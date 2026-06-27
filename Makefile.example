@@ -1,0 +1,21 @@
+.PHONY: check backend-check frontend-check fmt test
+
+check: backend-check frontend-check
+
+backend-check:
+	go fmt ./...
+	go vet ./...
+	go test ./...
+
+frontend-check:
+	@if [ -d web ] && [ -f web/package.json ]; then \
+		cd web && npm run lint && npm run typecheck && npm test -- --run; \
+	else \
+		echo "frontend not initialized yet; skipping frontend checks"; \
+	fi
+
+fmt:
+	go fmt ./...
+
+test:
+	go test ./...

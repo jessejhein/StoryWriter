@@ -1,0 +1,33 @@
+# Story project .gitignore
+
+# Derived app indexes/cache
+.storywork/*.sqlite
+.storywork/*.sqlite3
+.storywork/*.db
+.storywork/*.db-shm
+.storywork/*.db-wal
+.storywork/tmp/
+.storywork/cache/
+.storywork/embeddings/
+
+# Credentials must never live in project folders
+.env
+.env.*
+credentials/
+secrets/
+*.pem
+*.key
+*.token
+
+# Exports are generated unless the author chooses to track them manually
+exports/
+*.docx
+*.epub
+*.pdf
+
+# OS/editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~

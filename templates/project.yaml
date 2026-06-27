@@ -1,0 +1,9 @@
+version: 1
+id: proj_example
+name: Example Novel
+created_at: "REPLACE_ME"
+default_branch: main
+settings:
+  prose_format: markdown
+  vim_mode_default: true
+  ai_mutation_requires_acceptance: true
