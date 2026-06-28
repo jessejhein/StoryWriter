@@ -70,11 +70,12 @@ Milestone 0 creates a runnable local skeleton:
 - Health/status endpoint works.
 - Tests exist before code for the milestone behavior.
 
-## Next implementation target
+## Current implementation status
 
-Milestone 2 adds the Vim-friendly scene editor, strict scene load/save behavior,
-revision conflict protection, and one Git checkpoint per explicit save. Its
-implementation-ready handoff is `docs/11_milestone_2_task_prompt.md`.
+Milestones 0 through 2 are implemented. The app includes the local project
+foundation, canonical outline editing, and the Vim-friendly scene editor with
+revision conflict protection and one Git checkpoint per explicit save. Design
+the next milestone before extending the implementation.
 
 ## Development
 

@@ -79,8 +79,9 @@ export default function App() {
 
       {project && (
         <>
-          <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigateToScene(sceneID)} />
-          {selectedSceneID && (
+          {selectedSceneID === null ? (
+            <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigateToScene(sceneID)} />
+          ) : (
             <SceneEditor
               key={selectedSceneID}
               project={project}

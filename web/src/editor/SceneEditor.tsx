@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { Project, SaveSceneRequest, SceneDocument } from '../api'
-import { getScene, saveScene } from '../api'
+import { APIError, getScene, saveScene } from '../api'
 import CodeMirrorSurface from './CodeMirrorSurface'
 
 type Props = {
@@ -155,7 +155,7 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Save failed'
       setFeedback({
-        kind: /stale|changed/i.test(message) ? 'conflict' : 'error',
+        kind: requestError instanceof APIError && requestError.status === 409 ? 'conflict' : 'error',
         message,
       })
     } finally {

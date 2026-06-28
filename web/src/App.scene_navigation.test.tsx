@@ -81,6 +81,7 @@ test('confirms dirty navigation before leaving the editor', async () => {
   await waitFor(() => expect(screen.getByRole('button', { name: 'Open scene The Duel' })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Open scene The Duel' }))
   await waitFor(() => expect(screen.getByRole('button', { name: 'Back to outline' })).toBeInTheDocument())
+  expect(screen.queryByRole('button', { name: 'Open scene The Duel' })).not.toBeInTheDocument()
 
   fireEvent.change(screen.getByLabelText('Scene Markdown'), { target: { value: 'Dirty draft.\n' } })
 

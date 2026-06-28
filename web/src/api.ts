@@ -66,11 +66,21 @@ export type SaveSceneRequest = {
   expected_revision: string
 }
 
+export class APIError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'APIError'
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
   const body = await response.json()
   if (!response.ok) {
-    throw new Error(body.error ?? `Request failed with status ${response.status}`)
+    throw new APIError(response.status, body.error ?? `Request failed with status ${response.status}`)
   }
   return body as T
 }

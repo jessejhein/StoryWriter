@@ -12,7 +12,7 @@ import (
 //   - Scenario: 2.2.1 — Save valid edits.
 //   - Test purpose: verify a valid explicit scene save preserves immutable IDs,
 //     writes one canonical file, rebuilds the index, commits exactly once, and
-//     returns the reloaded saved scene.
+//     returns the exact canonical scene representation that was committed.
 func TestSaveScenePersistsCanonicalEditAndCheckpoint(t *testing.T) {
 	t.Parallel()
 

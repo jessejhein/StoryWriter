@@ -367,7 +367,8 @@ Save sequence:
 10. Atomically replace the scene file.
 11. Rebuild the disposable index.
 12. Commit all project changes with `Edit scene <scene-id>`.
-13. Reload the scene from disk and return it with its new revision.
+13. Return the exact canonical scene representation written in step 10 with its
+    new revision. Do not perform fallible work after the commit succeeds.
 
 Check the dirty worktree before checking revision. Both map to conflict, but a
 dirty worktree may include author work outside this scene and must stop all app
@@ -609,7 +610,7 @@ Write service tests for Scenarios 2.1.1 through 2.1.4:
 Use fake session, file, Git, and index boundaries. Write separate scenario files
 for:
 
-- successful save call order: clean, load, write, rebuild, commit, reload,
+- successful save call order: clean, load, write, rebuild, commit,
 - exact commit message and exactly one commit,
 - stale revision calls no write/index/Git mutation,
 - dirty worktree stops before canonical loading/writing,

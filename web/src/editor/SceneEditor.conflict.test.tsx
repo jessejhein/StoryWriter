@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
-import type { Project, SceneDocument } from '../api'
+import { APIError, type Project, type SceneDocument } from '../api'
 import SceneEditor from './SceneEditor'
 
-vi.mock('../api', () => ({
-  getScene: vi.fn(),
-  saveScene: vi.fn(),
-}))
+vi.mock('../api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api')>()
+  return { ...actual, getScene: vi.fn(), saveScene: vi.fn() }
+})
 
 vi.mock('./CodeMirrorSurface', () => ({
   default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
@@ -44,7 +44,7 @@ const scene: SceneDocument = {
 //   place, shows actionable feedback, and allows a retry or canonical reload.
 test('retains the current draft on conflict and exposes retry actions', async () => {
   vi.mocked(api.getScene).mockResolvedValue(scene)
-  vi.mocked(api.saveScene).mockRejectedValue(new Error('canonical scene changed; stale revision'))
+  vi.mocked(api.saveScene).mockRejectedValue(new APIError(409, 'canonical worktree is not clean'))
 
   render(<SceneEditor project={project} sceneID={scene.id} onBack={() => {}} onDirtyChange={() => {}} />)
 
