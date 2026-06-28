@@ -2,6 +2,7 @@ package story
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"storywork/internal/project"
@@ -67,5 +68,64 @@ func TestReorderWritesOnlyOutlineAndCommitsOnce(t *testing.T) {
 	}
 	if result.Outline.Arcs[0].Chapters[0].ID != "ch_00000000000000000002" {
 		t.Fatalf("reordered first chapter ID = %q", result.Outline.Arcs[0].Chapters[0].ID)
+	}
+}
+
+// BDD trace:
+//   - Requirement: Milestone 1, Story 1.3, reorder structure.
+//   - Scenario: scene reorder changes only outline.yaml and creates one exact
+//     checkpoint; invalid permutations change neither canonical files nor Git.
+//   - Test purpose: verify scene-level orchestration and failure atomicity at
+//     the service boundary.
+func TestSceneReorderCommitsOnceAndInvalidReorderDoesNothing(t *testing.T) {
+	t.Parallel()
+
+	initial := NewOutline()
+	initial, _ = AddArc(initial, "arc_00000000000000000001", "Act One")
+	initial, _ = AddChapter(initial, "arc_00000000000000000001", "ch_00000000000000000001", "Arrival")
+	initial, _ = AddScene(initial, "ch_00000000000000000001", "scn_00000000000000000001", "A")
+	initial, _ = AddScene(initial, "ch_00000000000000000001", "scn_00000000000000000002", "B")
+
+	files := &fakeFileStore{loadOutline: initial, exists: map[string]bool{}}
+	git := &fakeGitStore{clean: true}
+	service := NewService(
+		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
+		files,
+		git,
+		&fakeIndexStore{},
+		&fakeIDGenerator{},
+	)
+
+	result, err := service.Reorder(context.Background(), ReorderRequest{
+		ParentType:      "chapter",
+		ParentID:        "ch_00000000000000000001",
+		OrderedChildIDs: []string{"scn_00000000000000000002", "scn_00000000000000000001"},
+	})
+	if err != nil {
+		t.Fatalf("Reorder(scenes) error = %v", err)
+	}
+	if len(files.writtenFiles) != 1 || files.writtenFiles["outline.yaml"] == nil {
+		t.Fatalf("written files = %#v, want outline.yaml only", files.writtenFiles)
+	}
+	if git.commitCalls != 1 || git.commitMessages[0] != "Reorder scenes in ch_00000000000000000001" {
+		t.Fatalf("Git checkpoint = %d %#v", git.commitCalls, git.commitMessages)
+	}
+	if result.Outline.Arcs[0].Chapters[0].Scenes[0].ID != "scn_00000000000000000002" {
+		t.Fatalf("first scene = %#v", result.Outline.Arcs[0].Chapters[0].Scenes[0])
+	}
+
+	files.writtenFiles = nil
+	files.writeCalls = 0
+	git.commitCalls = 0
+	_, err = service.Reorder(context.Background(), ReorderRequest{
+		ParentType:      "chapter",
+		ParentID:        "ch_00000000000000000001",
+		OrderedChildIDs: []string{"scn_00000000000000000001"},
+	})
+	if !errors.Is(err, ErrInvalidReorder) {
+		t.Fatalf("invalid Reorder() error = %v, want ErrInvalidReorder", err)
+	}
+	if files.writeCalls != 0 || git.commitCalls != 0 {
+		t.Fatalf("invalid reorder wrote %d times and committed %d times", files.writeCalls, git.commitCalls)
 	}
 }

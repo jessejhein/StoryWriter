@@ -35,6 +35,7 @@ func (g *fakeIDGenerator) Next(_ NodeKind) (string, error) {
 
 type fakeGitStore struct {
 	clean          bool
+	isCleanErr     error
 	isCleanCalls   int
 	commitCalls    int
 	unstageCalls   int
@@ -45,7 +46,7 @@ type fakeGitStore struct {
 
 func (g *fakeGitStore) IsClean(context.Context, string) (bool, error) {
 	g.isCleanCalls++
-	return g.clean, nil
+	return g.clean, g.isCleanErr
 }
 
 func (g *fakeGitStore) CommitAll(_ context.Context, _ string, message string) error {
@@ -72,6 +73,11 @@ func (i *fakeIndexStore) Rebuild(context.Context, string) error {
 type fakeFileStore struct {
 	loadOutline   Outline
 	loadErr       error
+	reloadErr     error
+	loadCalls     int
+	loadHook      func(int)
+	marshaled     Outline
+	reloadPending bool
 	exists        map[string]bool
 	existsErr     error
 	marshalErr    error
@@ -79,9 +85,21 @@ type fakeFileStore struct {
 	writeCalls    int
 	writtenFiles  map[string][]byte
 	rollbackCalls int
+	rollbackErr   error
 }
 
 func (s *fakeFileStore) Load(context.Context, string) (Outline, error) {
+	s.loadCalls++
+	if s.loadHook != nil {
+		s.loadHook(s.loadCalls)
+	}
+	if s.reloadPending {
+		s.reloadPending = false
+		if s.reloadErr != nil {
+			return Outline{}, s.reloadErr
+		}
+		return s.marshaled, nil
+	}
 	return s.loadOutline, s.loadErr
 }
 
@@ -92,10 +110,11 @@ func (s *fakeFileStore) Exists(_ context.Context, _ string, relativePath string)
 	return s.exists[relativePath], nil
 }
 
-func (s *fakeFileStore) MarshalOutline(Outline) ([]byte, error) {
+func (s *fakeFileStore) MarshalOutline(outline Outline) ([]byte, error) {
 	if s.marshalErr != nil {
 		return nil, s.marshalErr
 	}
+	s.marshaled = outline
 	return []byte("outline"), nil
 }
 
@@ -126,8 +145,9 @@ func (s *fakeFileStore) WriteFiles(_ context.Context, _ string, files map[string
 	}
 	s.writeCalls++
 	s.writtenFiles = files
+	s.reloadPending = true
 	return func() error {
 		s.rollbackCalls++
-		return nil
+		return s.rollbackErr
 	}, nil
 }

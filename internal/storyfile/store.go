@@ -18,22 +18,22 @@ import (
 )
 
 type outlineDocument struct {
-	Version int         `yaml:"version"`
-	Root    outlineRoot `yaml:"root"`
+	Version int          `yaml:"version"`
+	Root    *outlineRoot `yaml:"root"`
 }
 
 type outlineRoot struct {
-	Arcs []outlineArcRef `yaml:"arcs"`
+	Arcs *[]outlineArcRef `yaml:"arcs"`
 }
 
 type outlineArcRef struct {
-	ID       string              `yaml:"id"`
-	Chapters []outlineChapterRef `yaml:"chapters"`
+	ID       string               `yaml:"id"`
+	Chapters *[]outlineChapterRef `yaml:"chapters"`
 }
 
 type outlineChapterRef struct {
-	ID     string            `yaml:"id"`
-	Scenes []outlineSceneRef `yaml:"scenes"`
+	ID     string             `yaml:"id"`
+	Scenes *[]outlineSceneRef `yaml:"scenes"`
 }
 
 type outlineSceneRef struct {
@@ -116,13 +116,22 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 	if document.Version != story.OutlineVersion {
 		return story.Outline{}, fmt.Errorf("outline.yaml has unsupported version %d", document.Version)
 	}
+	if document.Root == nil {
+		return story.Outline{}, errors.New("outline.yaml is missing root")
+	}
+	if document.Root.Arcs == nil {
+		return story.Outline{}, errors.New("outline.yaml root is missing arcs")
+	}
 
 	outline := story.NewOutline()
 	seenArcs := make(map[string]struct{})
 	seenChapters := make(map[string]struct{})
 	seenScenes := make(map[string]struct{})
 
-	for _, arcRef := range document.Root.Arcs {
+	for _, arcRef := range *document.Root.Arcs {
+		if arcRef.Chapters == nil {
+			return story.Outline{}, fmt.Errorf("outline.yaml arc %q is missing chapters", arcRef.ID)
+		}
 		if err := story.ValidateArcID(arcRef.ID); err != nil {
 			return story.Outline{}, fmt.Errorf("outline.yaml arc ID %q: %w", arcRef.ID, err)
 		}
@@ -154,7 +163,10 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 			return story.Outline{}, fmt.Errorf("load arc %q: %w", arcFile.ID, err)
 		}
 
-		for _, chapterRef := range arcRef.Chapters {
+		for _, chapterRef := range *arcRef.Chapters {
+			if chapterRef.Scenes == nil {
+				return story.Outline{}, fmt.Errorf("outline.yaml chapter %q is missing scenes", chapterRef.ID)
+			}
 			if err := story.ValidateChapterID(chapterRef.ID); err != nil {
 				return story.Outline{}, fmt.Errorf("outline.yaml chapter ID %q: %w", chapterRef.ID, err)
 			}
@@ -189,7 +201,7 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 				return story.Outline{}, fmt.Errorf("load chapter %q: %w", chapterFile.ID, err)
 			}
 
-			for _, sceneRef := range chapterRef.Scenes {
+			for _, sceneRef := range *chapterRef.Scenes {
 				if err := story.ValidateSceneID(sceneRef.ID); err != nil {
 					return story.Outline{}, fmt.Errorf("outline.yaml scene ID %q: %w", sceneRef.ID, err)
 				}
@@ -229,24 +241,27 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 
 // MarshalOutline encodes outline ordering only.
 func (s *Store) MarshalOutline(outline story.Outline) ([]byte, error) {
+	arcs := make([]outlineArcRef, len(outline.Arcs))
 	document := outlineDocument{
 		Version: story.OutlineVersion,
-		Root: outlineRoot{
-			Arcs: make([]outlineArcRef, len(outline.Arcs)),
+		Root: &outlineRoot{
+			Arcs: &arcs,
 		},
 	}
 	for i, arc := range outline.Arcs {
-		document.Root.Arcs[i] = outlineArcRef{
+		chapters := make([]outlineChapterRef, len(arc.Chapters))
+		(*document.Root.Arcs)[i] = outlineArcRef{
 			ID:       arc.ID,
-			Chapters: make([]outlineChapterRef, len(arc.Chapters)),
+			Chapters: &chapters,
 		}
 		for j, chapter := range arc.Chapters {
-			document.Root.Arcs[i].Chapters[j] = outlineChapterRef{
+			scenes := make([]outlineSceneRef, len(chapter.Scenes))
+			(*(*document.Root.Arcs)[i].Chapters)[j] = outlineChapterRef{
 				ID:     chapter.ID,
-				Scenes: make([]outlineSceneRef, len(chapter.Scenes)),
+				Scenes: &scenes,
 			}
 			for k, scene := range chapter.Scenes {
-				document.Root.Arcs[i].Chapters[j].Scenes[k] = outlineSceneRef{ID: scene.ID}
+				(*(*(*document.Root.Arcs)[i].Chapters)[j].Scenes)[k] = outlineSceneRef{ID: scene.ID}
 			}
 		}
 	}

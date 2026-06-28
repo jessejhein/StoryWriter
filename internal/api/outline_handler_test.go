@@ -169,6 +169,27 @@ func TestOutlineMutationRoutesValidateRequestsAndMapErrors(t *testing.T) {
 	if service.createArcTitle != "Act One" {
 		t.Fatalf("create arc title = %q", service.createArcTitle)
 	}
+	var createBody map[string]any
+	if err := json.NewDecoder(createArcResponse.Body).Decode(&createBody); err != nil {
+		t.Fatalf("decode create arc response: %v", err)
+	}
+	if createBody["changed_id"] != "arc_00000000000000000001" || createBody["outline"] == nil {
+		t.Fatalf("create arc response = %#v", createBody)
+	}
+
+	createChapterRequest := httptest.NewRequest(http.MethodPost, "/api/chapters", strings.NewReader(`{"arc_id":"arc_00000000000000000001","title":"Arrival"}`))
+	createChapterResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createChapterResponse, createChapterRequest)
+	if createChapterResponse.Code != http.StatusCreated || service.createChapterArcID != "arc_00000000000000000001" || service.createChapterTitle != "Arrival" {
+		t.Fatalf("create chapter status/arguments = %d %q %q", createChapterResponse.Code, service.createChapterArcID, service.createChapterTitle)
+	}
+
+	createSceneRequest := httptest.NewRequest(http.MethodPost, "/api/scenes", strings.NewReader(`{"chapter_id":"ch_00000000000000000001","title":"The Station"}`))
+	createSceneResponse := httptest.NewRecorder()
+	handler.ServeHTTP(createSceneResponse, createSceneRequest)
+	if createSceneResponse.Code != http.StatusCreated || service.createSceneChapterID != "ch_00000000000000000001" || service.createSceneTitle != "The Station" {
+		t.Fatalf("create scene status/arguments = %d %q %q", createSceneResponse.Code, service.createSceneChapterID, service.createSceneTitle)
+	}
 
 	reorderRequest := httptest.NewRequest(http.MethodPost, "/api/outline/reorder", strings.NewReader(`{"parent_type":"arc","parent_id":"arc_00000000000000000001","ordered_child_ids":["ch_00000000000000000002","ch_00000000000000000001"]}`))
 	reorderResponse := httptest.NewRecorder()
@@ -189,6 +210,13 @@ func TestOutlineMutationRoutesValidateRequestsAndMapErrors(t *testing.T) {
 		status     int
 	}{
 		{
+			name:   "malformed JSON rejected",
+			method: http.MethodPost,
+			path:   "/api/scenes",
+			body:   `{"chapter_id":`,
+			status: http.StatusBadRequest,
+		},
+		{
 			name:   "trailing JSON rejected",
 			method: http.MethodPost,
 			path:   "/api/arcs",
@@ -203,11 +231,34 @@ func TestOutlineMutationRoutesValidateRequestsAndMapErrors(t *testing.T) {
 			status: http.StatusBadRequest,
 		},
 		{
+			name:       "invalid title",
+			method:     http.MethodPost,
+			path:       "/api/arcs",
+			body:       `{"title":""}`,
+			serviceErr: story.ErrInvalidTitle,
+			status:     http.StatusBadRequest,
+		},
+		{
+			name:       "invalid ID shape",
+			method:     http.MethodPost,
+			path:       "/api/chapters",
+			body:       `{"arc_id":"../../unsafe","title":"Arrival"}`,
+			serviceErr: story.ErrInvalidID,
+			status:     http.StatusBadRequest,
+		},
+		{
 			name:       "no active project conflict",
 			method:     http.MethodGet,
 			path:       "/api/outline",
 			serviceErr: story.ErrNoActiveProject,
 			status:     http.StatusConflict,
+		},
+		{
+			name:   "request over one MiB rejected",
+			method: http.MethodPost,
+			path:   "/api/arcs",
+			body:   strings.Repeat(" ", 1<<20) + `{"title":"Act One"}`,
+			status: http.StatusBadRequest,
 		},
 		{
 			name:       "invalid reorder request",

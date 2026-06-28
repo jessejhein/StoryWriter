@@ -121,7 +121,7 @@ func (s *Service) CreateArc(ctx context.Context, title string) (MutationResult, 
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return s.persistMutation(ctx, current.Path, next, arcID, "Add arc "+arcID, map[string][]byte{
+	return s.persistMutation(ctx, current.Path, arcID, "Add arc "+arcID, map[string][]byte{
 		"outline.yaml": outlineBytes,
 		filepath.ToSlash(filepath.Join("arcs", arcID+".yaml")): arcBytes,
 	})
@@ -160,7 +160,7 @@ func (s *Service) CreateChapter(ctx context.Context, arcID, title string) (Mutat
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return s.persistMutation(ctx, current.Path, next, chapterID, "Add chapter "+chapterID, map[string][]byte{
+	return s.persistMutation(ctx, current.Path, chapterID, "Add chapter "+chapterID, map[string][]byte{
 		"outline.yaml": outlineBytes,
 		filepath.ToSlash(filepath.Join("chapters", chapterID+".yaml")): chapterBytes,
 	})
@@ -199,7 +199,7 @@ func (s *Service) CreateScene(ctx context.Context, chapterID, title string) (Mut
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return s.persistMutation(ctx, current.Path, next, sceneID, "Add scene "+sceneID, map[string][]byte{
+	return s.persistMutation(ctx, current.Path, sceneID, "Add scene "+sceneID, map[string][]byte{
 		"outline.yaml": outlineBytes,
 		filepath.ToSlash(filepath.Join("scenes", sceneID+".md")): sceneBytes,
 	})
@@ -236,15 +236,19 @@ func (s *Service) Reorder(ctx context.Context, request ReorderRequest) (Mutation
 	if err != nil {
 		return MutationResult{}, err
 	}
-	return s.persistMutation(ctx, current.Path, next, "", message, map[string][]byte{
+	return s.persistMutation(ctx, current.Path, "", message, map[string][]byte{
 		"outline.yaml": outlineBytes,
 	})
 }
 
-func (s *Service) persistMutation(ctx context.Context, projectPath string, outline Outline, changedID, message string, files map[string][]byte) (MutationResult, error) {
+func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
 	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
 	if err != nil {
-		return MutationResult{}, err
+		return MutationResult{}, s.rollbackMutation(ctx, projectPath, nil, err)
+	}
+	reloaded, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
 	if err := s.index.Rebuild(ctx, projectPath); err != nil {
 		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
@@ -252,7 +256,7 @@ func (s *Service) persistMutation(ctx context.Context, projectPath string, outli
 	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
 		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
-	return MutationResult{ChangedID: changedID, Outline: outline}, nil
+	return MutationResult{ChangedID: changedID, Outline: reloaded}, nil
 }
 
 func (s *Service) rollbackMutation(ctx context.Context, projectPath string, rollback func() error, cause error) error {

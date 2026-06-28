@@ -132,6 +132,46 @@ test('sends stable IDs for child creation and reorder', async () => {
 
 // BDD trace:
 // - Requirement: Milestone 1, Story 1.5, use the outline UI.
+// - Scenario: each valid parent exposes creation controls, and scene reorder
+//   sends the complete stable-ID permutation for exactly that chapter.
+// - Test purpose: verify the chapter-create and scene-reorder paths not covered
+//   by the sibling arc-create/chapter-reorder test.
+test('creates chapters and reorders scenes with complete stable-ID lists', async () => {
+  vi.mocked(api.getOutline).mockResolvedValue(nestedOutline)
+  vi.mocked(api.createChapter).mockResolvedValue(mutation(nestedOutline, 'ch_00000000000000000003'))
+  vi.mocked(api.reorderOutline).mockResolvedValue(mutation({
+    ...nestedOutline,
+    arcs: [{
+      ...nestedOutline.arcs[0],
+      chapters: [{
+        ...nestedOutline.arcs[0].chapters[0],
+        scenes: [
+          { id: 'scn_00000000000000000002', title: 'The Gate', display_label: 'Scene 1.1.1' },
+          { id: 'scn_00000000000000000001', title: 'The Station', display_label: 'Scene 1.1.2' },
+        ],
+      }, nestedOutline.arcs[0].chapters[1]],
+    }],
+  }))
+
+  render(<OutlineWorkbench project={project} />)
+  await waitFor(() => expect(screen.getByText('Arrival')).toBeInTheDocument())
+
+  fireEvent.click(screen.getByRole('button', { name: 'Add chapter in Act One' }))
+  fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Interlude' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+  await waitFor(() => expect(api.createChapter).toHaveBeenCalledWith('arc_00000000000000000001', 'Interlude'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move scene The Gate up' }))
+  await waitFor(() => expect(api.reorderOutline).toHaveBeenCalledWith({
+    parent_type: 'chapter',
+    parent_id: 'ch_00000000000000000001',
+    ordered_child_ids: ['scn_00000000000000000002', 'scn_00000000000000000001'],
+  }))
+  await waitFor(() => expect(screen.getByText('Scene 1.1.1').closest('li')).toHaveTextContent('The Gate'))
+})
+
+// BDD trace:
+// - Requirement: Milestone 1, Story 1.5, use the outline UI.
 // - Scenario: while a mutation is in progress, duplicate controls are disabled;
 //   when an API request fails, the error is visible and the user can retry the
 //   outline load.
