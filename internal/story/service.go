@@ -1,6 +1,7 @@
 package story
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -27,11 +28,13 @@ type Session interface {
 // FileStore loads, marshals, and atomically writes canonical story files.
 type FileStore interface {
 	Load(ctx context.Context, projectPath string) (Outline, error)
+	LoadScene(ctx context.Context, projectPath, sceneID string) (SceneDocument, error)
 	Exists(ctx context.Context, projectPath, relativePath string) (bool, error)
 	MarshalOutline(outline Outline) ([]byte, error)
 	MarshalArc(arc Arc) ([]byte, error)
 	MarshalChapter(chapter Chapter) ([]byte, error)
 	MarshalScene(scene Scene) ([]byte, error)
+	MarshalSceneDocument(scene SceneDocument) ([]byte, error)
 	WriteFiles(ctx context.Context, projectPath string, files map[string][]byte) (func() error, error)
 }
 
@@ -89,6 +92,31 @@ func (s *Service) Outline(ctx context.Context) (Outline, error) {
 		return Outline{}, err
 	}
 	return s.files.Load(ctx, current.Path)
+}
+
+// LoadScene returns one existing canonical scene for editor use.
+func (s *Service) LoadScene(ctx context.Context, sceneID string) (SceneDocument, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateSceneID(sceneID); err != nil {
+		return SceneDocument{}, err
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if _, err := findScene(outline, sceneID); err != nil {
+		if errors.Is(err, ErrParentNotFound) {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", sceneID, ErrSceneNotFound)
+		}
+		return SceneDocument{}, err
+	}
+	return s.files.LoadScene(ctx, current.Path, sceneID)
 }
 
 // CreateArc appends a new arc and checkpoints the mutation.
@@ -239,6 +267,85 @@ func (s *Service) Reorder(ctx context.Context, request ReorderRequest) (Mutation
 	return s.persistMutation(ctx, current.Path, "", message, map[string][]byte{
 		"outline.yaml": outlineBytes,
 	})
+}
+
+// SaveScene validates and persists one canonical scene edit.
+func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSceneRequest) (SceneDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateSceneID(sceneID); err != nil {
+		return SceneDocument{}, err
+	}
+	request, err = ValidateSceneSaveRequest(request)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if !clean {
+		return SceneDocument{}, ErrDirtyWorktree
+	}
+
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	sceneRef, err := findScene(outline, sceneID)
+	if err != nil {
+		if errors.Is(err, ErrParentNotFound) {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", sceneID, ErrSceneNotFound)
+		}
+		return SceneDocument{}, err
+	}
+	currentScene, err := s.files.LoadScene(ctx, current.Path, sceneID)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if currentScene.ChapterID != sceneRef.ChapterID {
+		return SceneDocument{}, fmt.Errorf("scene %q chapter mismatch: %w", sceneID, ErrSceneNotFound)
+	}
+	if currentScene.Revision != request.ExpectedRevision {
+		return SceneDocument{}, fmt.Errorf("scene %q revision changed: %w", sceneID, ErrStaleRevision)
+	}
+
+	nextScene := currentScene
+	nextScene.Title = request.Title
+	nextScene.FrontMatter = request.FrontMatter
+	nextScene.Markdown = request.Markdown
+
+	sceneBytes, err := s.files.MarshalSceneDocument(nextScene)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if bytes.Equal(sceneBytes, currentScene.Canonical) {
+		return SceneDocument{}, ErrNoSceneChanges
+	}
+
+	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{
+		filepath.ToSlash(filepath.Join("scenes", sceneID+".md")): sceneBytes,
+	})
+	if err != nil {
+		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, nil, err)
+	}
+	if err := s.index.Rebuild(ctx, current.Path); err != nil {
+		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	if err := s.git.CommitAll(ctx, current.Path, "Edit scene "+sceneID); err != nil {
+		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	reloaded, err := s.files.LoadScene(ctx, current.Path, sceneID)
+	if err != nil {
+		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	return reloaded, nil
 }
 
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {

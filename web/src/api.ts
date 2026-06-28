@@ -8,7 +8,7 @@ export type Project = {
   index_initialized: boolean
 }
 
-export type Scene = {
+export type OutlineScene = {
   id: string
   title: string
   display_label: string
@@ -18,7 +18,7 @@ export type Chapter = {
   id: string
   title: string
   display_label: string
-  scenes: Scene[]
+  scenes: OutlineScene[]
 }
 
 export type Arc = {
@@ -42,6 +42,28 @@ export type ReorderRequest = {
   parent_type: 'arc' | 'chapter'
   parent_id: string
   ordered_child_ids: string[]
+}
+
+export type SceneFrontMatter = {
+  pov: string
+  status: 'draft' | 'revised' | 'final'
+  exclude_from_ai: boolean
+}
+
+export type SceneDocument = {
+  id: string
+  chapter_id: string
+  title: string
+  frontmatter: SceneFrontMatter
+  markdown: string
+  revision: string
+}
+
+export type SaveSceneRequest = {
+  title: string
+  frontmatter: SceneFrontMatter
+  markdown: string
+  expected_revision: string
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -91,4 +113,16 @@ export function createScene(chapterID: string, title: string): Promise<OutlineMu
 
 export function reorderOutline(requestBody: ReorderRequest): Promise<OutlineMutation> {
   return postJSON('/api/outline/reorder', requestBody)
+}
+
+export function getScene(sceneID: string): Promise<SceneDocument> {
+  return request(`/api/scenes/${sceneID}`)
+}
+
+export function saveScene(sceneID: string, requestBody: SaveSceneRequest): Promise<SceneDocument> {
+  return request(`/api/scenes/${sceneID}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  })
 }

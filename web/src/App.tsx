@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { createProject, getHealth, openProject, type Project } from './api'
+import SceneEditor from './editor/SceneEditor'
 import OutlineWorkbench from './outline/OutlineWorkbench'
 import './styles.css'
 
@@ -8,6 +9,8 @@ export default function App() {
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
   const [project, setProject] = useState<Project | null>(null)
+  const [selectedSceneID, setSelectedSceneID] = useState<string | null>(null)
+  const [editorDirty, setEditorDirty] = useState(false)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -23,8 +26,20 @@ export default function App() {
     setError('')
     try {
       setProject(mode === 'create' ? await createProject(name, path) : await openProject(path))
+      setSelectedSceneID(null)
+      setEditorDirty(false)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Request failed')
+    }
+  }
+
+  function navigateToScene(sceneID: string | null) {
+    if (editorDirty && selectedSceneID !== sceneID && !window.confirm('Discard the current scene draft?')) {
+      return
+    }
+    setSelectedSceneID(sceneID)
+    if (sceneID === null) {
+      setEditorDirty(false)
     }
   }
 
@@ -62,7 +77,20 @@ export default function App() {
         </section>
       )}
 
-      {project && <OutlineWorkbench project={project} />}
+      {project && (
+        <>
+          <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigateToScene(sceneID)} />
+          {selectedSceneID && (
+            <SceneEditor
+              key={selectedSceneID}
+              project={project}
+              sceneID={selectedSceneID}
+              onBack={() => navigateToScene(null)}
+              onDirtyChange={setEditorDirty}
+            />
+          )}
+        </>
+      )}
     </main>
   )
 }

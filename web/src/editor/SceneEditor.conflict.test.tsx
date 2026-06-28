@@ -1,0 +1,59 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { expect, test, vi } from 'vitest'
+import type { Project, SceneDocument } from '../api'
+import SceneEditor from './SceneEditor'
+
+vi.mock('../api', () => ({
+  getScene: vi.fn(),
+  saveScene: vi.fn(),
+}))
+
+vi.mock('./CodeMirrorSurface', () => ({
+  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
+    <textarea aria-label="Scene Markdown" value={value} onChange={(event) => onChange(event.target.value)} />
+  ),
+}))
+
+const api = await import('../api')
+
+const project: Project = {
+  project_id: 'proj_test_novel',
+  name: 'Test Novel',
+  path: '/tmp/test-novel',
+  git_initialized: true,
+  index_initialized: true,
+}
+
+const scene: SceneDocument = {
+  id: 'scn_00000000000000000001',
+  chapter_id: 'ch_00000000000000000001',
+  title: 'The Duel',
+  frontmatter: {
+    pov: 'Luke',
+    status: 'draft',
+    exclude_from_ai: false,
+  },
+  markdown: 'Scene prose.\n',
+  revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+}
+
+// BDD trace:
+// - Requirement: M2-R05, M2-R14.
+// - Scenario: 2.5.2 — Failed save retains draft.
+// - Test purpose: verify a failed or conflicting save keeps the edited draft in
+//   place, shows actionable feedback, and allows a retry or canonical reload.
+test('retains the current draft on conflict and exposes retry actions', async () => {
+  vi.mocked(api.getScene).mockResolvedValue(scene)
+  vi.mocked(api.saveScene).mockRejectedValue(new Error('canonical scene changed; stale revision'))
+
+  render(<SceneEditor project={project} sceneID={scene.id} onBack={() => {}} onDirtyChange={() => {}} />)
+
+  await waitFor(() => expect(screen.getByText('Clean')).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText('Scene Markdown'), { target: { value: 'Conflicting draft.\n' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save scene' }))
+
+  await waitFor(() => expect(screen.getByText('Conflict')).toBeInTheDocument())
+  expect(screen.getByLabelText('Scene Markdown')).toHaveValue('Conflicting draft.\n')
+  expect(screen.getByRole('button', { name: 'Retry save' })).toBeInTheDocument()
+  expect(screen.getAllByRole('button', { name: 'Reload canonical' })).toHaveLength(2)
+})

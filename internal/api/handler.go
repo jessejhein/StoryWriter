@@ -32,6 +32,8 @@ type StoryStore interface {
 	CreateChapter(ctx context.Context, arcID, title string) (story.MutationResult, error)
 	CreateScene(ctx context.Context, chapterID, title string) (story.MutationResult, error)
 	Reorder(ctx context.Context, request story.ReorderRequest) (story.MutationResult, error)
+	LoadScene(ctx context.Context, sceneID string) (story.SceneDocument, error)
+	SaveScene(ctx context.Context, sceneID string, request story.SaveSceneRequest) (story.SceneDocument, error)
 }
 
 // NewHandler creates the Milestone 0 API router.
@@ -138,12 +140,62 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		writeJSON(writer, http.StatusOK, result)
 	})
+	mux.HandleFunc("GET /api/scenes/{scene_id}", func(writer http.ResponseWriter, request *http.Request) {
+		sceneDocument, err := stories.LoadScene(request.Context(), request.PathValue("scene_id"))
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, sceneDocument)
+	})
+	mux.HandleFunc("PUT /api/scenes/{scene_id}", func(writer http.ResponseWriter, request *http.Request) {
+		var saveRequest struct {
+			Title            string                  `json:"title"`
+			FrontMatter      *story.SceneFrontMatter `json:"frontmatter"`
+			Markdown         string                  `json:"markdown"`
+			ExpectedRevision string                  `json:"expected_revision"`
+		}
+		if err := decodeJSONWithLimit(writer, request, &saveRequest, 6<<20); err != nil {
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeError(writer, status, err)
+			return
+		}
+		if saveRequest.FrontMatter == nil {
+			writeError(writer, http.StatusBadRequest, errors.New("frontmatter is required"))
+			return
+		}
+		sceneDocument, err := stories.SaveScene(request.Context(), request.PathValue("scene_id"), story.SaveSceneRequest{
+			Title:            saveRequest.Title,
+			FrontMatter:      *saveRequest.FrontMatter,
+			Markdown:         saveRequest.Markdown,
+			ExpectedRevision: saveRequest.ExpectedRevision,
+		})
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, sceneDocument)
+	})
 	return mux
 }
 
 func decodeJSON(request *http.Request, target any) error {
+	return decodeJSONWithLimit(nil, request, target, 1<<20)
+}
+
+func decodeJSONWithLimit(writer http.ResponseWriter, request *http.Request, target any, limit int64) error {
 	defer request.Body.Close()
-	decoder := json.NewDecoder(io.LimitReader(request.Body, 1<<20))
+	reader := io.Reader(request.Body)
+	if writer != nil {
+		reader = http.MaxBytesReader(writer, request.Body, limit)
+	} else {
+		reader = io.LimitReader(request.Body, limit)
+	}
+	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("invalid JSON request: %w", err)
@@ -162,10 +214,12 @@ func writeStoryError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree):
 		status = http.StatusConflict
-	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder):
+	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder), errors.Is(err, story.ErrInvalidPOV), errors.Is(err, story.ErrInvalidStatus), errors.Is(err, story.ErrInvalidMarkdown), errors.Is(err, story.ErrInvalidRevision), errors.Is(err, story.ErrNoSceneChanges):
 		status = http.StatusBadRequest
-	case errors.Is(err, story.ErrParentNotFound):
+	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound):
 		status = http.StatusNotFound
+	case errors.Is(err, story.ErrStaleRevision):
+		status = http.StatusConflict
 	}
 	writeError(writer, status, err)
 }

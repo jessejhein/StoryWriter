@@ -25,17 +25,23 @@ func (s *activeProjectSessionStub) Set(current project.Project) {
 type storyServiceStub struct {
 	outlineResult        story.Outline
 	mutationResult       story.MutationResult
+	sceneResult          story.SceneDocument
 	outlineErr           error
 	createArcErr         error
 	createChapterErr     error
 	createSceneErr       error
 	reorderErr           error
+	loadSceneErr         error
+	saveSceneErr         error
 	createArcTitle       string
 	createChapterArcID   string
 	createChapterTitle   string
 	createSceneChapterID string
 	createSceneTitle     string
 	reorderRequest       story.ReorderRequest
+	loadSceneID          string
+	saveSceneID          string
+	saveSceneRequest     story.SaveSceneRequest
 }
 
 func (s *storyServiceStub) Outline(context.Context) (story.Outline, error) {
@@ -62,6 +68,17 @@ func (s *storyServiceStub) CreateScene(_ context.Context, chapterID, title strin
 func (s *storyServiceStub) Reorder(_ context.Context, request story.ReorderRequest) (story.MutationResult, error) {
 	s.reorderRequest = request
 	return s.mutationResult, s.reorderErr
+}
+
+func (s *storyServiceStub) LoadScene(_ context.Context, sceneID string) (story.SceneDocument, error) {
+	s.loadSceneID = sceneID
+	return s.sceneResult, s.loadSceneErr
+}
+
+func (s *storyServiceStub) SaveScene(_ context.Context, sceneID string, request story.SaveSceneRequest) (story.SceneDocument, error) {
+	s.saveSceneID = sceneID
+	s.saveSceneRequest = request
+	return s.sceneResult, s.saveSceneErr
 }
 
 // BDD trace:

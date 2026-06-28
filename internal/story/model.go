@@ -2,6 +2,8 @@
 package story
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -22,6 +24,13 @@ var (
 	ErrInvalidReorder  = errors.New("invalid reorder")
 	ErrNoActiveProject = errors.New("no active project")
 	ErrDirtyWorktree   = errors.New("story project has uncommitted changes")
+	ErrSceneNotFound   = errors.New("scene not found")
+	ErrInvalidPOV      = errors.New("invalid pov")
+	ErrInvalidStatus   = errors.New("invalid status")
+	ErrInvalidMarkdown = errors.New("invalid markdown")
+	ErrInvalidRevision = errors.New("invalid revision")
+	ErrStaleRevision   = errors.New("stale scene revision")
+	ErrNoSceneChanges  = errors.New("scene save has no changes")
 )
 
 var idPatterns = map[string]*regexp.Regexp{
@@ -61,6 +70,32 @@ type Scene struct {
 	DisplayLabel string `json:"display_label"`
 }
 
+// SceneFrontMatter contains the editable canonical scene metadata.
+type SceneFrontMatter struct {
+	POV           string `json:"pov"`
+	Status        string `json:"status"`
+	ExcludeFromAI bool   `json:"exclude_from_ai"`
+}
+
+// SceneDocument is the editor-facing scene payload returned by Milestone 2.
+type SceneDocument struct {
+	ID          string           `json:"id"`
+	ChapterID   string           `json:"chapter_id"`
+	Title       string           `json:"title"`
+	FrontMatter SceneFrontMatter `json:"frontmatter"`
+	Markdown    string           `json:"markdown"`
+	Revision    string           `json:"revision"`
+	Canonical   []byte           `json:"-"`
+}
+
+// SaveSceneRequest is the validated save input for a canonical scene mutation.
+type SaveSceneRequest struct {
+	Title            string
+	FrontMatter      SceneFrontMatter
+	Markdown         string
+	ExpectedRevision string
+}
+
 // ReorderRequest reorders direct children using stable IDs.
 type ReorderRequest struct {
 	ParentType      string   `json:"parent_type"`
@@ -86,6 +121,84 @@ func ValidateChapterID(id string) error {
 // ValidateSceneID verifies a scene ID shape.
 func ValidateSceneID(id string) error {
 	return validateID("scene", id)
+}
+
+// ValidatePOV trims and validates a POV field.
+func ValidatePOV(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if utf8.RuneCountInString(value) > maxTitleRunes {
+		return "", fmt.Errorf("pov must be at most %d characters: %w", maxTitleRunes, ErrInvalidPOV)
+	}
+	return value, nil
+}
+
+// ValidateSceneStatus validates the fixed canonical scene status values.
+func ValidateSceneStatus(value string) (string, error) {
+	switch value {
+	case "draft", "revised", "final":
+		return value, nil
+	default:
+		return "", fmt.Errorf("status %q is unsupported: %w", value, ErrInvalidStatus)
+	}
+}
+
+// ValidateRevision validates the opaque SHA-256 revision token shape.
+func ValidateRevision(value string) error {
+	if !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(value) {
+		return fmt.Errorf("revision %q is invalid: %w", value, ErrInvalidRevision)
+	}
+	return nil
+}
+
+// NormalizeMarkdown validates and canonicalizes request markdown text.
+func NormalizeMarkdown(value string) (string, error) {
+	if strings.ContainsRune(value, '\x00') {
+		return "", fmt.Errorf("markdown contains NUL byte: %w", ErrInvalidMarkdown)
+	}
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	if !utf8.ValidString(value) {
+		return "", fmt.Errorf("markdown is not valid UTF-8: %w", ErrInvalidMarkdown)
+	}
+	if len([]byte(value)) > 5<<20 {
+		return "", fmt.Errorf("markdown exceeds 5 MiB limit: %w", ErrInvalidMarkdown)
+	}
+	return value, nil
+}
+
+// ValidateSceneSaveRequest validates a scene save request after JSON decoding.
+func ValidateSceneSaveRequest(request SaveSceneRequest) (SaveSceneRequest, error) {
+	title, err := ValidateTitle(request.Title)
+	if err != nil {
+		return SaveSceneRequest{}, err
+	}
+	pov, err := ValidatePOV(request.FrontMatter.POV)
+	if err != nil {
+		return SaveSceneRequest{}, err
+	}
+	status, err := ValidateSceneStatus(request.FrontMatter.Status)
+	if err != nil {
+		return SaveSceneRequest{}, err
+	}
+	markdown, err := NormalizeMarkdown(request.Markdown)
+	if err != nil {
+		return SaveSceneRequest{}, err
+	}
+	if err := ValidateRevision(request.ExpectedRevision); err != nil {
+		return SaveSceneRequest{}, err
+	}
+
+	request.Title = title
+	request.FrontMatter.POV = pov
+	request.FrontMatter.Status = status
+	request.Markdown = markdown
+	return request, nil
+}
+
+// ComputeRevision returns the fixed opaque revision token for canonical bytes.
+func ComputeRevision(contents []byte) string {
+	digest := sha256.Sum256(contents)
+	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
 // ValidateTitle trims and validates a title.

@@ -18,9 +18,10 @@ type FormState =
 
 type Props = {
   project: Project
+  onOpenScene?: (sceneID: string) => void
 }
 
-export default function OutlineWorkbench({ project }: Props) {
+export default function OutlineWorkbench({ project, onOpenScene }: Props) {
   const [outline, setOutline] = useState<Outline | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -201,6 +202,9 @@ export default function OutlineWorkbench({ project }: Props) {
                                   <strong>{scene.title}</strong>
                                 </div>
                                 <div className="scene-actions">
+                                  <button type="button" className="secondary" onClick={() => onOpenScene?.(scene.id)} disabled={busy}>
+                                    Open scene {scene.title}
+                                  </button>
                                   <button type="button" className="secondary" onClick={() => void moveScene(chapter, sceneIndex, -1)} disabled={busy || sceneIndex === 0}>
                                     Move scene {scene.title} up
                                   </button>

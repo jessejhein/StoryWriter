@@ -10,7 +10,9 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -239,6 +241,22 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 	return outline, nil
 }
 
+// LoadScene reads one canonical scene document and computes its revision.
+func (s *Store) LoadScene(_ context.Context, projectPath, sceneID string) (story.SceneDocument, error) {
+	if err := story.ValidateSceneID(sceneID); err != nil {
+		return story.SceneDocument{}, err
+	}
+	relativePath := filepath.ToSlash(filepath.Join("scenes", sceneID+".md"))
+	contents, err := s.readFile(filepath.Join(projectPath, "scenes", sceneID+".md"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return story.SceneDocument{}, fmt.Errorf("scene %q: %w", sceneID, story.ErrSceneNotFound)
+		}
+		return story.SceneDocument{}, fmt.Errorf("read %s: %w", relativePath, err)
+	}
+	return parseCanonicalScene(relativePath, contents)
+}
+
 // MarshalOutline encodes outline ordering only.
 func (s *Store) MarshalOutline(outline story.Outline) ([]byte, error) {
 	arcs := make([]outlineArcRef, len(outline.Arcs))
@@ -329,6 +347,62 @@ func (s *Store) MarshalScene(scene story.Scene) ([]byte, error) {
 		return nil, err
 	}
 	return []byte("---\n" + string(frontMatter) + "---\n\n"), nil
+}
+
+// MarshalSceneDocument encodes the full canonical scene file.
+func (s *Store) MarshalSceneDocument(scene story.SceneDocument) ([]byte, error) {
+	if err := story.ValidateSceneID(scene.ID); err != nil {
+		return nil, err
+	}
+	if err := story.ValidateChapterID(scene.ChapterID); err != nil {
+		return nil, err
+	}
+	title, err := story.ValidateTitle(scene.Title)
+	if err != nil {
+		return nil, err
+	}
+	pov, err := story.ValidatePOV(scene.FrontMatter.POV)
+	if err != nil {
+		return nil, err
+	}
+	status, err := story.ValidateSceneStatus(scene.FrontMatter.Status)
+	if err != nil {
+		return nil, err
+	}
+	markdown, err := story.NormalizeMarkdown(scene.Markdown)
+	if err != nil {
+		return nil, err
+	}
+
+	var buffer bytes.Buffer
+	buffer.WriteString("---\n")
+	buffer.WriteString("id: ")
+	buffer.WriteString(scene.ID)
+	buffer.WriteByte('\n')
+	buffer.WriteString("title: ")
+	buffer.WriteString(quoteYAMLScalar(title))
+	buffer.WriteByte('\n')
+	buffer.WriteString("chapter_id: ")
+	buffer.WriteString(scene.ChapterID)
+	buffer.WriteByte('\n')
+	buffer.WriteString("pov: ")
+	buffer.WriteString(quoteYAMLScalar(pov))
+	buffer.WriteByte('\n')
+	buffer.WriteString("status: ")
+	buffer.WriteString(status)
+	buffer.WriteByte('\n')
+	buffer.WriteString("exclude_from_ai: ")
+	if scene.FrontMatter.ExcludeFromAI {
+		buffer.WriteString("true\n")
+	} else {
+		buffer.WriteString("false\n")
+	}
+	buffer.WriteString("---\n\n")
+	buffer.WriteString(markdown)
+	if !strings.HasSuffix(buffer.String(), "\n") {
+		buffer.WriteByte('\n')
+	}
+	return buffer.Bytes(), nil
 }
 
 // WriteFiles atomically replaces the requested relative paths and returns a
@@ -435,20 +509,137 @@ func marshalYAML(value any) ([]byte, error) {
 }
 
 func parseScene(path string, contents []byte) (sceneFrontMatter, error) {
+	document, err := parseCanonicalScene(path, contents)
+	if err != nil {
+		return sceneFrontMatter{}, err
+	}
+	return sceneFrontMatter{
+		ID:            document.ID,
+		Title:         document.Title,
+		ChapterID:     document.ChapterID,
+		POV:           document.FrontMatter.POV,
+		Status:        document.FrontMatter.Status,
+		ExcludeFromAI: document.FrontMatter.ExcludeFromAI,
+	}, nil
+}
+
+func parseCanonicalScene(path string, contents []byte) (story.SceneDocument, error) {
+	if !utf8.Valid(contents) {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: scene file is not valid UTF-8", path)
+	}
 	text := string(contents)
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	if strings.ContainsRune(text, '\x00') {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: scene file contains NUL byte", path)
+	}
 	if !strings.HasPrefix(text, "---\n") {
-		return sceneFrontMatter{}, fmt.Errorf("decode %s: missing YAML front matter", path)
+		return story.SceneDocument{}, fmt.Errorf("decode %s: missing YAML front matter", path)
 	}
 	rest := strings.TrimPrefix(text, "---\n")
 	end := strings.Index(rest, "\n---\n")
 	if end < 0 {
-		return sceneFrontMatter{}, fmt.Errorf("decode %s: missing front matter terminator", path)
+		return story.SceneDocument{}, fmt.Errorf("decode %s: missing front matter terminator", path)
 	}
 
-	frontMatterText := rest[:end+1]
-	var frontMatter sceneFrontMatter
-	if err := decodeYAML(path, []byte(frontMatterText), &frontMatter); err != nil {
-		return sceneFrontMatter{}, err
+	frontMatter, err := decodeSceneFrontMatter(path, rest[:end+1])
+	if err != nil {
+		return story.SceneDocument{}, err
 	}
-	return frontMatter, nil
+	title, err := story.ValidateTitle(frontMatter.Title)
+	if err != nil {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if err := story.ValidateSceneID(frontMatter.ID); err != nil {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if err := story.ValidateChapterID(frontMatter.ChapterID); err != nil {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	pov, err := story.ValidatePOV(frontMatter.POV)
+	if err != nil {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	status, err := story.ValidateSceneStatus(frontMatter.Status)
+	if err != nil {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	markdownText := rest[end+5:]
+	if !strings.HasPrefix(markdownText, "\n") {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: missing blank line after front matter", path)
+	}
+	markdown, err := story.NormalizeMarkdown(strings.TrimPrefix(markdownText, "\n"))
+	if err != nil {
+		return story.SceneDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	canonical := append([]byte(nil), contents...)
+	return story.SceneDocument{
+		ID:        frontMatter.ID,
+		ChapterID: frontMatter.ChapterID,
+		Title:     title,
+		FrontMatter: story.SceneFrontMatter{
+			POV:           pov,
+			Status:        status,
+			ExcludeFromAI: frontMatter.ExcludeFromAI,
+		},
+		Markdown:  markdown,
+		Revision:  story.ComputeRevision(canonical),
+		Canonical: canonical,
+	}, nil
+}
+
+func decodeSceneFrontMatter(path, text string) (sceneFrontMatter, error) {
+	var node yaml.Node
+	if err := yaml.Unmarshal([]byte(text), &node); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	if len(node.Content) != 1 || node.Content[0].Kind != yaml.MappingNode {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s: front matter must be a mapping", path)
+	}
+	mapping := node.Content[0]
+	seen := map[string]struct{}{}
+	values := map[string]*yaml.Node{}
+	for i := 0; i < len(mapping.Content); i += 2 {
+		key := mapping.Content[i].Value
+		value := mapping.Content[i+1]
+		if _, exists := seen[key]; exists {
+			return sceneFrontMatter{}, fmt.Errorf("decode %s: duplicate front matter field %q", path, key)
+		}
+		seen[key] = struct{}{}
+		values[key] = value
+		switch key {
+		case "id", "title", "chapter_id", "pov", "status", "exclude_from_ai":
+		default:
+			return sceneFrontMatter{}, fmt.Errorf("decode %s: field %s not found", path, key)
+		}
+	}
+	for _, key := range []string{"id", "title", "chapter_id", "pov", "status", "exclude_from_ai"} {
+		if _, ok := values[key]; !ok {
+			return sceneFrontMatter{}, fmt.Errorf("decode %s: missing front matter field %q", path, key)
+		}
+	}
+	var matter sceneFrontMatter
+	if err := values["id"].Decode(&matter.ID); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s id: %w", path, err)
+	}
+	if err := values["title"].Decode(&matter.Title); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s title: %w", path, err)
+	}
+	if err := values["chapter_id"].Decode(&matter.ChapterID); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s chapter_id: %w", path, err)
+	}
+	if err := values["pov"].Decode(&matter.POV); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s pov: %w", path, err)
+	}
+	if err := values["status"].Decode(&matter.Status); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s status: %w", path, err)
+	}
+	if err := values["exclude_from_ai"].Decode(&matter.ExcludeFromAI); err != nil {
+		return sceneFrontMatter{}, fmt.Errorf("decode %s exclude_from_ai: %w", path, err)
+	}
+	return matter, nil
+}
+
+func quoteYAMLScalar(value string) string {
+	return strconv.Quote(value)
 }

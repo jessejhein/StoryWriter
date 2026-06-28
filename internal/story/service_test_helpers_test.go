@@ -71,21 +71,27 @@ func (i *fakeIndexStore) Rebuild(context.Context, string) error {
 }
 
 type fakeFileStore struct {
-	loadOutline   Outline
-	loadErr       error
-	reloadErr     error
-	loadCalls     int
-	loadHook      func(int)
-	marshaled     Outline
-	reloadPending bool
-	exists        map[string]bool
-	existsErr     error
-	marshalErr    error
-	writeErr      error
-	writeCalls    int
-	writtenFiles  map[string][]byte
-	rollbackCalls int
-	rollbackErr   error
+	loadOutline     Outline
+	loadErr         error
+	reloadErr       error
+	loadCalls       int
+	loadHook        func(int)
+	marshaled       Outline
+	reloadPending   bool
+	exists          map[string]bool
+	existsErr       error
+	marshalErr      error
+	writeErr        error
+	writeCalls      int
+	writtenFiles    map[string][]byte
+	rollbackCalls   int
+	rollbackErr     error
+	scene           SceneDocument
+	loadSceneErr    error
+	sceneBytes      []byte
+	marshalSceneErr error
+	loadSceneCalls  int
+	reloadedScene   *SceneDocument
 }
 
 func (s *fakeFileStore) Load(context.Context, string) (Outline, error) {
@@ -108,6 +114,17 @@ func (s *fakeFileStore) Exists(_ context.Context, _ string, relativePath string)
 		return false, s.existsErr
 	}
 	return s.exists[relativePath], nil
+}
+
+func (s *fakeFileStore) LoadScene(context.Context, string, string) (SceneDocument, error) {
+	s.loadSceneCalls++
+	if s.loadSceneErr != nil {
+		return SceneDocument{}, s.loadSceneErr
+	}
+	if s.reloadedScene != nil && s.loadSceneCalls > 1 {
+		return *s.reloadedScene, nil
+	}
+	return s.scene, nil
 }
 
 func (s *fakeFileStore) MarshalOutline(outline Outline) ([]byte, error) {
@@ -137,6 +154,16 @@ func (s *fakeFileStore) MarshalScene(scene Scene) ([]byte, error) {
 		return nil, s.marshalErr
 	}
 	return []byte("scene:" + scene.ID), nil
+}
+
+func (s *fakeFileStore) MarshalSceneDocument(scene SceneDocument) ([]byte, error) {
+	if s.marshalSceneErr != nil {
+		return nil, s.marshalSceneErr
+	}
+	if s.sceneBytes != nil {
+		return s.sceneBytes, nil
+	}
+	return []byte("scene-document"), nil
 }
 
 func (s *fakeFileStore) WriteFiles(_ context.Context, _ string, files map[string][]byte) (func() error, error) {
