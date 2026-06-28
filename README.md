@@ -33,6 +33,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 11. `docs/09_milestone_0_task_prompt.md`
 12. `docs/10_milestone_1_task_prompt.md`
 13. `docs/11_milestone_2_task_prompt.md`
+14. `docs/12_milestone_3_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -74,8 +75,9 @@ Milestone 0 creates a runnable local skeleton:
 
 Milestones 0 through 2 are implemented. The app includes the local project
 foundation, canonical outline editing, and the Vim-friendly scene editor with
-revision conflict protection and one Git checkpoint per explicit save. Design
-the next milestone before extending the implementation.
+revision conflict protection and one Git checkpoint per explicit save.
+Milestone 3 is specified but not implemented; its contract is in
+`docs/12_milestone_3_task_prompt.md`.
 
 ## Development
 
