@@ -8,6 +8,42 @@ export type Project = {
   index_initialized: boolean
 }
 
+export type Scene = {
+  id: string
+  title: string
+  display_label: string
+}
+
+export type Chapter = {
+  id: string
+  title: string
+  display_label: string
+  scenes: Scene[]
+}
+
+export type Arc = {
+  id: string
+  title: string
+  display_label: string
+  chapters: Chapter[]
+}
+
+export type Outline = {
+  version: number
+  arcs: Arc[]
+}
+
+export type OutlineMutation = {
+  changed_id?: string
+  outline: Outline
+}
+
+export type ReorderRequest = {
+  parent_type: 'arc' | 'chapter'
+  parent_id: string
+  ordered_child_ids: string[]
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init)
   const body = await response.json()
@@ -17,22 +53,42 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T
 }
 
+function postJSON<T>(path: string, body: unknown): Promise<T> {
+  return request(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
 export function getHealth(): Promise<Health> {
   return request('/api/health')
 }
 
 export function createProject(name: string, path: string): Promise<Project> {
-  return request('/api/projects', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, path }),
-  })
+  return postJSON('/api/projects', { name, path })
 }
 
 export function openProject(path: string): Promise<Project> {
-  return request('/api/projects/open', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path }),
-  })
+  return postJSON('/api/projects/open', { path })
+}
+
+export function getOutline(): Promise<Outline> {
+  return request('/api/outline')
+}
+
+export function createArc(title: string): Promise<OutlineMutation> {
+  return postJSON('/api/arcs', { title })
+}
+
+export function createChapter(arcID: string, title: string): Promise<OutlineMutation> {
+  return postJSON('/api/chapters', { arc_id: arcID, title })
+}
+
+export function createScene(chapterID: string, title: string): Promise<OutlineMutation> {
+  return postJSON('/api/scenes', { chapter_id: chapterID, title })
+}
+
+export function reorderOutline(requestBody: ReorderRequest): Promise<OutlineMutation> {
+  return postJSON('/api/outline/reorder', requestBody)
 }

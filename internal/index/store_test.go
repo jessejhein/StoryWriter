@@ -13,11 +13,11 @@ import (
 )
 
 // BDD trace:
-// - Requirement: Milestone 0, Story 0.2, open existing project.
-// - Scenario: given a valid project folder, when I open the project, then the
-//   app verifies or rebuilds the SQLite index.
-// - Test purpose: verify rebuilding the index is idempotent and the canonical
-//   file manifest includes project.yaml exactly once.
+//   - Requirement: Milestone 0, Story 0.2, open existing project.
+//   - Scenario: given a valid project folder, when I open the project, then the
+//     app verifies or rebuilds the SQLite index.
+//   - Test purpose: verify rebuilding the index is idempotent and the canonical
+//     file manifest includes project.yaml exactly once.
 func TestRebuildIsIdempotentAndIndexesCanonicalFiles(t *testing.T) {
 	t.Parallel()
 

@@ -14,12 +14,12 @@ import (
 )
 
 // BDD trace:
-// - Requirement: Milestone 0, Story 0.1, create project folder.
-// - Scenario: given an empty directory path, when I create a project named
-//   "Test Novel", then the app writes project starter files, initializes Git,
-//   creates the SQLite index, and records a first commit.
-// - Test purpose: verify the project service creates the canonical folder
-//   layout, initializes the adapters, and writes the first commit.
+//   - Requirement: Milestone 0, Story 0.1, create project folder.
+//   - Scenario: given an empty directory path, when I create a project named
+//     "Test Novel", then the app writes project starter files, initializes Git,
+//     creates the SQLite index, and records a first commit.
+//   - Test purpose: verify the project service creates the canonical folder
+//     layout, initializes the adapters, and writes the first commit.
 func TestCreateWritesStarterProjectAndInitializesStores(t *testing.T) {
 	t.Parallel()
 
@@ -66,11 +66,11 @@ func TestCreateWritesStarterProjectAndInitializesStores(t *testing.T) {
 }
 
 // BDD trace:
-// - Requirement: Milestone 0, Story 0.2, open existing project.
-// - Scenario: given a valid project folder, when I open the project, then the
-//   app loads project metadata and verifies or rebuilds the SQLite index.
-// - Test purpose: verify opening a valid project rebuilds a missing index and
-//   preserves the project metadata.
+//   - Requirement: Milestone 0, Story 0.2, open existing project.
+//   - Scenario: given a valid project folder, when I open the project, then the
+//     app loads project metadata and verifies or rebuilds the SQLite index.
+//   - Test purpose: verify opening a valid project rebuilds a missing index and
+//     preserves the project metadata.
 func TestOpenValidProjectRebuildsMissingIndex(t *testing.T) {
 	t.Parallel()
 
@@ -96,10 +96,10 @@ func TestOpenValidProjectRebuildsMissingIndex(t *testing.T) {
 }
 
 // BDD trace:
-// - Requirement: Milestone 0, Story 0.2, open existing project.
-// - Scenario: given a valid project folder, when I open the project, then the
-//   app loads project metadata and verifies or rebuilds the SQLite index.
-// - Test purpose: verify opening an invalid project fails with a useful error.
+//   - Requirement: Milestone 0, Story 0.2, open existing project.
+//   - Scenario: given a valid project folder, when I open the project, then the
+//     app loads project metadata and verifies or rebuilds the SQLite index.
+//   - Test purpose: verify opening an invalid project fails with a useful error.
 func TestOpenRejectsInvalidProject(t *testing.T) {
 	t.Parallel()
 

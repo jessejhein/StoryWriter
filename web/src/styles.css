@@ -40,10 +40,30 @@ button { border: 1px solid var(--ink); background: var(--ink); color: var(--pape
 button.secondary { background: transparent; color: var(--ink); }
 button:disabled { opacity: .35; cursor: not-allowed; }
 .error { color: var(--red); margin: 0; }
-aside { margin-top: 34px; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); padding: 18px 0; display: grid; grid-template-columns: 140px 1fr auto; gap: 20px; align-items: center; }
-aside span { color: var(--red); }
-aside strong { font-size: 1.35rem; }
-aside code { font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: .75rem; }
+.outline-shell { display: grid; grid-template-columns: .84fr 1.16fr; margin-top: 78px; background: linear-gradient(180deg, rgba(246, 240, 229, .96), rgba(240, 232, 217, .98)); border: 1px solid var(--ink); box-shadow: 12px 12px 0 rgba(41, 40, 32, .12); }
+.outline-meta { padding: clamp(30px, 5vw, 64px); border-right: 1px solid var(--rule); }
+.outline-meta h2 { font-size: clamp(2.4rem, 5vw, 4.6rem); line-height: .96; letter-spacing: -.045em; margin: 0; font-weight: 400; }
+.outline-meta > p:last-child { font-size: 1.12rem; line-height: 1.55; max-width: 28rem; margin-top: 28px; }
+.outline-panel { padding: clamp(26px, 4vw, 44px); display: grid; gap: 22px; align-content: start; min-width: 0; }
+.outline-toolbar { display: flex; justify-content: space-between; gap: 16px; align-items: start; border-bottom: 1px solid var(--rule); padding-bottom: 18px; }
+.outline-toolbar strong, .outline-card strong, .scene-row strong { display: block; margin-top: 6px; font-size: 1.1rem; }
+.outline-toolbar code { display: block; margin-top: 10px; font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: .75rem; line-height: 1.5; word-break: break-all; }
+.section-label { font-family: 'IBM Plex Mono', 'Courier New', monospace; text-transform: uppercase; letter-spacing: .08em; font-size: .72rem; color: var(--red); }
+.outline-message { margin: 0; padding: 18px 0; }
+.outline-error { display: flex; justify-content: space-between; align-items: center; gap: 16px; border: 1px solid rgba(164, 59, 46, .35); background: rgba(164, 59, 46, .08); padding: 14px 16px; }
+.empty-outline { display: grid; gap: 14px; padding: 30px 0 12px; }
+.empty-outline p { margin: 0; }
+.outline-header-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.outline-header-row h3 { margin: 0; font-size: 1.3rem; font-weight: 600; }
+.outline-tree, .chapter-list, .scene-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 14px; }
+.outline-arc, .outline-chapter { display: grid; gap: 12px; }
+.outline-card { display: flex; justify-content: space-between; gap: 16px; align-items: start; border: 1px solid var(--rule); background: rgba(255, 252, 247, .82); padding: 18px; }
+.chapter-card { margin-left: 20px; }
+.chapter-actions, .scene-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: end; }
+.scene-list { margin-left: 40px; }
+.scene-row { display: flex; justify-content: space-between; gap: 16px; align-items: start; border-left: 1px solid var(--rule); padding: 10px 0 10px 18px; }
+.inline-form { padding: 16px 18px; border: 1px dashed var(--rule); background: rgba(255, 255, 255, .5); display: grid; gap: 16px; }
+.inline-form label { gap: 8px; }
 
 @media (max-width: 760px) {
   main { width: min(100% - 24px, 560px); padding-top: 22px; }
@@ -51,5 +71,9 @@ aside code { font-family: 'IBM Plex Mono', 'Courier New', monospace; font-size: 
   .status { grid-column: 1; grid-row: auto; justify-self: start; }
   .workbench { grid-template-columns: 1fr; margin-top: 42px; }
   .intro { border-right: 0; border-bottom: 1px solid var(--rule); }
-  aside { grid-template-columns: 1fr; gap: 6px; }
+  .outline-shell { grid-template-columns: 1fr; margin-top: 42px; }
+  .outline-meta { border-right: 0; border-bottom: 1px solid var(--rule); }
+  .outline-toolbar, .outline-card, .scene-row, .outline-header-row { flex-direction: column; }
+  .chapter-card, .scene-list { margin-left: 0; }
+  .chapter-actions, .scene-actions { justify-content: start; }
 }

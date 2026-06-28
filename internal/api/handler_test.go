@@ -27,17 +27,17 @@ func (s *projectStoreStub) Open(_ context.Context, _ string) (project.Project, e
 }
 
 // BDD trace:
-// - Requirement: Milestone 0, Story 0.3, health check.
-// - Scenario: when I request /api/health, I receive status ok and version
-//   information.
-// - Test purpose: verify the API health handler returns the expected status
-//   and version payload.
+//   - Requirement: Milestone 0, Story 0.3, health check.
+//   - Scenario: when I request /api/health, I receive status ok and version
+//     information.
+//   - Test purpose: verify the API health handler returns the expected status
+//     and version payload.
 func TestHealth(t *testing.T) {
 	t.Parallel()
 
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	response := httptest.NewRecorder()
-	api.NewHandler(&projectStoreStub{}, "0.0.0-test").ServeHTTP(response, request)
+	api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "0.0.0-test").ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
@@ -52,12 +52,12 @@ func TestHealth(t *testing.T) {
 }
 
 // BDD trace:
-// - Requirement: Milestone 0, Story 0.1, create project folder.
-// - Scenario: given an empty directory path, when I create a project named
-//   "Test Novel", then the app writes project starter files, initializes Git,
-//   creates the SQLite index, and records a first commit.
-// - Test purpose: verify the API forwards the project create request and
-//   returns HTTP 201 for a successful project creation.
+//   - Requirement: Milestone 0, Story 0.1, create project folder.
+//   - Scenario: given an empty directory path, when I create a project named
+//     "Test Novel", then the app writes project starter files, initializes Git,
+//     creates the SQLite index, and records a first commit.
+//   - Test purpose: verify the API forwards the project create request and
+//     returns HTTP 201 for a successful project creation.
 func TestCreateProject(t *testing.T) {
 	t.Parallel()
 
@@ -66,7 +66,7 @@ func TestCreateProject(t *testing.T) {
 	}}
 	request := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(`{"name":"Test Novel","path":"/tmp/test-novel"}`))
 	response := httptest.NewRecorder()
-	api.NewHandler(store, "test").ServeHTTP(response, request)
+	api.NewHandler(store, &activeProjectSessionStub{}, &storyServiceStub{}, "test").ServeHTTP(response, request)
 
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())

@@ -56,6 +56,23 @@ func (s *Store) IsRepo(ctx context.Context, path string) (bool, error) {
 	return strings.TrimSpace(output) == path, nil
 }
 
+// IsClean reports whether the working tree has no tracked or staged changes.
+func (s *Store) IsClean(ctx context.Context, path string) (bool, error) {
+	output, err := s.run(ctx, "-C", path, "status", "--porcelain")
+	if err != nil {
+		return false, fmt.Errorf("inspect Git worktree: %w", err)
+	}
+	return strings.TrimSpace(output) == "", nil
+}
+
+// UnstageAll removes staged changes without discarding the working tree.
+func (s *Store) UnstageAll(ctx context.Context, path string) error {
+	if _, err := s.run(ctx, "-C", path, "reset", "--mixed", "HEAD"); err != nil {
+		return fmt.Errorf("unstage project files: %w", err)
+	}
+	return nil
+}
+
 func (s *Store) run(ctx context.Context, arguments ...string) (string, error) {
 	command := exec.CommandContext(ctx, s.executable, arguments...)
 	output, err := command.CombinedOutput()

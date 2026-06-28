@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"storywork/internal/project"
+	"storywork/internal/story"
 )
 
 // ProjectStore is the project application boundary used by HTTP handlers.
@@ -19,8 +20,22 @@ type ProjectStore interface {
 	Open(ctx context.Context, path string) (project.Project, error)
 }
 
+// ActiveProjectSession stores the current project for later outline routes.
+type ActiveProjectSession interface {
+	Set(project.Project)
+}
+
+// StoryStore serves and mutates the active project's outline.
+type StoryStore interface {
+	Outline(ctx context.Context) (story.Outline, error)
+	CreateArc(ctx context.Context, title string) (story.MutationResult, error)
+	CreateChapter(ctx context.Context, arcID, title string) (story.MutationResult, error)
+	CreateScene(ctx context.Context, chapterID, title string) (story.MutationResult, error)
+	Reorder(ctx context.Context, request story.ReorderRequest) (story.MutationResult, error)
+}
+
 // NewHandler creates the Milestone 0 API router.
-func NewHandler(projects ProjectStore, version string) http.Handler {
+func NewHandler(projects ProjectStore, session ActiveProjectSession, stories StoryStore, version string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok", "version": version})
@@ -36,6 +51,7 @@ func NewHandler(projects ProjectStore, version string) http.Handler {
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
+		session.Set(created)
 		writeJSON(writer, http.StatusCreated, created)
 	})
 	mux.HandleFunc("POST /api/projects/open", func(writer http.ResponseWriter, request *http.Request) {
@@ -51,7 +67,76 @@ func NewHandler(projects ProjectStore, version string) http.Handler {
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
+		session.Set(opened)
 		writeJSON(writer, http.StatusOK, opened)
+	})
+	mux.HandleFunc("GET /api/outline", func(writer http.ResponseWriter, request *http.Request) {
+		outline, err := stories.Outline(request.Context())
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, outline)
+	})
+	mux.HandleFunc("POST /api/arcs", func(writer http.ResponseWriter, request *http.Request) {
+		var createRequest struct {
+			Title string `json:"title"`
+		}
+		if err := decodeJSON(request, &createRequest); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		result, err := stories.CreateArc(request.Context(), createRequest.Title)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, result)
+	})
+	mux.HandleFunc("POST /api/chapters", func(writer http.ResponseWriter, request *http.Request) {
+		var createRequest struct {
+			ArcID string `json:"arc_id"`
+			Title string `json:"title"`
+		}
+		if err := decodeJSON(request, &createRequest); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		result, err := stories.CreateChapter(request.Context(), createRequest.ArcID, createRequest.Title)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, result)
+	})
+	mux.HandleFunc("POST /api/scenes", func(writer http.ResponseWriter, request *http.Request) {
+		var createRequest struct {
+			ChapterID string `json:"chapter_id"`
+			Title     string `json:"title"`
+		}
+		if err := decodeJSON(request, &createRequest); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		result, err := stories.CreateScene(request.Context(), createRequest.ChapterID, createRequest.Title)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, result)
+	})
+	mux.HandleFunc("POST /api/outline/reorder", func(writer http.ResponseWriter, request *http.Request) {
+		var reorderRequest story.ReorderRequest
+		if err := decodeJSON(request, &reorderRequest); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		result, err := stories.Reorder(request.Context(), reorderRequest)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, result)
 	})
 	return mux
 }
@@ -63,7 +148,26 @@ func decodeJSON(request *http.Request, target any) error {
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("invalid JSON request: %w", err)
 	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		if err == nil {
+			return errors.New("invalid JSON request: unexpected trailing JSON value")
+		}
+		return fmt.Errorf("invalid JSON request: %w", err)
+	}
 	return nil
+}
+
+func writeStoryError(writer http.ResponseWriter, err error) {
+	status := http.StatusInternalServerError
+	switch {
+	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree):
+		status = http.StatusConflict
+	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder):
+		status = http.StatusBadRequest
+	case errors.Is(err, story.ErrParentNotFound):
+		status = http.StatusNotFound
+	}
+	writeError(writer, status, err)
 }
 
 func writeError(writer http.ResponseWriter, status int, err error) {
