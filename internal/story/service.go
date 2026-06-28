@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"storywork/internal/codex"
 	"storywork/internal/project"
 )
 
@@ -15,9 +16,14 @@ import (
 type NodeKind string
 
 const (
-	NodeKindArc     NodeKind = "arc"
-	NodeKindChapter NodeKind = "chapter"
-	NodeKindScene   NodeKind = "scene"
+	NodeKindArc         NodeKind = "arc"
+	NodeKindChapter     NodeKind = "chapter"
+	NodeKindScene       NodeKind = "scene"
+	NodeKindCharacter   NodeKind = "character"
+	NodeKindLocation    NodeKind = "location"
+	NodeKindLore        NodeKind = "lore"
+	NodeKindCustom      NodeKind = "custom"
+	NodeKindProgression NodeKind = "progression"
 )
 
 // Session resolves the active project for the current backend process.
@@ -29,12 +35,17 @@ type Session interface {
 type FileStore interface {
 	Load(ctx context.Context, projectPath string) (Outline, error)
 	LoadScene(ctx context.Context, projectPath, sceneID string) (SceneDocument, error)
+	LoadCodexEntries(ctx context.Context, projectPath string) ([]codex.Entry, error)
+	LoadCodexEntry(ctx context.Context, projectPath, entryID string) (codex.Entry, error)
+	LoadProgressions(ctx context.Context, projectPath, entryID string) (codex.ProgressionDocument, error)
 	Exists(ctx context.Context, projectPath, relativePath string) (bool, error)
 	MarshalOutline(outline Outline) ([]byte, error)
 	MarshalArc(arc Arc) ([]byte, error)
 	MarshalChapter(chapter Chapter) ([]byte, error)
 	MarshalScene(scene Scene) ([]byte, error)
 	MarshalSceneDocument(scene SceneDocument) ([]byte, error)
+	MarshalCodexEntry(entry codex.Entry) ([]byte, error)
+	MarshalProgressions(document codex.ProgressionDocument) ([]byte, error)
 	WriteFiles(ctx context.Context, projectPath string, files map[string][]byte) (func() error, error)
 }
 
@@ -346,6 +357,278 @@ func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSce
 	return nextScene, nil
 }
 
+// CodexEntries returns the current active project's validated Codex list.
+func (s *Service) CodexEntries(ctx context.Context) ([]codex.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return nil, err
+	}
+	return s.files.LoadCodexEntries(ctx, current.Path)
+}
+
+// LoadCodexEntry returns one validated canonical Codex entry.
+func (s *Service) LoadCodexEntry(ctx context.Context, entryID string) (codex.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.Entry{}, err
+	}
+	return s.files.LoadCodexEntry(ctx, current.Path, entryID)
+}
+
+// CreateCodexEntry creates and checkpoints one new canonical Codex entry.
+func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryRequest) (codex.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	request, err = codex.NormalizeCreateRequest(request)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if !clean {
+		return codex.Entry{}, ErrDirtyWorktree
+	}
+	entryID, err := s.nextUnusedID(ctx, current.Path, codexNodeKind(request.Type))
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	nextEntry, err := codex.NormalizeEntry(codex.Entry{
+		ID:          entryID,
+		Type:        request.Type,
+		Name:        request.Name,
+		Aliases:     request.Aliases,
+		Tags:        request.Tags,
+		Description: request.Description,
+		Metadata:    request.Metadata,
+	})
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	entryBytes, err := s.files.MarshalCodexEntry(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	relativePath, err := codexEntryPath(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{relativePath: entryBytes})
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if err := s.index.Rebuild(ctx, current.Path); err != nil {
+		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	if err := s.git.CommitAll(ctx, current.Path, "Create Codex entry "+nextEntry.ID); err != nil {
+		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	nextEntry.Revision = codex.ComputeRevision(entryBytes)
+	return nextEntry, nil
+}
+
+// UpdateCodexEntry edits one existing canonical Codex entry.
+func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request codex.SaveEntryRequest) (codex.Entry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.Entry{}, err
+	}
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if !clean {
+		return codex.Entry{}, ErrDirtyWorktree
+	}
+	currentEntry, err := s.files.LoadCodexEntry(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if currentEntry.Revision != request.ExpectedRevision {
+		return codex.Entry{}, fmt.Errorf("entry %q revision changed: %w", entryID, ErrStaleRevision)
+	}
+	nextEntry, err := codex.NormalizeUpdateRequest(entryID, currentEntry, request)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	entryBytes, err := s.files.MarshalCodexEntry(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	currentBytes, err := s.files.MarshalCodexEntry(currentEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if bytes.Equal(entryBytes, currentBytes) {
+		return codex.Entry{}, codex.ErrNoChanges
+	}
+	relativePath, err := codexEntryPath(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{relativePath: entryBytes})
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if err := s.index.Rebuild(ctx, current.Path); err != nil {
+		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	if err := s.git.CommitAll(ctx, current.Path, "Edit Codex entry "+nextEntry.ID); err != nil {
+		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	nextEntry.Revision = codex.ComputeRevision(entryBytes)
+	return nextEntry, nil
+}
+
+// LoadProgressions returns one entry's canonical progression document or an empty logical document.
+func (s *Service) LoadProgressions(ctx context.Context, entryID string) (codex.ProgressionDocument, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if _, err := s.files.LoadCodexEntry(ctx, current.Path, entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	return s.files.LoadProgressions(ctx, current.Path, entryID)
+}
+
+// SaveProgressions replaces one entry's ordered canonical progression list.
+func (s *Service) SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if !clean {
+		return codex.ProgressionDocument{}, ErrDirtyWorktree
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if _, err := s.files.LoadCodexEntry(ctx, current.Path, entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	currentDocument, err := s.files.LoadProgressions(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := validateProgressionExpectedRevision(currentDocument.Revision, request.ExpectedRevision); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if request.ExpectedRevision != nil && currentDocument.Revision != nil && *request.ExpectedRevision != *currentDocument.Revision {
+		return codex.ProgressionDocument{}, fmt.Errorf("progressions %q revision changed: %w", entryID, ErrStaleRevision)
+	}
+	sceneIDs := outlineSceneIDs(outline)
+	progressions := append([]codex.Progression(nil), request.Progressions...)
+	if len(progressions) == 0 && currentDocument.Revision == nil {
+		return codex.ProgressionDocument{}, codex.ErrNoChanges
+	}
+	progressions, err = s.assignProgressionIDs(progressions)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	progressions, err = codex.NormalizeProgressions(entryID, progressions, sceneIDs)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	nextDocument := codex.ProgressionDocument{
+		EntryID:      entryID,
+		Progressions: progressions,
+	}
+	documentBytes, err := s.files.MarshalProgressions(nextDocument)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	currentBytes, err := s.files.MarshalProgressions(codex.ProgressionDocument{
+		EntryID:      currentDocument.EntryID,
+		Progressions: currentDocument.Progressions,
+	})
+	if err == nil && bytes.Equal(documentBytes, currentBytes) {
+		return codex.ProgressionDocument{}, codex.ErrNoChanges
+	}
+	relativePath := filepath.ToSlash(filepath.Join("progressions", entryID+".yaml"))
+	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{relativePath: documentBytes})
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := s.index.Rebuild(ctx, current.Path); err != nil {
+		return codex.ProgressionDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	if err := s.git.CommitAll(ctx, current.Path, "Edit progressions "+entryID); err != nil {
+		return codex.ProgressionDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
+	}
+	revision := codex.ComputeRevision(documentBytes)
+	nextDocument.Revision = &revision
+	return nextDocument, nil
+}
+
+// ResolveActiveCodexState reads one entry and resolves its active state for a target scene.
+func (s *Service) ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.ActiveState{}, err
+	}
+	if err := codex.ValidateSceneID(sceneID); err != nil {
+		return codex.ActiveState{}, err
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	entry, err := s.files.LoadCodexEntry(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	progressions, err := s.files.LoadProgressions(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	return codex.ResolveActiveState(entry, progressions.Progressions, flattenOutlineScenes(outline), sceneID)
+}
+
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
 	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
 	if err != nil {
@@ -362,6 +645,21 @@ func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, m
 		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
 	return MutationResult{ChangedID: changedID, Outline: reloaded}, nil
+}
+
+func (s *Service) assignProgressionIDs(progressions []codex.Progression) ([]codex.Progression, error) {
+	next := append([]codex.Progression(nil), progressions...)
+	for index := range next {
+		if next[index].ID != "" {
+			continue
+		}
+		id, err := s.ids.Next(NodeKindProgression)
+		if err != nil {
+			return nil, err
+		}
+		next[index].ID = id
+	}
+	return next, nil
 }
 
 func (s *Service) rollbackMutation(ctx context.Context, projectPath string, rollback func() error, cause error) error {
@@ -429,9 +727,74 @@ func entityPath(kind NodeKind, id string) (string, error) {
 		return filepath.ToSlash(filepath.Join("chapters", id+".yaml")), nil
 	case NodeKindScene:
 		return filepath.ToSlash(filepath.Join("scenes", id+".md")), nil
+	case NodeKindCharacter:
+		return filepath.ToSlash(filepath.Join("codex", "characters", id+".yaml")), nil
+	case NodeKindLocation:
+		return filepath.ToSlash(filepath.Join("codex", "locations", id+".yaml")), nil
+	case NodeKindLore:
+		return filepath.ToSlash(filepath.Join("codex", "lore", id+".yaml")), nil
+	case NodeKindCustom:
+		return filepath.ToSlash(filepath.Join("codex", "custom", id+".yaml")), nil
+	case NodeKindProgression:
+		return filepath.ToSlash(filepath.Join("progressions", id+".yaml")), nil
 	default:
 		return "", fmt.Errorf("unknown node kind %q", kind)
 	}
+}
+
+func codexNodeKind(entryType codex.EntryType) NodeKind {
+	switch entryType {
+	case codex.TypeCharacter:
+		return NodeKindCharacter
+	case codex.TypeLocation:
+		return NodeKindLocation
+	case codex.TypeLore:
+		return NodeKindLore
+	case codex.TypeCustom:
+		return NodeKindCustom
+	default:
+		return NodeKind("")
+	}
+}
+
+func codexEntryPath(entry codex.Entry) (string, error) {
+	return entityPath(codexNodeKind(entry.Type), entry.ID)
+}
+
+func validateProgressionExpectedRevision(current, expected *string) error {
+	if expected == nil {
+		if current != nil {
+			return codex.ErrInvalidRevision
+		}
+		return nil
+	}
+	if *expected == "" {
+		return codex.ErrInvalidRevision
+	}
+	if err := codex.ValidateRevision(*expected); err != nil {
+		return err
+	}
+	return nil
+}
+
+func outlineSceneIDs(outline Outline) map[string]struct{} {
+	sceneIDs := make(map[string]struct{})
+	for _, scene := range flattenOutlineScenes(outline) {
+		sceneIDs[scene.ID] = struct{}{}
+	}
+	return sceneIDs
+}
+
+func flattenOutlineScenes(outline Outline) []codex.SceneRef {
+	scenes := make([]codex.SceneRef, 0)
+	for _, arc := range outline.Arcs {
+		for _, chapter := range arc.Chapters {
+			for _, scene := range chapter.Scenes {
+				scenes = append(scenes, codex.SceneRef{ID: scene.ID})
+			}
+		}
+	}
+	return scenes
 }
 
 func findChapter(outline Outline, chapterID string) (Chapter, error) {

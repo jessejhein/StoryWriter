@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"storywork/internal/codex"
 	"storywork/internal/project"
 	"storywork/internal/story"
 )
@@ -34,6 +35,13 @@ type StoryStore interface {
 	Reorder(ctx context.Context, request story.ReorderRequest) (story.MutationResult, error)
 	LoadScene(ctx context.Context, sceneID string) (story.SceneDocument, error)
 	SaveScene(ctx context.Context, sceneID string, request story.SaveSceneRequest) (story.SceneDocument, error)
+	CodexEntries(ctx context.Context) ([]codex.Entry, error)
+	LoadCodexEntry(ctx context.Context, entryID string) (codex.Entry, error)
+	CreateCodexEntry(ctx context.Context, request codex.SaveEntryRequest) (codex.Entry, error)
+	UpdateCodexEntry(ctx context.Context, entryID string, request codex.SaveEntryRequest) (codex.Entry, error)
+	LoadProgressions(ctx context.Context, entryID string) (codex.ProgressionDocument, error)
+	SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error)
+	ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error)
 }
 
 // NewHandler creates the Milestone 0 API router.
@@ -180,6 +188,131 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		writeJSON(writer, http.StatusOK, sceneDocument)
 	})
+	mux.HandleFunc("GET /api/codex", func(writer http.ResponseWriter, request *http.Request) {
+		entries, err := stories.CodexEntries(request.Context())
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string][]codex.Entry{"entries": entries})
+	})
+	mux.HandleFunc("POST /api/codex", func(writer http.ResponseWriter, request *http.Request) {
+		var createRequest struct {
+			Type        codex.EntryType   `json:"type"`
+			Name        string            `json:"name"`
+			Aliases     []string          `json:"aliases"`
+			Tags        []string          `json:"tags"`
+			Description string            `json:"description"`
+			Metadata    map[string]string `json:"metadata"`
+		}
+		if err := decodeJSONWithLimit(writer, request, &createRequest, 1<<20); err != nil {
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeError(writer, status, err)
+			return
+		}
+		entry, err := stories.CreateCodexEntry(request.Context(), codex.SaveEntryRequest{
+			Type:        createRequest.Type,
+			Name:        createRequest.Name,
+			Aliases:     createRequest.Aliases,
+			Tags:        createRequest.Tags,
+			Description: createRequest.Description,
+			Metadata:    createRequest.Metadata,
+		})
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, entry)
+	})
+	mux.HandleFunc("GET /api/codex/{entry_id}", func(writer http.ResponseWriter, request *http.Request) {
+		entry, err := stories.LoadCodexEntry(request.Context(), request.PathValue("entry_id"))
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, entry)
+	})
+	mux.HandleFunc("PUT /api/codex/{entry_id}", func(writer http.ResponseWriter, request *http.Request) {
+		var updateRequest struct {
+			Name             string            `json:"name"`
+			Aliases          []string          `json:"aliases"`
+			Tags             []string          `json:"tags"`
+			Description      string            `json:"description"`
+			Metadata         map[string]string `json:"metadata"`
+			ExpectedRevision string            `json:"expected_revision"`
+		}
+		if err := decodeJSONWithLimit(writer, request, &updateRequest, 1<<20); err != nil {
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeError(writer, status, err)
+			return
+		}
+		entry, err := stories.UpdateCodexEntry(request.Context(), request.PathValue("entry_id"), codex.SaveEntryRequest{
+			Name:             updateRequest.Name,
+			Aliases:          updateRequest.Aliases,
+			Tags:             updateRequest.Tags,
+			Description:      updateRequest.Description,
+			Metadata:         updateRequest.Metadata,
+			ExpectedRevision: updateRequest.ExpectedRevision,
+		})
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, entry)
+	})
+	mux.HandleFunc("GET /api/codex/{entry_id}/progressions", func(writer http.ResponseWriter, request *http.Request) {
+		document, err := stories.LoadProgressions(request.Context(), request.PathValue("entry_id"))
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, document)
+	})
+	mux.HandleFunc("PUT /api/codex/{entry_id}/progressions", func(writer http.ResponseWriter, request *http.Request) {
+		var updateRequest struct {
+			Progressions     []codex.Progression `json:"progressions"`
+			ExpectedRevision *string             `json:"expected_revision"`
+		}
+		if err := decodeJSONWithLimit(writer, request, &updateRequest, 1<<20); err != nil {
+			status := http.StatusBadRequest
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				status = http.StatusRequestEntityTooLarge
+			}
+			writeError(writer, status, err)
+			return
+		}
+		document, err := stories.SaveProgressions(request.Context(), request.PathValue("entry_id"), codex.SaveProgressionsRequest{
+			Progressions:     updateRequest.Progressions,
+			ExpectedRevision: updateRequest.ExpectedRevision,
+		})
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, document)
+	})
+	mux.HandleFunc("GET /api/codex/{entry_id}/active", func(writer http.ResponseWriter, request *http.Request) {
+		sceneID := request.URL.Query().Get("scene_id")
+		if sceneID == "" {
+			writeError(writer, http.StatusBadRequest, errors.New("scene_id is required"))
+			return
+		}
+		activeState, err := stories.ResolveActiveCodexState(request.Context(), request.PathValue("entry_id"), sceneID)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, activeState)
+	})
 	return mux
 }
 
@@ -216,7 +349,11 @@ func writeStoryError(writer http.ResponseWriter, err error) {
 		status = http.StatusConflict
 	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder), errors.Is(err, story.ErrInvalidPOV), errors.Is(err, story.ErrInvalidStatus), errors.Is(err, story.ErrInvalidMarkdown), errors.Is(err, story.ErrInvalidRevision), errors.Is(err, story.ErrNoSceneChanges):
 		status = http.StatusBadRequest
+	case errors.Is(err, codex.ErrInvalidType), errors.Is(err, codex.ErrInvalidID), errors.Is(err, codex.ErrInvalidName), errors.Is(err, codex.ErrInvalidAlias), errors.Is(err, codex.ErrInvalidTag), errors.Is(err, codex.ErrInvalidDescription), errors.Is(err, codex.ErrInvalidMetadata), errors.Is(err, codex.ErrInvalidRevision), errors.Is(err, codex.ErrInvalidProgression), errors.Is(err, codex.ErrNoChanges):
+		status = http.StatusBadRequest
 	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound):
+		status = http.StatusNotFound
+	case errors.Is(err, codex.ErrEntryNotFound), errors.Is(err, codex.ErrSceneNotFound):
 		status = http.StatusNotFound
 	case errors.Is(err, story.ErrStaleRevision):
 		status = http.StatusConflict

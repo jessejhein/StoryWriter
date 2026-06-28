@@ -13,6 +13,13 @@ vi.mock('./api', () => ({
   reorderOutline: vi.fn(),
   getScene: vi.fn(),
   saveScene: vi.fn(),
+  getCodexEntries: vi.fn(),
+  createCodexEntry: vi.fn(),
+  getCodexEntry: vi.fn(),
+  updateCodexEntry: vi.fn(),
+  getCodexProgressions: vi.fn(),
+  saveCodexProgressions: vi.fn(),
+  getCodexActiveState: vi.fn(),
 }))
 
 vi.mock('./editor/CodeMirrorSurface', () => ({

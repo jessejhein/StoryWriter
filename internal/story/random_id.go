@@ -24,6 +24,16 @@ func (g *RandomIDGenerator) Next(kind NodeKind) (string, error) {
 		prefix = "ch_"
 	case NodeKindScene:
 		prefix = "scn_"
+	case NodeKindCharacter:
+		prefix = "char_"
+	case NodeKindLocation:
+		prefix = "loc_"
+	case NodeKindLore:
+		prefix = "lore_"
+	case NodeKindCustom:
+		prefix = "custom_"
+	case NodeKindProgression:
+		prefix = "prog_"
 	default:
 		return "", fmt.Errorf("unknown node kind %q", kind)
 	}

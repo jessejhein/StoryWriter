@@ -66,6 +66,59 @@ export type SaveSceneRequest = {
   expected_revision: string
 }
 
+export type CodexEntryType = 'character' | 'location' | 'lore' | 'custom'
+
+export type CodexEntry = {
+  id: string
+  type: CodexEntryType
+  name: string
+  aliases: string[]
+  tags: string[]
+  description: string
+  metadata: Record<string, string>
+  revision: string
+}
+
+export type SaveCodexEntryRequest = {
+  type?: CodexEntryType
+  name: string
+  aliases: string[]
+  tags: string[]
+  description: string
+  metadata: Record<string, string>
+  expected_revision?: string
+}
+
+export type CodexProgression = {
+  id?: string
+  anchor: {
+    type: 'scene'
+    id: string
+    timing: 'before' | 'after'
+  }
+  changes: {
+    description?: string
+    metadata?: Record<string, string>
+  }
+}
+
+export type CodexProgressionDocument = {
+  entry_id: string
+  progressions: CodexProgression[]
+  revision: string | null
+}
+
+export type SaveCodexProgressionsRequest = {
+  progressions: CodexProgression[]
+  expected_revision: string | null
+}
+
+export type CodexActiveState = {
+  scene_id: string
+  entry: Omit<CodexEntry, 'revision'>
+  applied_progression_ids: string[]
+}
+
 export class APIError extends Error {
   readonly status: number
 
@@ -135,4 +188,40 @@ export function saveScene(sceneID: string, requestBody: SaveSceneRequest): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
   })
+}
+
+export function getCodexEntries(): Promise<{ entries: CodexEntry[] }> {
+  return request('/api/codex')
+}
+
+export function createCodexEntry(requestBody: SaveCodexEntryRequest): Promise<CodexEntry> {
+  return postJSON('/api/codex', requestBody)
+}
+
+export function getCodexEntry(entryID: string): Promise<CodexEntry> {
+  return request(`/api/codex/${entryID}`)
+}
+
+export function updateCodexEntry(entryID: string, requestBody: SaveCodexEntryRequest): Promise<CodexEntry> {
+  return request(`/api/codex/${entryID}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  })
+}
+
+export function getCodexProgressions(entryID: string): Promise<CodexProgressionDocument> {
+  return request(`/api/codex/${entryID}/progressions`)
+}
+
+export function saveCodexProgressions(entryID: string, requestBody: SaveCodexProgressionsRequest): Promise<CodexProgressionDocument> {
+  return request(`/api/codex/${entryID}/progressions`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  })
+}
+
+export function getCodexActiveState(entryID: string, sceneID: string): Promise<CodexActiveState> {
+  return request(`/api/codex/${entryID}/active?scene_id=${encodeURIComponent(sceneID)}`)
 }

@@ -1,0 +1,460 @@
+import { ChangeEvent, useEffect, useState } from 'react'
+import {
+  APIError,
+  createCodexEntry,
+  getCodexActiveState,
+  getCodexEntries,
+  getCodexEntry,
+  getCodexProgressions,
+  getOutline,
+  saveCodexProgressions,
+  updateCodexEntry,
+  type CodexActiveState,
+  type CodexEntry,
+  type CodexEntryType,
+  type CodexProgression,
+  type Outline,
+  type Project,
+} from '../api'
+
+type Props = {
+  project: Project
+  onDirtyChange?: (dirty: boolean) => void
+}
+
+type MetadataRow = { key: string; value: string }
+type ProgressionRow = {
+  id?: string
+  sceneID: string
+  timing: 'before' | 'after'
+  description: string
+}
+
+type EntryDraft = {
+  id?: string
+  type: CodexEntryType
+  name: string
+  aliases: string[]
+  tags: string[]
+  description: string
+  metadata: MetadataRow[]
+  revision?: string
+}
+
+const emptyDraft = (entryType: CodexEntryType = 'character'): EntryDraft => ({
+  type: entryType,
+  name: '',
+  aliases: [],
+  tags: [],
+  description: '',
+  metadata: [],
+})
+
+function normalizeDraft(draft: EntryDraft) {
+  return JSON.stringify(draft)
+}
+
+function normalizeProgressionRows(rows: ProgressionRow[]) {
+  return JSON.stringify(rows)
+}
+
+function entryToDraft(entry: CodexEntry): EntryDraft {
+  return {
+    id: entry.id,
+    type: entry.type,
+    name: entry.name,
+    aliases: entry.aliases,
+    tags: entry.tags,
+    description: entry.description,
+    metadata: Object.entries(entry.metadata).map(([key, value]) => ({ key, value })),
+    revision: entry.revision,
+  }
+}
+
+function draftToRequest(draft: EntryDraft) {
+  return {
+    type: draft.type,
+    name: draft.name,
+    aliases: draft.aliases,
+    tags: draft.tags,
+    description: draft.description,
+    metadata: Object.fromEntries(draft.metadata.filter((row) => row.key.trim() !== '').map((row) => [row.key, row.value])),
+    expected_revision: draft.revision,
+  }
+}
+
+function progressionDocumentToRows(progressions: CodexProgression[]): ProgressionRow[] {
+  return progressions.map((progression) => ({
+    id: progression.id,
+    sceneID: progression.anchor.id,
+    timing: progression.anchor.timing,
+    description: progression.changes.description ?? '',
+  }))
+}
+
+export default function CodexWorkbench({ project, onDirtyChange }: Props) {
+  const [entries, setEntries] = useState<CodexEntry[]>([])
+  const [outline, setOutline] = useState<Outline | null>(null)
+  const [selectedEntryID, setSelectedEntryID] = useState<string | null>(null)
+  const [entryDraft, setEntryDraft] = useState<EntryDraft>(emptyDraft())
+  const [savedEntrySnapshot, setSavedEntrySnapshot] = useState(normalizeDraft(emptyDraft()))
+  const [progressions, setProgressions] = useState<ProgressionRow[]>([])
+  const [savedProgressionsSnapshot, setSavedProgressionsSnapshot] = useState(normalizeProgressionRows([]))
+  const [progressionRevision, setProgressionRevision] = useState<string | null>(null)
+  const [activeSceneID, setActiveSceneID] = useState('')
+  const [activeState, setActiveState] = useState<CodexActiveState | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [entryStatus, setEntryStatus] = useState('Saved')
+  const [progressionStatus, setProgressionStatus] = useState('Saved')
+  const [error, setError] = useState('')
+  const [savingEntry, setSavingEntry] = useState(false)
+  const [savingProgressions, setSavingProgressions] = useState(false)
+
+  const scenes = outline?.arcs.flatMap((arc) => arc.chapters.flatMap((chapter) => chapter.scenes)) ?? []
+  const entryDirty = normalizeDraft(entryDraft) !== savedEntrySnapshot
+  const progressionDirty = normalizeProgressionRows(progressions) !== savedProgressionsSnapshot
+  const dirty = entryDirty || progressionDirty
+  const visibleActiveState = selectedEntryID && activeSceneID ? activeState : null
+
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
+
+  useEffect(() => {
+    let cancelled = false
+    async function load() {
+      setLoading(true)
+      setError('')
+      try {
+        const [entryResponse, nextOutline] = await Promise.all([getCodexEntries(), getOutline()])
+        if (cancelled) {
+          return
+        }
+        setEntries(entryResponse.entries)
+        setOutline(nextOutline)
+        const firstSceneID = nextOutline.arcs.flatMap((arc) => arc.chapters.flatMap((chapter) => chapter.scenes))[0]?.id ?? ''
+        setActiveSceneID(firstSceneID)
+      } catch (requestError) {
+        if (!cancelled) {
+          setError(requestError instanceof Error ? requestError.message : 'Request failed')
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [project.project_id])
+
+  useEffect(() => {
+    if (!selectedEntryID || !activeSceneID) {
+      return
+    }
+    void getCodexActiveState(selectedEntryID, activeSceneID)
+      .then((nextActiveState) => setActiveState(nextActiveState))
+      .catch(() => setActiveState(null))
+  }, [selectedEntryID, activeSceneID])
+
+  async function selectEntry(entryID: string) {
+    if (dirty && selectedEntryID !== entryID && !window.confirm('Discard the current Codex draft?')) {
+      return
+    }
+    setError('')
+    setSelectedEntryID(entryID)
+    try {
+      const [entry, document] = await Promise.all([getCodexEntry(entryID), getCodexProgressions(entryID)])
+      const draft = entryToDraft(entry)
+      setEntryDraft(draft)
+      setSavedEntrySnapshot(normalizeDraft(draft))
+      const rows = progressionDocumentToRows(document.progressions)
+      setProgressions(rows)
+      setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
+      setProgressionRevision(document.revision)
+      setEntryStatus('Saved')
+      setProgressionStatus('Saved')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Request failed')
+    }
+  }
+
+  function beginNewEntry() {
+    if (dirty && !window.confirm('Discard the current Codex draft?')) {
+      return
+    }
+    const draft = emptyDraft()
+    setSelectedEntryID(null)
+    setEntryDraft(draft)
+    setSavedEntrySnapshot(normalizeDraft(draft))
+    setProgressions([])
+    setSavedProgressionsSnapshot(normalizeProgressionRows([]))
+    setProgressionRevision(null)
+    setEntryStatus('Unsaved changes')
+    setProgressionStatus('Saved')
+    setActiveState(null)
+  }
+
+  function updateDraft(nextDraft: EntryDraft) {
+    setEntryDraft(nextDraft)
+    setEntryStatus(normalizeDraft(nextDraft) === savedEntrySnapshot ? 'Saved' : 'Unsaved changes')
+  }
+
+  async function saveEntry() {
+    setSavingEntry(true)
+    setError('')
+    setEntryStatus('Saving')
+    try {
+      const saved = entryDraft.id
+        ? await updateCodexEntry(entryDraft.id, draftToRequest(entryDraft))
+        : await createCodexEntry(draftToRequest(entryDraft))
+      const draft = entryToDraft(saved)
+      setEntryDraft(draft)
+      setSavedEntrySnapshot(normalizeDraft(draft))
+      setEntryStatus('Saved')
+      setSelectedEntryID(saved.id)
+      setEntries((current) => {
+        const others = current.filter((entry) => entry.id !== saved.id)
+        return [...others, saved].sort((left, right) => left.name.localeCompare(right.name))
+      })
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Request failed'
+      setError(message)
+      setEntryStatus(requestError instanceof APIError && requestError.status === 409 ? 'Conflict' : 'Error')
+    } finally {
+      setSavingEntry(false)
+    }
+  }
+
+  async function saveProgressions() {
+    if (!selectedEntryID) {
+      return
+    }
+    setSavingProgressions(true)
+    setError('')
+    setProgressionStatus('Saving')
+    try {
+      const saved = await saveCodexProgressions(selectedEntryID, {
+        progressions: progressions.map((progression) => ({
+          id: progression.id,
+          anchor: {
+            type: 'scene',
+            id: progression.sceneID,
+            timing: progression.timing,
+          },
+          changes: progression.description ? { description: progression.description } : { metadata: {} },
+        })),
+        expected_revision: progressionRevision,
+      })
+      const rows = progressionDocumentToRows(saved.progressions)
+      setProgressions(rows)
+      setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
+      setProgressionRevision(saved.revision)
+      setProgressionStatus('Saved')
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Request failed'
+      setError(message)
+      setProgressionStatus(requestError instanceof APIError && requestError.status === 409 ? 'Conflict' : 'Error')
+    } finally {
+      setSavingProgressions(false)
+    }
+  }
+
+  function updateAlias(index: number, value: string) {
+    const aliases = [...entryDraft.aliases]
+    aliases[index] = value
+    updateDraft({ ...entryDraft, aliases })
+  }
+
+  function updateTag(index: number, value: string) {
+    const tags = [...entryDraft.tags]
+    tags[index] = value
+    updateDraft({ ...entryDraft, tags })
+  }
+
+  function updateMetadata(index: number, key: 'key' | 'value', value: string) {
+    const metadata = [...entryDraft.metadata]
+    metadata[index] = { ...metadata[index], [key]: value }
+    updateDraft({ ...entryDraft, metadata })
+  }
+
+  function updateProgression(index: number, field: keyof ProgressionRow, value: string) {
+    const next = [...progressions]
+    next[index] = { ...next[index], [field]: value }
+    setProgressions(next)
+    setProgressionStatus(normalizeProgressionRows(next) === savedProgressionsSnapshot ? 'Saved' : 'Unsaved changes')
+  }
+
+  if (loading) {
+    return <section className="workbench"><p>Loading Codex…</p></section>
+  }
+
+  return (
+    <section className="workbench codex-workbench">
+      <aside>
+        <div className="section-heading">
+          <h2>Codex</h2>
+          <button type="button" onClick={beginNewEntry}>New entry</button>
+        </div>
+        {entries.length === 0 ? (
+          <p>No Codex entries yet.</p>
+        ) : (
+          <ul>
+            {entries.map((entry) => (
+              <li key={entry.id}>
+                <button type="button" onClick={() => void selectEntry(entry.id)}>{entry.name}</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </aside>
+
+      <div className="codex-editor">
+        <header className="section-heading">
+          <div>
+            <p className="folio">Milestone 3 / Codex</p>
+            <h3>{selectedEntryID ? entryDraft.name || 'Untitled entry' : 'New entry'}</h3>
+          </div>
+          <div>
+            <span>{entryStatus}</span>
+            <button type="button" onClick={() => void saveEntry()} disabled={savingEntry || !entryDirty}>
+              {savingEntry ? 'Saving…' : 'Save entry'}
+            </button>
+          </div>
+        </header>
+
+        <label>
+          Type
+          <select value={entryDraft.type} onChange={(event) => updateDraft({ ...entryDraft, type: event.target.value as CodexEntryType })} disabled={Boolean(entryDraft.id)}>
+            <option value="character">Character</option>
+            <option value="location">Location</option>
+            <option value="lore">Lore</option>
+            <option value="custom">Custom</option>
+          </select>
+        </label>
+        <label>
+          Name
+          <input value={entryDraft.name} onChange={(event) => updateDraft({ ...entryDraft, name: event.target.value })} />
+        </label>
+        <label>
+          Description
+          <textarea value={entryDraft.description} onChange={(event) => updateDraft({ ...entryDraft, description: event.target.value })} />
+        </label>
+
+        <div>
+          <div className="section-heading">
+            <h4>Aliases</h4>
+            <button type="button" onClick={() => updateDraft({ ...entryDraft, aliases: [...entryDraft.aliases, ''] })}>Add alias</button>
+          </div>
+          {entryDraft.aliases.map((alias, index) => (
+            <label key={`alias-${index}`}>
+              Alias {index + 1}
+              <input value={alias} onChange={(event) => updateAlias(index, event.target.value)} />
+            </label>
+          ))}
+        </div>
+
+        <div>
+          <div className="section-heading">
+            <h4>Tags</h4>
+            <button type="button" onClick={() => updateDraft({ ...entryDraft, tags: [...entryDraft.tags, ''] })}>Add tag</button>
+          </div>
+          {entryDraft.tags.map((tag, index) => (
+            <label key={`tag-${index}`}>
+              Tag {index + 1}
+              <input value={tag} onChange={(event) => updateTag(index, event.target.value)} />
+            </label>
+          ))}
+        </div>
+
+        <div>
+          <div className="section-heading">
+            <h4>Metadata</h4>
+            <button type="button" onClick={() => updateDraft({ ...entryDraft, metadata: [...entryDraft.metadata, { key: '', value: '' }] })}>Add metadata</button>
+          </div>
+          {entryDraft.metadata.map((row, index) => (
+            <div key={`metadata-${index}`} className="metadata-row">
+              <label>
+                Metadata key {index + 1}
+                <input value={row.key} onChange={(event) => updateMetadata(index, 'key', event.target.value)} />
+              </label>
+              <label>
+                Metadata value {index + 1}
+                <input value={row.value} onChange={(event) => updateMetadata(index, 'value', event.target.value)} />
+              </label>
+            </div>
+          ))}
+        </div>
+
+        {selectedEntryID && (
+          <>
+            <section>
+              <header className="section-heading">
+                <h4>Progressions</h4>
+                <div>
+                  <span>{progressionStatus}</span>
+                  <button
+                    type="button"
+                    onClick={() => setProgressions([...progressions, { sceneID: scenes[0]?.id ?? '', timing: 'after', description: '' }])}
+                  >
+                    Add progression
+                  </button>
+                  <button type="button" onClick={() => void saveProgressions()} disabled={savingProgressions || !progressionDirty}>
+                    {savingProgressions ? 'Saving…' : 'Save progressions'}
+                  </button>
+                </div>
+              </header>
+              {progressions.map((progression, index) => (
+                <div key={progression.id ?? `new-${index}`} className="progression-row">
+                  <label>
+                    Scene
+                    <select value={progression.sceneID} onChange={(event) => updateProgression(index, 'sceneID', event.target.value)}>
+                      {scenes.map((scene) => (
+                        <option key={scene.id} value={scene.id}>{scene.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Timing
+                    <select value={progression.timing} onChange={(event) => updateProgression(index, 'timing', event.target.value)}>
+                      <option value="before">Before</option>
+                      <option value="after">After</option>
+                    </select>
+                  </label>
+                  <label>
+                    Progression description
+                    <textarea value={progression.description} onChange={(event) => updateProgression(index, 'description', event.target.value)} />
+                  </label>
+                </div>
+              ))}
+            </section>
+
+            <section>
+              <header className="section-heading">
+                <h4>Active state</h4>
+              </header>
+              <label>
+                Scene selector
+                <select value={activeSceneID} onChange={(event: ChangeEvent<HTMLSelectElement>) => setActiveSceneID(event.target.value)}>
+                  {scenes.map((scene) => (
+                    <option key={scene.id} value={scene.id}>{scene.title}</option>
+                  ))}
+                </select>
+              </label>
+              {visibleActiveState && (
+                <div>
+                  <p>{visibleActiveState.entry.description}</p>
+                  <p>Applied progressions: {visibleActiveState.applied_progression_ids.join(', ') || 'None'}</p>
+                </div>
+              )}
+            </section>
+          </>
+        )}
+
+        {error && <p role="alert">{error}</p>}
+      </div>
+    </section>
+  )
+}
