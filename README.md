@@ -30,6 +30,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 8. `docs/06_api_contract.md`
 9. `docs/07_frontend_editor.md`
 10. `docs/08_testing_acceptance.md`
+11. `docs/09_milestone_0_task_prompt.md`
 
 Then implement **Milestone 0 only** unless the user explicitly asks for a later milestone.
 
@@ -66,3 +67,39 @@ Milestone 0 creates a runnable local skeleton:
 - Health/status endpoint works.
 - Tests exist before code for the milestone behavior.
 
+## Development
+
+Requirements:
+
+- Go 1.26 or newer
+- Node.js 22 or newer
+- Git
+
+Install frontend dependencies and run all checks:
+
+```bash
+cd web && npm install && cd ..
+make check
+```
+
+Run the backend and frontend in separate terminals:
+
+```bash
+make dev-backend
+make dev-frontend
+```
+
+The API listens on `127.0.0.1:8080`. Vite proxies `/api` requests to it.
+
+## Milestone 0 package map
+
+- `cmd/storywork`: process startup and graceful shutdown only.
+- `internal/app`: production dependency composition.
+- `internal/api`: HTTP transport and JSON validation.
+- `internal/project`: project creation/opening orchestration.
+- `internal/gitstore`: Git command adapter.
+- `internal/index`: rebuildable SQLite index adapter.
+- `templates`: embedded canonical starter files.
+- `web`: React/Vite local UI.
+
+Working implementation plans belong in `.plans/`, which is ignored by Git. Product decisions and durable behavior belong in `docs/`.

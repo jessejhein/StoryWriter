@@ -17,12 +17,23 @@ Do not implement later milestones except where a tiny stub is needed to keep the
 5. Project creation writes starter canonical files:
    - `project.yaml`
    - `outline.yaml`
-   - starter directories
+   - starter directories from the storage model:
+     - `arcs/`
+     - `chapters/`
+     - `scenes/`
+     - `codex/`
+     - `progressions/`
+     - `agents/`
+     - `styles/`
+     - `imports/raw/`
+     - `imports/processed/`
+     - `.storywork/tmp/`
    - starter built-in agent/style templates if simple enough
 6. Project creation initializes Git.
-7. Project creation creates `.storywork/index.sqlite`.
-8. Project opening validates/rebuilds index.
-9. `make check` runs backend tests and frontend checks that exist.
+7. Project creation records an initial Git commit for the starter files.
+8. Project creation creates `.storywork/index.sqlite`.
+9. Project opening validates/rebuilds index.
+10. `make check` runs backend tests and frontend checks that exist.
 
 ## Do first
 
@@ -84,4 +95,3 @@ make check
 ```
 
 If frontend checks are not wired yet, `make check` may run only backend commands, but include clear TODO comments in the Makefile.
-

@@ -38,6 +38,7 @@ go.work.sum
 
 # dependencies
 /node_modules
+node_modules/
 /.pnp
 .pnp.js
 
@@ -50,6 +51,7 @@ go.work.sum
 
 # production
 /build
+web/dist/
 
 # misc
 .DS_Store
