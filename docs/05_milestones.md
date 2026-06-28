@@ -119,7 +119,7 @@ Write and save scene prose.
 - As an author, I can use Vim keybindings.
 - As an author, edits save to the scene Markdown file.
 - As an author, I can see unsaved/saved status.
-- As an author, each accepted save can create a lightweight Git checkpoint or checkpoint batch.
+- As an author, each explicit successful save creates exactly one lightweight Git checkpoint.
 
 ### TDD focus
 

@@ -70,8 +70,13 @@ Manual:
 
 - Load scene Markdown.
 - Save scene Markdown.
-- Preserve YAML front matter.
+- Edit and preserve the supported YAML front matter fields.
 - Reload after save.
+- Reject stale revisions without overwriting a newer scene.
+- Reject dirty worktrees without changing canonical files or Git history.
+- Roll back the scene and index when checkpoint creation fails.
+- Create exactly one Git checkpoint per successful explicit save.
+- Show loading, dirty, saving, saved, conflict, and error states in the editor.
 - Vim mode manual smoke test.
 
 ### Milestone 3

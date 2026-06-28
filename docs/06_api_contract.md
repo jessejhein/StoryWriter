@@ -147,12 +147,32 @@ All errors retain the existing JSON shape: `{"error":"useful message"}`.
 
 ## Scenes
 
+Scene routes operate on the active project and use stable scene IDs. See
+`docs/11_milestone_2_task_prompt.md` for the complete Milestone 2 contract.
+
 ```http
 GET /api/scenes/{scene_id}
 PUT /api/scenes/{scene_id}
 ```
 
-Save request:
+Load response:
+
+```json
+{
+  "id": "scn_0123456789abcdef0123",
+  "chapter_id": "ch_0123456789abcdef0123",
+  "title": "The Duel",
+  "frontmatter": {
+    "pov": "Luke",
+    "status": "draft",
+    "exclude_from_ai": false
+  },
+  "markdown": "Scene prose here...",
+  "revision": "sha256:7d6b9b5f..."
+}
+```
+
+Save request uses the revision returned by the most recent load or save:
 
 ```json
 {
@@ -163,9 +183,14 @@ Save request:
     "exclude_from_ai": false
   },
   "markdown": "Scene prose here...",
-  "checkpoint": true
+  "expected_revision": "sha256:7d6b9b5f..."
 }
 ```
+
+A successful save returns the same shape as the load response with the new
+revision. Every successful explicit save creates exactly one Git commit. A stale
+`expected_revision` returns `409 Conflict` without changing files, the index, or
+Git history.
 
 ## Codex
 

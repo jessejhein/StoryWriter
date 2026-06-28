@@ -32,6 +32,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 10. `docs/08_testing_acceptance.md`
 11. `docs/09_milestone_0_task_prompt.md`
 12. `docs/10_milestone_1_task_prompt.md`
+13. `docs/11_milestone_2_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -71,8 +72,9 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Next implementation target
 
-Milestone 1 adds canonical arc, chapter, and scene structure plus the basic outline
-UI. Its implementation-ready handoff is `docs/10_milestone_1_task_prompt.md`.
+Milestone 2 adds the Vim-friendly scene editor, strict scene load/save behavior,
+revision conflict protection, and one Git checkpoint per explicit save. Its
+implementation-ready handoff is `docs/11_milestone_2_task_prompt.md`.
 
 ## Development
 
