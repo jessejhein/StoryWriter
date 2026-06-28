@@ -126,7 +126,7 @@ Write and save scene prose.
 - scene parse/write logic,
 - save endpoint,
 - frontend editor state,
-- manual acceptance tests for Vim editing.
+- automated Vim extension regression coverage.
 
 ### Done when
 

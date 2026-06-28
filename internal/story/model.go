@@ -33,6 +33,8 @@ var (
 	ErrNoSceneChanges  = errors.New("scene save has no changes")
 )
 
+var revisionPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 var idPatterns = map[string]*regexp.Regexp{
 	"arc":     regexp.MustCompile(`^arc_[0-9a-f]{20}$`),
 	"chapter": regexp.MustCompile(`^ch_[0-9a-f]{20}$`),
@@ -144,7 +146,7 @@ func ValidateSceneStatus(value string) (string, error) {
 
 // ValidateRevision validates the opaque SHA-256 revision token shape.
 func ValidateRevision(value string) error {
-	if !regexp.MustCompile(`^sha256:[0-9a-f]{64}$`).MatchString(value) {
+	if !revisionPattern.MatchString(value) {
 		return fmt.Errorf("revision %q is invalid: %w", value, ErrInvalidRevision)
 	}
 	return nil

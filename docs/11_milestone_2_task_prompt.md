@@ -486,9 +486,9 @@ Editor requirements:
 - The UI must remain keyboard operable. CodeMirror Vim behavior does not replace
   accessible buttons and form labels.
 
-Do not test CodeMirror’s own Vim implementation. Automated tests verify that the
-editor is configured with the Vim extension; one manual acceptance test verifies
-real insert/normal mode behavior.
+Do not re-test the whole CodeMirror Vim package. Automated tests should verify
+that the editor is configured with the Vim extension and that one narrow
+real-extension regression still accepts a normal-mode Vim command.
 
 ## Package responsibilities
 
@@ -745,8 +745,8 @@ Do not leave background processes running.
 Milestone 2 is done only when:
 
 - every requirement M2-R01 through M2-R17 is implemented or directly verified,
-- every BDD scenario above has automated coverage except the real Vim keystroke
-  behavior, which has the required manual smoke test,
+- every BDD scenario above has automated coverage, including a narrow real Vim
+  command regression test for the editor extension,
 - all new test files and test cases follow the traceability format,
 - scene saves preserve immutable identity and never silently overwrite stale or
   dirty canonical state,

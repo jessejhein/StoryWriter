@@ -333,7 +333,7 @@ func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSce
 		filepath.ToSlash(filepath.Join("scenes", sceneID+".md")): sceneBytes,
 	})
 	if err != nil {
-		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, nil, err)
+		return SceneDocument{}, err
 	}
 	if err := s.index.Rebuild(ctx, current.Path); err != nil {
 		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
@@ -341,11 +341,9 @@ func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSce
 	if err := s.git.CommitAll(ctx, current.Path, "Edit scene "+sceneID); err != nil {
 		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
 	}
-	reloaded, err := s.files.LoadScene(ctx, current.Path, sceneID)
-	if err != nil {
-		return SceneDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
-	return reloaded, nil
+	nextScene.Revision = ComputeRevision(sceneBytes)
+	nextScene.Canonical = append([]byte(nil), sceneBytes...)
+	return nextScene, nil
 }
 
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {

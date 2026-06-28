@@ -77,7 +77,7 @@ Manual:
 - Roll back the scene and index when checkpoint creation fails.
 - Create exactly one Git checkpoint per successful explicit save.
 - Show loading, dirty, saving, saved, conflict, and error states in the editor.
-- Vim mode manual smoke test.
+- Verify the real Vim extension handles a normal-mode edit command.
 
 ### Milestone 3
 

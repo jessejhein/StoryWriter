@@ -44,13 +44,6 @@ func TestSaveScenePersistsCanonicalEditAndCheckpoint(t *testing.T) {
 		&fakeIDGenerator{},
 	)
 
-	savedScene := files.scene
-	savedScene.Title = "The Duel Revised"
-	savedScene.FrontMatter.Status = "revised"
-	savedScene.Markdown = "Revised.\n"
-	savedScene.Revision = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-	files.reloadedScene = &savedScene
-
 	result, err := service.SaveScene(context.Background(), "scn_00000000000000000001", SaveSceneRequest{
 		Title: "The Duel Revised",
 		FrontMatter: SceneFrontMatter{
@@ -73,7 +66,10 @@ func TestSaveScenePersistsCanonicalEditAndCheckpoint(t *testing.T) {
 	if index.rebuildCalls != 1 {
 		t.Fatalf("index rebuild calls = %d, want 1", index.rebuildCalls)
 	}
-	if result.Title != "The Duel Revised" || result.Revision != savedScene.Revision {
+	if files.loadSceneCalls != 1 {
+		t.Fatalf("load scene calls = %d, want 1", files.loadSceneCalls)
+	}
+	if result.Title != "The Duel Revised" || result.Revision != ComputeRevision([]byte("new")) {
 		t.Fatalf("result = %#v", result)
 	}
 	if result.ID != "scn_00000000000000000001" || result.ChapterID != "ch_00000000000000000001" {
