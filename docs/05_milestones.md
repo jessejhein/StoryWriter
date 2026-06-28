@@ -78,7 +78,7 @@ Then I receive status ok and version information
 
 ### Goal
 
-Create/edit the story hierarchy using canonical text files.
+Create and reorder the story hierarchy using canonical text files.
 
 ### Stories
 
@@ -86,6 +86,9 @@ Create/edit the story hierarchy using canonical text files.
 - As an author, I can view a tree of arcs -> chapters -> scenes.
 - As an author, I can reorder scenes and chapters while stable IDs remain unchanged.
 - As an author, every structural change creates a Git checkpoint.
+
+The implementation contract, BDD cases, schemas, error behavior, and ordered TDD
+work are defined in `docs/10_milestone_1_task_prompt.md`.
 
 ### TDD focus
 
@@ -98,6 +101,9 @@ Create/edit the story hierarchy using canonical text files.
 ### Done when
 
 The user can create a simple outline in UI/API and see files written under `arcs/`, `chapters/`, `scenes/`, and `outline.yaml`.
+
+Renaming, deleting, reparenting, and editing scene prose are not part of this
+milestone.
 
 ---
 
@@ -306,4 +312,3 @@ Make the app daily-usable for one author.
 ### Done when
 
 The full MVP success criteria from `00_project_brief.md` are satisfied.
-

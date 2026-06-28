@@ -60,6 +60,11 @@ Manual:
 - Display labels update after reorder.
 - Files serialize/deserialize correctly.
 - Git checkpoint occurs after structural change.
+- A missing active project returns 409.
+- Invalid reorder permutations leave files and Git history unchanged.
+- A dirty project worktree blocks structural mutation.
+- A failed checkpoint restores the pre-request canonical files.
+- The outline UI renders nesting and sends stable IDs when creating/reordering.
 
 ### Milestone 2
 
@@ -143,4 +148,3 @@ Manual:
 16. Export Markdown.
 
 Pass only if the author remains in control at every AI mutation point.
-

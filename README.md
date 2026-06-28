@@ -31,8 +31,10 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 9. `docs/07_frontend_editor.md`
 10. `docs/08_testing_acceptance.md`
 11. `docs/09_milestone_0_task_prompt.md`
+12. `docs/10_milestone_1_task_prompt.md`
 
-Then implement **Milestone 0 only** unless the user explicitly asks for a later milestone.
+Then implement only the milestone the user assigned. If the user did not assign one,
+stop after identifying the next incomplete milestone and ask before coding.
 
 ## Local Go rules
 
@@ -54,7 +56,7 @@ If those rules conflict with these docs, prefer the local Go rules for coding st
 - Credentials: OS/browser/provider credential mechanisms where possible; never store provider secrets in project folders.
 - Deployment: local dev first; Docker Compose may be added, but the app should also run directly.
 
-## First implementation target
+## Implemented foundation
 
 Milestone 0 creates a runnable local skeleton:
 
@@ -66,6 +68,11 @@ Milestone 0 creates a runnable local skeleton:
 - SQLite index is created under `.storywork/` and can be rebuilt.
 - Health/status endpoint works.
 - Tests exist before code for the milestone behavior.
+
+## Next implementation target
+
+Milestone 1 adds canonical arc, chapter, and scene structure plus the basic outline
+UI. Its implementation-ready handoff is `docs/10_milestone_1_task_prompt.md`.
 
 ## Development
 

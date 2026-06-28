@@ -57,6 +57,11 @@ Request:
 
 ## Outline
 
+Outline routes operate on the active project. A successful create/open project
+request sets the active project for this backend process. The active project is
+not persisted across backend restarts. An outline request without an active
+project returns `409 Conflict`.
+
 ```http
 GET /api/outline
 POST /api/arcs
@@ -64,6 +69,55 @@ POST /api/chapters
 POST /api/scenes
 POST /api/outline/reorder
 ```
+
+Create requests:
+
+```json
+{"title":"Act One"}
+```
+
+```json
+{"arc_id":"arc_0123456789abcdef0123","title":"Arrival"}
+```
+
+```json
+{"chapter_id":"ch_0123456789abcdef0123","title":"The Station"}
+```
+
+Each create response is `201 Created`. Reorder returns `200 OK`. Both return the
+changed ID when applicable and the complete outline view:
+
+```json
+{
+  "changed_id": "scn_0123456789abcdef0123",
+  "outline": {
+    "version": 1,
+    "arcs": [
+      {
+        "id": "arc_0123456789abcdef0123",
+        "title": "Act One",
+        "display_label": "Arc 1",
+        "chapters": [
+          {
+            "id": "ch_0123456789abcdef0123",
+            "title": "Arrival",
+            "display_label": "Chapter 1.1",
+            "scenes": [
+              {
+                "id": "scn_0123456789abcdef0123",
+                "title": "The Station",
+                "display_label": "Scene 1.1.1"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`GET /api/outline` returns the `outline` object itself, not the mutation wrapper.
 
 Reorder request should use stable IDs, not display numbers.
 
@@ -74,6 +128,22 @@ Reorder request should use stable IDs, not display numbers.
   "ordered_child_ids": ["scn_0002", "scn_0001"]
 }
 ```
+
+`parent_type` is `arc` when reordering chapters and `chapter` when reordering
+scenes. `ordered_child_ids` must be an exact permutation of the parent's existing
+children: no missing, duplicate, foreign, or unknown IDs. Reordering arcs and
+moving a child to another parent are out of scope for Milestone 1.
+
+Milestone 1 status rules:
+
+- `400 Bad Request`: malformed JSON, unknown fields, invalid title, invalid ID
+  shape, or an invalid reorder permutation.
+- `404 Not Found`: a well-formed parent ID does not exist.
+- `409 Conflict`: no active project, dirty story-project Git worktree, or a
+  checkpoint conflict.
+- `500 Internal Server Error`: file, index, Git executable, or rollback failure.
+
+All errors retain the existing JSON shape: `{"error":"useful message"}`.
 
 ## Scenes
 
@@ -208,4 +278,3 @@ POST /api/branches/{branch_name}/discard
 ```
 
 MVP branch promotion can be manual/coarse. Do not build complex merge UI first.
-

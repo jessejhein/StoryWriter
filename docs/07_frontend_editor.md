@@ -23,7 +23,8 @@ Reasons:
 
 - Tree/list: arcs -> chapters -> scenes.
 - Create arc/chapter/scene.
-- Reorder via drag/drop.
+- Reorder chapters/scenes with keyboard-operable controls.
+- Drag/drop may be added as an enhancement, not as the only reorder control.
 - Open selected scene.
 
 ### Scene editor
@@ -95,4 +96,3 @@ Must support:
 - collaborative cursors,
 - command palette unless trivial,
 - Firenvim integration.
-

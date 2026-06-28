@@ -72,7 +72,6 @@ Use Markdown with YAML front matter.
 id: scn_0001
 title: The Duel
 chapter_id: ch_0001
-position: 10
 pov: Luke
 status: draft
 exclude_from_ai: false
@@ -80,6 +79,48 @@ exclude_from_ai: false
 
 Scene prose starts here.
 ```
+
+`outline.yaml` is the only ordering authority. Do not copy a mutable numeric
+position into arc, chapter, or scene files. Display labels such as "Chapter 2"
+are derived from the current outline order and are not canonical state.
+
+## Milestone 1 structure file formats
+
+Arc files use this exact schema:
+
+```yaml
+version: 1
+id: arc_00000000000000000000
+title: The First Crossing
+```
+
+Chapter files use this exact schema:
+
+```yaml
+version: 1
+id: ch_00000000000000000000
+arc_id: arc_00000000000000000000
+title: The Map Room
+```
+
+New scene files contain YAML front matter and an empty Markdown body:
+
+```markdown
+---
+id: scn_00000000000000000000
+title: The Locked Cabinet
+chapter_id: ch_00000000000000000000
+pov: ""
+status: draft
+exclude_from_ai: false
+---
+
+```
+
+The IDs above demonstrate shape only. Production IDs are random and stable;
+tests inject deterministic IDs. Structure readers must reject duplicate IDs,
+missing referenced files, parent mismatches, unsupported versions, and malformed
+YAML with a useful error. Reordering changes only `outline.yaml`.
 
 ## Outline file
 
@@ -199,4 +240,3 @@ CREATE TABLE files (
 ```
 
 Later milestones add story, Codex, progressions, imports, and agent run logs.
-

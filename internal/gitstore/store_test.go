@@ -11,6 +11,12 @@ import (
 	"storywork/internal/gitstore"
 )
 
+// BDD trace:
+// - Requirement: Milestone 0, Story 0.1, create project folder.
+// - Scenario: given an empty directory path, when I create a project, then the
+//   app initializes a Git repository and records a first commit.
+// - Test purpose: verify the Git adapter can initialize a repository, commit
+//   staged project files, and report the repository as valid.
 func TestStoreInitializesAndCommitsRepository(t *testing.T) {
 	t.Parallel()
 
