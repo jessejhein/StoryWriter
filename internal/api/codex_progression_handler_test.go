@@ -49,9 +49,12 @@ func TestCodexProgressionRoutesValidateJSONAndMapStatuses(t *testing.T) {
 		name   string
 		err    error
 		status int
+		body   string
 	}{
-		{name: "invalid payload", err: codex.ErrInvalidProgression, status: http.StatusBadRequest},
-		{name: "stale revision", err: story.ErrStaleRevision, status: http.StatusConflict},
+		{name: "missing progressions", body: `{"expected_revision":null}`, status: http.StatusBadRequest},
+		{name: "missing expected revision", body: `{"progressions":[]}`, status: http.StatusBadRequest},
+		{name: "invalid payload", body: body, err: codex.ErrInvalidProgression, status: http.StatusBadRequest},
+		{name: "stale revision", body: body, err: story.ErrStaleRevision, status: http.StatusConflict},
 	}
 	for _, testCase := range cases {
 		testCase := testCase
@@ -61,7 +64,7 @@ func TestCodexProgressionRoutesValidateJSONAndMapStatuses(t *testing.T) {
 			response := httptest.NewRecorder()
 			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{saveProgressionsErr: testCase.err}, "test").ServeHTTP(
 				response,
-				httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123/progressions", strings.NewReader(body)),
+				httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123/progressions", strings.NewReader(testCase.body)),
 			)
 			if response.Code != testCase.status {
 				t.Fatalf("status = %d, want %d", response.Code, testCase.status)

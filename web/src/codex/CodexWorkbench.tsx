@@ -67,6 +67,16 @@ function normalizeProgressionRows(rows: ProgressionRow[]) {
   return JSON.stringify(rows)
 }
 
+function moveItem<T>(items: T[], from: number, to: number): T[] {
+  if (to < 0 || to >= items.length || from === to) {
+    return items
+  }
+  const next = [...items]
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item)
+  return next
+}
+
 function entryToDraft(entry: CodexEntry): EntryDraft {
   return {
     id: entry.id,
@@ -170,6 +180,18 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   const dirty = entryDirty || progressionDirty
   const visibleActiveState = selectedEntryID && activeSceneID ? activeState : null
 
+  function applyLoadedEntry(entry: CodexEntry, document: { progressions: CodexProgression[]; revision: string | null }) {
+    const draft = entryToDraft(entry)
+    setEntryDraft(draft)
+    setSavedEntrySnapshot(normalizeDraft(draft))
+    const rows = progressionDocumentToRows(document.progressions)
+    setProgressions(rows)
+    setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
+    setProgressionRevision(document.revision)
+    setEntryStatus('Saved')
+    setProgressionStatus('Saved')
+  }
+
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
@@ -205,34 +227,66 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   }, [project.project_id])
 
   useEffect(() => {
+    if (!selectedEntryID) {
+      return
+    }
+    const entryID = selectedEntryID
+    let cancelled = false
+    async function loadSelectedEntry() {
+      try {
+        const [entry, document] = await Promise.all([getCodexEntry(entryID), getCodexProgressions(entryID)])
+        if (cancelled) {
+          return
+        }
+        applyLoadedEntry(entry, document)
+      } catch (requestError) {
+        if (!cancelled) {
+          setError(requestError instanceof Error ? requestError.message : 'Request failed')
+        }
+      }
+    }
+    void loadSelectedEntry()
+    return () => {
+      cancelled = true
+    }
+  }, [selectedEntryID])
+
+  useEffect(() => {
     if (!selectedEntryID || !activeSceneID) {
       return
     }
+    let cancelled = false
     void getCodexActiveState(selectedEntryID, activeSceneID)
-      .then((nextActiveState) => setActiveState(nextActiveState))
-      .catch(() => setActiveState(null))
+      .then((nextActiveState) => {
+        if (cancelled) {
+          return
+        }
+        setActiveState(nextActiveState)
+      })
+      .catch((requestError) => {
+        if (cancelled) {
+          return
+        }
+        setActiveState(null)
+        setError(requestError instanceof Error ? requestError.message : 'Request failed')
+      })
+    return () => {
+      cancelled = true
+    }
   }, [selectedEntryID, activeSceneID])
 
-  async function selectEntry(entryID: string) {
+  function updateProgressionRows(next: ProgressionRow[]) {
+    setProgressions(next)
+    setProgressionStatus(normalizeProgressionRows(next) === savedProgressionsSnapshot ? 'Saved' : 'Unsaved changes')
+  }
+
+  function selectEntry(entryID: string) {
     if (dirty && selectedEntryID !== entryID && !window.confirm('Discard the current Codex draft?')) {
       return
     }
     setError('')
+    setActiveState(null)
     setSelectedEntryID(entryID)
-    try {
-      const [entry, document] = await Promise.all([getCodexEntry(entryID), getCodexProgressions(entryID)])
-      const draft = entryToDraft(entry)
-      setEntryDraft(draft)
-      setSavedEntrySnapshot(normalizeDraft(draft))
-      const rows = progressionDocumentToRows(document.progressions)
-      setProgressions(rows)
-      setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
-      setProgressionRevision(document.revision)
-      setEntryStatus('Saved')
-      setProgressionStatus('Saved')
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'Request failed')
-    }
   }
 
   function beginNewEntry() {
@@ -329,8 +383,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   function updateProgression(index: number, field: keyof ProgressionRow, value: string) {
     const next = [...progressions]
     next[index] = { ...next[index], [field]: value }
-    setProgressions(next)
-    setProgressionStatus(normalizeProgressionRows(next) === savedProgressionsSnapshot ? 'Saved' : 'Unsaved changes')
+    updateProgressionRows(next)
   }
 
   function updateProgressionMetadata(index: number, metadataIndex: number, field: keyof MetadataRow, value: string) {
@@ -338,8 +391,41 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
     const metadata = [...next[index].metadata]
     metadata[metadataIndex] = { ...metadata[metadataIndex], [field]: value }
     next[index] = { ...next[index], metadata }
-    setProgressions(next)
-    setProgressionStatus(normalizeProgressionRows(next) === savedProgressionsSnapshot ? 'Saved' : 'Unsaved changes')
+    updateProgressionRows(next)
+  }
+
+  function moveAlias(index: number, offset: number) {
+    updateDraft({ ...entryDraft, aliases: moveItem(entryDraft.aliases, index, index + offset) })
+  }
+
+  function removeAlias(index: number) {
+    updateDraft({ ...entryDraft, aliases: entryDraft.aliases.filter((_, currentIndex) => currentIndex !== index) })
+  }
+
+  function moveTag(index: number, offset: number) {
+    updateDraft({ ...entryDraft, tags: moveItem(entryDraft.tags, index, index + offset) })
+  }
+
+  function removeTag(index: number) {
+    updateDraft({ ...entryDraft, tags: entryDraft.tags.filter((_, currentIndex) => currentIndex !== index) })
+  }
+
+  function addProgression() {
+    updateProgressionRows([...progressions, { sceneID: scenes[0]?.id ?? '', timing: 'after', description: '', metadata: [] }])
+  }
+
+  function moveProgression(index: number, offset: number) {
+    updateProgressionRows(moveItem(progressions, index, index + offset))
+  }
+
+  function removeProgression(index: number) {
+    updateProgressionRows(progressions.filter((_, currentIndex) => currentIndex !== index))
+  }
+
+  function addProgressionMetadata(index: number) {
+    const next = [...progressions]
+    next[index] = { ...next[index], metadata: [...next[index].metadata, { key: '', value: '' }] }
+    updateProgressionRows(next)
   }
 
   if (loading) {
@@ -416,10 +502,17 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
             <button type="button" onClick={() => updateDraft({ ...entryDraft, aliases: [...entryDraft.aliases, ''] })}>Add alias</button>
           </div>
           {entryDraft.aliases.map((alias, index) => (
-            <label key={`alias-${index}`}>
-              Alias {index + 1}
-              <input value={alias} onChange={(event) => updateAlias(index, event.target.value)} />
-            </label>
+            <div key={`alias-${index}`} className="metadata-row">
+              <label>
+                Alias {index + 1}
+                <input value={alias} onChange={(event) => updateAlias(index, event.target.value)} />
+              </label>
+              <div>
+                <button type="button" onClick={() => moveAlias(index, -1)} disabled={index === 0}>Move alias {index + 1} up</button>
+                <button type="button" onClick={() => moveAlias(index, 1)} disabled={index === entryDraft.aliases.length - 1}>Move alias {index + 1} down</button>
+                <button type="button" onClick={() => removeAlias(index)}>Remove alias {index + 1}</button>
+              </div>
+            </div>
           ))}
         </div>
 
@@ -429,10 +522,17 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
             <button type="button" onClick={() => updateDraft({ ...entryDraft, tags: [...entryDraft.tags, ''] })}>Add tag</button>
           </div>
           {entryDraft.tags.map((tag, index) => (
-            <label key={`tag-${index}`}>
-              Tag {index + 1}
-              <input value={tag} onChange={(event) => updateTag(index, event.target.value)} />
-            </label>
+            <div key={`tag-${index}`} className="metadata-row">
+              <label>
+                Tag {index + 1}
+                <input value={tag} onChange={(event) => updateTag(index, event.target.value)} />
+              </label>
+              <div>
+                <button type="button" onClick={() => moveTag(index, -1)} disabled={index === 0}>Move tag {index + 1} up</button>
+                <button type="button" onClick={() => moveTag(index, 1)} disabled={index === entryDraft.tags.length - 1}>Move tag {index + 1} down</button>
+                <button type="button" onClick={() => removeTag(index)}>Remove tag {index + 1}</button>
+              </div>
+            </div>
           ))}
         </div>
 
@@ -464,7 +564,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
                   <span>{progressionStatus}</span>
                   <button
                     type="button"
-                    onClick={() => setProgressions([...progressions, { sceneID: scenes[0]?.id ?? '', timing: 'after', description: '', metadata: [] }])}
+                    onClick={addProgression}
                   >
                     Add progression
                   </button>
@@ -475,6 +575,14 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
               </header>
               {progressions.map((progression, index) => (
                 <div key={progression.id ?? `new-${index}`} className="progression-row">
+                  <div className="section-heading">
+                    <h5>Progression {index + 1}</h5>
+                    <div>
+                      <button type="button" onClick={() => moveProgression(index, -1)} disabled={index === 0}>Move progression {index + 1} up</button>
+                      <button type="button" onClick={() => moveProgression(index, 1)} disabled={index === progressions.length - 1}>Move progression {index + 1} down</button>
+                      <button type="button" onClick={() => removeProgression(index)}>Remove progression {index + 1}</button>
+                    </div>
+                  </div>
                   <label>
                     Scene
                     <select value={progression.sceneID} onChange={(event) => updateProgression(index, 'sceneID', event.target.value)}>
@@ -499,12 +607,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
                       <h5>Progression metadata</h5>
                       <button
                         type="button"
-                        onClick={() => {
-                          const next = [...progressions]
-                          next[index] = { ...next[index], metadata: [...next[index].metadata, { key: '', value: '' }] }
-                          setProgressions(next)
-                          setProgressionStatus(normalizeProgressionRows(next) === savedProgressionsSnapshot ? 'Saved' : 'Unsaved changes')
-                        }}
+                        onClick={() => addProgressionMetadata(index)}
                       >
                         Add progression metadata
                       </button>

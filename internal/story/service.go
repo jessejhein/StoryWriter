@@ -601,7 +601,7 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if len(progressions) == 0 && currentDocument.Revision == nil {
 		return codex.ProgressionDocument{}, codex.ErrNoChanges
 	}
-	progressions, err = s.assignProgressionIDs(progressions)
+	progressions, err = s.reconcileProgressionIDs(currentDocument.Progressions, progressions)
 	if err != nil {
 		return codex.ProgressionDocument{}, err
 	}
@@ -688,11 +688,30 @@ func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, m
 	return MutationResult{ChangedID: changedID, Outline: reloaded}, nil
 }
 
-func (s *Service) assignProgressionIDs(progressions []codex.Progression) ([]codex.Progression, error) {
-	next := append([]codex.Progression(nil), progressions...)
+func (s *Service) reconcileProgressionIDs(current, requested []codex.Progression) ([]codex.Progression, error) {
+	currentByID := make(map[string]codex.Progression, len(current))
+	currentByAnchor := make(map[string]codex.Progression, len(current))
+	for _, progression := range current {
+		currentByID[progression.ID] = progression
+		currentByAnchor[progressionAnchorKey(progression)] = progression
+	}
+
+	next := append([]codex.Progression(nil), requested...)
+	claimedCurrentIDs := make(map[string]struct{}, len(currentByID))
 	for index := range next {
 		if next[index].ID != "" {
+			if _, ok := currentByID[next[index].ID]; !ok {
+				return nil, fmt.Errorf("progression ID %q must be omitted for new rows: %w", next[index].ID, codex.ErrInvalidProgression)
+			}
+			claimedCurrentIDs[next[index].ID] = struct{}{}
 			continue
+		}
+		if matched, ok := currentByAnchor[progressionAnchorKey(next[index])]; ok {
+			if _, claimed := claimedCurrentIDs[matched.ID]; !claimed {
+				next[index].ID = matched.ID
+				claimedCurrentIDs[matched.ID] = struct{}{}
+				continue
+			}
 		}
 		id, err := s.ids.Next(NodeKindProgression)
 		if err != nil {
@@ -701,6 +720,10 @@ func (s *Service) assignProgressionIDs(progressions []codex.Progression) ([]code
 		next[index].ID = id
 	}
 	return next, nil
+}
+
+func progressionAnchorKey(progression codex.Progression) string {
+	return progression.Anchor.ID + ":" + progression.Anchor.Timing
 }
 
 func (s *Service) rollbackMutation(ctx context.Context, projectPath string, rollback func() error, cause error) error {

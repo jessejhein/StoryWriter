@@ -388,9 +388,6 @@ func decodeStringMap(path, field string, node *yaml.Node) (map[string]string, er
 		}
 		return values, nil
 	}
-	if node.Kind == yaml.MappingNode && len(node.Content) == 0 {
-		return map[string]string{}, nil
-	}
 	return nil, fmt.Errorf("decode %s %s: expected mapping", path, field)
 }
 

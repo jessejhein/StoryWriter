@@ -82,6 +82,16 @@ beforeEach(() => {
   vi.mocked(api.getCodexActiveState).mockResolvedValue(activeState)
 })
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 test('loads an entry, saves progressions, refreshes active state, and guards dirty navigation', async () => {
   vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [entry] })
   vi.mocked(api.getCodexEntry).mockResolvedValue(entry)
@@ -128,4 +138,132 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
   fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
   expect(confirm).toHaveBeenCalled()
   expect(screen.getByLabelText('Name')).toHaveValue('Ben Kenobi')
+})
+
+test('supports remove and reorder controls for aliases, tags, and progressions', async () => {
+  const secondEntry: CodexEntry = {
+    ...entry,
+    aliases: ['Ben', 'General Kenobi'],
+    tags: ['mentor', 'jedi'],
+  }
+  vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [secondEntry] })
+  vi.mocked(api.getCodexEntry).mockResolvedValue(secondEntry)
+  vi.mocked(api.getCodexProgressions).mockResolvedValue({
+    entry_id: entry.id,
+    progressions: [{
+      id: 'prog_0123456789abcdef0123',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { description: 'First.' },
+    }, {
+      id: 'prog_0123456789abcdef0124',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0124', timing: 'before' },
+      changes: { description: 'Second.' },
+    }],
+    revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  })
+  vi.mocked(api.updateCodexEntry).mockResolvedValue(secondEntry)
+  vi.mocked(api.saveCodexProgressions).mockResolvedValue({
+    entry_id: entry.id,
+    progressions: [{
+      id: 'prog_0123456789abcdef0124',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0124', timing: 'before' },
+      changes: { description: 'Second.' },
+    }],
+    revision: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  })
+
+  render(<CodexWorkbench project={project} />)
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Obi-Wan Kenobi' }))
+  await waitFor(() => expect(screen.getByLabelText('Alias 2')).toHaveValue('General Kenobi'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move alias 2 up' }))
+  expect(screen.getByLabelText('Alias 1')).toHaveValue('General Kenobi')
+  fireEvent.click(screen.getByRole('button', { name: 'Remove alias 2' }))
+  expect(screen.queryByLabelText('Alias 2')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move tag 2 up' }))
+  expect(screen.getByLabelText('Tag 1')).toHaveValue('jedi')
+  fireEvent.click(screen.getByRole('button', { name: 'Remove tag 2' }))
+  expect(screen.queryByLabelText('Tag 2')).not.toBeInTheDocument()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Move progression 2 up' }))
+  expect(screen.getAllByLabelText('Progression description')[0]).toHaveValue('Second.')
+  fireEvent.click(screen.getByRole('button', { name: 'Remove progression 2' }))
+  expect(screen.getAllByLabelText('Progression description')).toHaveLength(1)
+
+  fireEvent.click(screen.getByRole('button', { name: 'Save progressions' }))
+  await waitFor(() => expect(api.saveCodexProgressions).toHaveBeenCalled())
+  expect(vi.mocked(api.saveCodexProgressions).mock.calls[0]?.[1]).toEqual({
+    progressions: [{
+      id: 'prog_0123456789abcdef0124',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0124', timing: 'before' },
+      changes: { description: 'Second.' },
+    }],
+    expected_revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  })
+})
+
+test('ignores stale entry and active-state responses after switching selection', async () => {
+  const firstEntry = entry
+  const secondEntry: CodexEntry = {
+    ...entry,
+    id: 'char_0123456789abcdef0999',
+    name: 'Leia Organa',
+    aliases: ['Leia'],
+    tags: ['leader'],
+    description: 'Princess.',
+    metadata: { status: 'alive', role: 'leader' },
+    revision: 'sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+  }
+  const firstEntryLoad = deferred<CodexEntry>()
+  const firstProgressionsLoad = deferred<CodexProgressionDocument>()
+  const secondEntryLoad = deferred<CodexEntry>()
+  const secondProgressionsLoad = deferred<CodexProgressionDocument>()
+  const firstActiveLoad = deferred<CodexActiveState>()
+  const secondActiveLoad = deferred<CodexActiveState>()
+
+  vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [firstEntry, secondEntry] })
+  vi.mocked(api.getCodexEntry).mockImplementation((entryID: string) => {
+    return entryID === firstEntry.id ? firstEntryLoad.promise : secondEntryLoad.promise
+  })
+  vi.mocked(api.getCodexProgressions).mockImplementation((entryID: string) => {
+    return entryID === firstEntry.id ? firstProgressionsLoad.promise : secondProgressionsLoad.promise
+  })
+  vi.mocked(api.getCodexActiveState).mockImplementation((entryID: string) => {
+    return entryID === firstEntry.id ? firstActiveLoad.promise : secondActiveLoad.promise
+  })
+
+  render(<CodexWorkbench project={project} />)
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Obi-Wan Kenobi' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Leia Organa' }))
+
+  secondEntryLoad.resolve(secondEntry)
+  secondProgressionsLoad.resolve(progressions)
+  await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Leia Organa'))
+
+  secondActiveLoad.resolve({
+    ...activeState,
+    entry: {
+      ...activeState.entry,
+      id: secondEntry.id,
+      name: secondEntry.name,
+      aliases: secondEntry.aliases,
+      tags: secondEntry.tags,
+      description: secondEntry.description,
+      metadata: secondEntry.metadata,
+    },
+  })
+  await waitFor(() => expect(screen.getByText('leader')).toBeInTheDocument())
+
+  firstEntryLoad.resolve(firstEntry)
+  firstProgressionsLoad.resolve(progressions)
+  firstActiveLoad.resolve(activeState)
+
+  await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Leia Organa'))
+  expect(screen.queryByDisplayValue('Obi-Wan Kenobi')).not.toBeInTheDocument()
+  expect(screen.getByText('leader')).toBeInTheDocument()
 })

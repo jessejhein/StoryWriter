@@ -3,6 +3,8 @@ package story
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 
 	"storywork/internal/codex"
 	"storywork/internal/project"
@@ -218,7 +220,32 @@ func (s *fakeFileStore) MarshalProgressions(document codex.ProgressionDocument) 
 	if s.progressionBytes != nil {
 		return s.progressionBytes, nil
 	}
-	return []byte("progressions"), nil
+	var builder strings.Builder
+	builder.WriteString(document.EntryID)
+	for _, progression := range document.Progressions {
+		builder.WriteString("|")
+		builder.WriteString(progression.ID)
+		builder.WriteString("|")
+		builder.WriteString(progression.Anchor.ID)
+		builder.WriteString("|")
+		builder.WriteString(progression.Anchor.Timing)
+		builder.WriteString("|")
+		if progression.Changes.Description != nil {
+			builder.WriteString(*progression.Changes.Description)
+		}
+		keys := make([]string, 0, len(progression.Changes.Metadata))
+		for key := range progression.Changes.Metadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			builder.WriteString("|")
+			builder.WriteString(key)
+			builder.WriteString("=")
+			builder.WriteString(progression.Changes.Metadata[key])
+		}
+	}
+	return []byte(builder.String()), nil
 }
 
 func (s *fakeFileStore) WriteFiles(_ context.Context, _ string, files map[string][]byte) (func() error, error) {

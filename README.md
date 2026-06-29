@@ -76,7 +76,8 @@ Milestone 0 creates a runnable local skeleton:
 Milestones 0 through 3 are implemented. The app includes the local project
 foundation, canonical outline editing, the Vim-friendly scene editor with
 revision conflict protection and one Git checkpoint per explicit save, plus the
-Codex workbench with timeline progressions and active-state resolution.
+Codex workbench with strict progression validation, stable IDs, reorder/remove
+controls, and active-state resolution.
 
 ## Development
 

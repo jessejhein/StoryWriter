@@ -3,6 +3,7 @@ package api
 // handler.go defines the Storywork HTTP routes and JSON error-mapping policy.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,6 +61,11 @@ type StoryStore interface {
 	SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error)
 	// ResolveActiveCodexState resolves one entry as of a target scene.
 	ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error)
+}
+
+type requiredJSONField struct {
+	name      string
+	allowNull bool
 }
 
 // NewHandler creates the full local Storywork HTTP router for the current milestone set.
@@ -223,7 +229,14 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			Description string            `json:"description"`
 			Metadata    map[string]string `json:"metadata"`
 		}
-		if err := decodeJSONWithLimit(writer, request, &createRequest, 1<<20); err != nil {
+		if err := decodeJSONWithRequiredFields(writer, request, &createRequest, 1<<20,
+			requiredJSONField{name: "type"},
+			requiredJSONField{name: "name"},
+			requiredJSONField{name: "aliases"},
+			requiredJSONField{name: "tags"},
+			requiredJSONField{name: "description"},
+			requiredJSONField{name: "metadata"},
+		); err != nil {
 			status := http.StatusBadRequest
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
@@ -263,7 +276,14 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			Metadata         map[string]string `json:"metadata"`
 			ExpectedRevision string            `json:"expected_revision"`
 		}
-		if err := decodeJSONWithLimit(writer, request, &updateRequest, 1<<20); err != nil {
+		if err := decodeJSONWithRequiredFields(writer, request, &updateRequest, 1<<20,
+			requiredJSONField{name: "name"},
+			requiredJSONField{name: "aliases"},
+			requiredJSONField{name: "tags"},
+			requiredJSONField{name: "description"},
+			requiredJSONField{name: "metadata"},
+			requiredJSONField{name: "expected_revision"},
+		); err != nil {
 			status := http.StatusBadRequest
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
@@ -299,7 +319,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			Progressions     []codex.Progression `json:"progressions"`
 			ExpectedRevision *string             `json:"expected_revision"`
 		}
-		if err := decodeJSONWithLimit(writer, request, &updateRequest, 1<<20); err != nil {
+		if err := decodeJSONWithRequiredFields(writer, request, &updateRequest, 1<<20,
+			requiredJSONField{name: "progressions"},
+			requiredJSONField{name: "expected_revision", allowNull: true},
+		); err != nil {
 			status := http.StatusBadRequest
 			var maxBytesErr *http.MaxBytesError
 			if errors.As(err, &maxBytesErr) {
@@ -338,7 +361,26 @@ func decodeJSON(request *http.Request, target any) error {
 	return decodeJSONWithLimit(nil, request, target, 1<<20)
 }
 
+func decodeJSONWithRequiredFields(writer http.ResponseWriter, request *http.Request, target any, limit int64, requiredFields ...requiredJSONField) error {
+	body, err := readJSONBodyWithLimit(writer, request, limit)
+	if err != nil {
+		return err
+	}
+	if err := requireJSONFields(body, requiredFields...); err != nil {
+		return err
+	}
+	return decodeJSONBytes(body, target)
+}
+
 func decodeJSONWithLimit(writer http.ResponseWriter, request *http.Request, target any, limit int64) error {
+	body, err := readJSONBodyWithLimit(writer, request, limit)
+	if err != nil {
+		return err
+	}
+	return decodeJSONBytes(body, target)
+}
+
+func readJSONBodyWithLimit(writer http.ResponseWriter, request *http.Request, limit int64) ([]byte, error) {
 	defer request.Body.Close()
 	reader := io.Reader(request.Body)
 	if writer != nil {
@@ -346,7 +388,15 @@ func decodeJSONWithLimit(writer http.ResponseWriter, request *http.Request, targ
 	} else {
 		reader = io.LimitReader(request.Body, limit)
 	}
-	decoder := json.NewDecoder(reader)
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, fmt.Errorf("invalid JSON request: %w", err)
+	}
+	return body, nil
+}
+
+func decodeJSONBytes(body []byte, target any) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("invalid JSON request: %w", err)
@@ -356,6 +406,23 @@ func decodeJSONWithLimit(writer http.ResponseWriter, request *http.Request, targ
 			return errors.New("invalid JSON request: unexpected trailing JSON value")
 		}
 		return fmt.Errorf("invalid JSON request: %w", err)
+	}
+	return nil
+}
+
+func requireJSONFields(body []byte, requiredFields ...requiredJSONField) error {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return fmt.Errorf("invalid JSON request: %w", err)
+	}
+	for _, field := range requiredFields {
+		value, ok := fields[field.name]
+		if !ok {
+			return fmt.Errorf("invalid JSON request: %s is required", field.name)
+		}
+		if !field.allowNull && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return fmt.Errorf("invalid JSON request: %s must not be null", field.name)
+		}
 	}
 	return nil
 }

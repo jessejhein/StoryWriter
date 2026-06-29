@@ -63,6 +63,10 @@ func TestCodexCreateAndUpdateRoutesValidateJSONAndMapStatuses(t *testing.T) {
 		status int
 	}{
 		{name: "unknown field", method: http.MethodPost, path: "/api/codex", body: `{"type":"character","name":"Ben","aliases":[],"tags":[],"description":"","metadata":{},"extra":true}`, status: http.StatusBadRequest},
+		{name: "missing create aliases", method: http.MethodPost, path: "/api/codex", body: `{"type":"character","name":"Ben","tags":[],"description":"","metadata":{}}`, status: http.StatusBadRequest},
+		{name: "missing create metadata", method: http.MethodPost, path: "/api/codex", body: `{"type":"character","name":"Ben","aliases":[],"tags":[],"description":""}`, status: http.StatusBadRequest},
+		{name: "missing update aliases", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: `{"name":"Ben Kenobi","tags":["mentor"],"description":"Guide.","metadata":{"status":"alive"},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, status: http.StatusBadRequest},
+		{name: "missing update expected revision", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: `{"name":"Ben Kenobi","aliases":["Ben"],"tags":["mentor"],"description":"Guide.","metadata":{"status":"alive"}}`, status: http.StatusBadRequest},
 		{name: "bad type", method: http.MethodPost, path: "/api/codex", body: createBody, err: codex.ErrInvalidType, status: http.StatusBadRequest},
 		{name: "stale revision", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: updateBody, err: story.ErrStaleRevision, status: http.StatusConflict},
 		{name: "missing entry", method: http.MethodGet, path: "/api/codex/char_0123456789abcdef0123", err: codex.ErrEntryNotFound, status: http.StatusNotFound},

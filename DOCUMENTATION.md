@@ -1,6 +1,6 @@
 # Storywork Documentation Standards
 
-**Last Updated:** June 2026  
+**Last Updated:** June 2026
 **Version:** Milestone 0
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
@@ -241,6 +241,5 @@ Our goal is that **any developer** (including future contributors or yourself in
 
 ---
 
-**Approved by:** [Your Name]  
+**Approved by:** [Your Name]
 **Status:** Living Document — update as standards evolve
-
