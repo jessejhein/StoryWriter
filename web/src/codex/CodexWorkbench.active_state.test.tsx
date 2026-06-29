@@ -105,6 +105,13 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
     }],
     revision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   })
+  vi.mocked(api.getCodexActiveState)
+    .mockResolvedValueOnce(activeState)
+    .mockResolvedValue({
+      ...activeState,
+      entry: { ...activeState.entry, description: 'Gone.', metadata: { role: 'mentor', status: 'deceased' } },
+      applied_progression_ids: ['prog_0123456789abcdef0123'],
+    })
   const confirm = vi.spyOn(window, 'confirm')
 
   // Test: selecting an entry loads its canonical state, progression saves are explicit, and switching entries while dirty asks for confirmation.
@@ -132,6 +139,9 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
     }],
     expected_revision: null,
   })
+  await waitFor(() => expect(api.getCodexActiveState).toHaveBeenCalledTimes(2))
+  expect(screen.getByText('deceased')).toBeInTheDocument()
+  expect(screen.getByText('Applied progressions: prog_0123456789abcdef0123')).toBeInTheDocument()
 
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben Kenobi' } })
   confirm.mockReturnValueOnce(false)
@@ -265,6 +275,44 @@ test('supports removing metadata rows and preserving explicit empty progression 
       changes: { description: '', metadata: { role: 'force-ghost' } },
     }],
     expected_revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  })
+})
+
+test('removes a progression description change without removing its metadata changes', async () => {
+  vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [entry] })
+  vi.mocked(api.getCodexEntry).mockResolvedValue(entry)
+  vi.mocked(api.getCodexProgressions).mockResolvedValue({
+    entry_id: entry.id,
+    progressions: [{
+      id: 'prog_0123456789abcdef0123',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { description: 'Gone.', metadata: { status: 'deceased' } },
+    }],
+    revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  })
+  vi.mocked(api.saveCodexProgressions).mockResolvedValue({
+    entry_id: entry.id,
+    progressions: [{
+      id: 'prog_0123456789abcdef0123',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { metadata: { status: 'deceased' } },
+    }],
+    revision: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  })
+
+  // Test: an author can remove an optional description replacement while preserving the row's metadata change.
+  // Requirements: M3-R10, M3-R11
+  render(<CodexWorkbench project={project} />)
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Obi-Wan Kenobi' }))
+  await waitFor(() => expect(screen.getByLabelText('Progression description')).toHaveValue('Gone.'))
+  fireEvent.click(screen.getByRole('button', { name: 'Remove description change' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save progressions' }))
+
+  await waitFor(() => expect(api.saveCodexProgressions).toHaveBeenCalled())
+  expect(vi.mocked(api.saveCodexProgressions).mock.calls[0]?.[1].progressions[0]?.changes).toEqual({
+    metadata: { status: 'deceased' },
   })
 })
 

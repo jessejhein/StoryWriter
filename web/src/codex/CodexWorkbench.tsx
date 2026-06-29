@@ -169,6 +169,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   const [progressionRevision, setProgressionRevision] = useState<string | null>(null)
   const [activeSceneID, setActiveSceneID] = useState('')
   const [activeState, setActiveState] = useState<CodexActiveState | null>(null)
+  const [activeStateRefresh, setActiveStateRefresh] = useState(0)
   const [loading, setLoading] = useState(true)
   const [entryStatus, setEntryStatus] = useState('Saved')
   const [progressionStatus, setProgressionStatus] = useState('Saved')
@@ -275,7 +276,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
     return () => {
       cancelled = true
     }
-  }, [selectedEntryID, activeSceneID])
+  }, [selectedEntryID, activeSceneID, activeStateRefresh])
 
   function updateProgressionRows(next: ProgressionRow[]) {
     setProgressions(next)
@@ -325,6 +326,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
       setSavedEntrySnapshot(normalizeDraft(draft))
       setEntryStatus('Saved')
       setSelectedEntryID(saved.id)
+      setActiveStateRefresh((current) => current + 1)
       setEntries((current) => {
         const others = current.filter((entry) => entry.id !== saved.id)
         return [...others, saved].sort(compareCodexEntries)
@@ -355,6 +357,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
       setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
       setProgressionRevision(saved.revision)
       setProgressionStatus('Saved')
+      setActiveStateRefresh((current) => current + 1)
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Request failed'
       setError(message)
@@ -391,6 +394,12 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   function updateProgressionDescription(index: number, value: string) {
     const next = [...progressions]
     next[index] = { ...next[index], hasDescription: true, description: value }
+    updateProgressionRows(next)
+  }
+
+  function removeProgressionDescription(index: number) {
+    const next = [...progressions]
+    next[index] = { ...next[index], hasDescription: false, description: '' }
     updateProgressionRows(next)
   }
 
@@ -624,6 +633,9 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
                     Progression description
                     <textarea value={progression.description} onChange={(event) => updateProgressionDescription(index, event.target.value)} />
                   </label>
+                  {progression.hasDescription && (
+                    <button type="button" onClick={() => removeProgressionDescription(index)}>Remove description change</button>
+                  )}
                   <div>
                     <div className="section-heading">
                       <h5>Progression metadata</h5>
