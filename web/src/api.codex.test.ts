@@ -1,9 +1,9 @@
-import { expect, test, vi } from 'vitest'
-import { APIError, createCodexEntry, getCodexActiveState, getCodexEntries, getCodexProgressions, saveCodexProgressions, updateCodexEntry } from './api'
-
 // BDD Scenario: 3.1.2 - Create an entry
 // Requirements: M3-R09
 // Test purpose: Plain-English description of the frontend Codex API client request shapes and error mapping.
+import { expect, test, vi } from 'vitest'
+import { APIError, createCodexEntry, getCodexActiveState, getCodexEntries, getCodexProgressions, saveCodexProgressions, updateCodexEntry } from './api'
+
 test('codex api functions use the documented routes and JSON bodies', async () => {
   const fetchMock = vi.fn()
     .mockResolvedValueOnce({ ok: true, json: async () => ({ entries: [] }) })

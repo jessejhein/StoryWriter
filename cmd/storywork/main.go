@@ -18,7 +18,7 @@ const version = "0.0.0-dev"
 func main() {
 	address := os.Getenv("STORYWORK_ADDR")
 	if address == "" {
-		address = "127.0.0.1:8080"
+		address = "127.0.0.1:9090"
 	}
 	server := &http.Server{
 		Addr:              address,

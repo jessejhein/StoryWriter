@@ -513,10 +513,21 @@ func (s *Service) LoadProgressions(ctx context.Context, entryID string) (codex.P
 	if err := codex.ValidateEntryID(entryID); err != nil {
 		return codex.ProgressionDocument{}, err
 	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
 	if _, err := s.files.LoadCodexEntry(ctx, current.Path, entryID); err != nil {
 		return codex.ProgressionDocument{}, err
 	}
-	return s.files.LoadProgressions(ctx, current.Path, entryID)
+	document, err := s.files.LoadProgressions(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := validateProgressionAnchors(outlineSceneIDs(outline), document.Progressions); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	return document, nil
 }
 
 // SaveProgressions replaces one entry's ordered canonical progression list.
@@ -795,6 +806,15 @@ func flattenOutlineScenes(outline Outline) []codex.SceneRef {
 		}
 	}
 	return scenes
+}
+
+func validateProgressionAnchors(sceneIDs map[string]struct{}, progressions []codex.Progression) error {
+	for _, progression := range progressions {
+		if _, ok := sceneIDs[progression.Anchor.ID]; !ok {
+			return fmt.Errorf("progression %q references scene anchor %q absent from the current outline", progression.ID, progression.Anchor.ID)
+		}
+	}
+	return nil
 }
 
 func findChapter(outline Outline, chapterID string) (Chapter, error) {

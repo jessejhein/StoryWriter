@@ -1,3 +1,6 @@
+// BDD Scenario: 3.5.2 - Confirm destructive navigation
+// Requirements: M3-R11, M3-R12
+// Test purpose: Plain-English description of the project-level navigation guard when leaving the Codex workbench with unsaved changes.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import App from './App'
@@ -32,9 +35,6 @@ const project = {
   index_initialized: true,
 }
 
-// BDD Scenario: 3.5.2 - Confirm destructive navigation
-// Requirements: M3-R11, M3-R12
-// Test purpose: Plain-English description of the project-level navigation guard when leaving the Codex workbench with unsaved changes.
 test('confirms project-level navigation when codex draft is dirty', async () => {
   vi.mocked(api.getHealth).mockResolvedValue({ status: 'ok', version: '0.0.0-test' })
   vi.mocked(api.createProject).mockResolvedValue(project)
@@ -61,4 +61,8 @@ test('confirms project-level navigation when codex draft is dirty', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'Outline' }))
   expect(confirm).toHaveBeenCalled()
   expect(screen.getByLabelText('Name')).toHaveValue('Ben')
+
+  const beforeUnload = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(beforeUnload)
+  expect(beforeUnload.defaultPrevented).toBe(true)
 })

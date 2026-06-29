@@ -286,7 +286,35 @@ func NormalizeProgressions(entryID string, progressions []Progression, sceneIDs 
 			seenIDs[normalized.ID] = struct{}{}
 		}
 		if _, ok := sceneIDs[normalized.Anchor.ID]; !ok {
-			return nil, fmt.Errorf("scene anchor %q is unknown: %w", normalized.Anchor.ID, ErrSceneNotFound)
+			return nil, fmt.Errorf("scene anchor %q is unknown: %w", normalized.Anchor.ID, ErrInvalidProgression)
+		}
+		anchorKey := normalized.Anchor.ID + ":" + normalized.Anchor.Timing
+		if _, exists := seenAnchors[anchorKey]; exists {
+			return nil, fmt.Errorf("anchor %s is duplicated: %w", anchorKey, ErrInvalidProgression)
+		}
+		seenAnchors[anchorKey] = struct{}{}
+		next = append(next, normalized)
+	}
+	return next, nil
+}
+
+func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]Progression, error) {
+	if err := ValidateEntryID(entryID); err != nil {
+		return nil, err
+	}
+	seenIDs := make(map[string]struct{}, len(progressions))
+	seenAnchors := make(map[string]struct{}, len(progressions))
+	next := make([]Progression, 0, len(progressions))
+	for index, progression := range progressions {
+		normalized, err := normalizeProgression(progression)
+		if err != nil {
+			return nil, fmt.Errorf("progression %d: %w", index, err)
+		}
+		if normalized.ID != "" {
+			if _, exists := seenIDs[normalized.ID]; exists {
+				return nil, fmt.Errorf("progression %q is duplicated: %w", normalized.ID, ErrInvalidProgression)
+			}
+			seenIDs[normalized.ID] = struct{}{}
 		}
 		anchorKey := normalized.Anchor.ID + ":" + normalized.Anchor.Timing
 		if _, exists := seenAnchors[anchorKey]; exists {
@@ -340,7 +368,7 @@ func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes [
 	if targetIndex < 0 {
 		return ActiveState{}, fmt.Errorf("scene %q: %w", targetSceneID, ErrSceneNotFound)
 	}
-	normalizedProgressions, err := NormalizeProgressions(base.ID, progressions, sceneKeySet(orderedScenes))
+	normalizedProgressions, err := NormalizeStoredProgressions(base.ID, progressions)
 	if err != nil {
 		return ActiveState{}, err
 	}
@@ -354,7 +382,7 @@ func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes [
 	for index, progression := range normalizedProgressions {
 		anchorIndex, ok := sceneIndex[progression.Anchor.ID]
 		if !ok {
-			return ActiveState{}, fmt.Errorf("scene anchor %q is unknown: %w", progression.Anchor.ID, ErrSceneNotFound)
+			return ActiveState{}, fmt.Errorf("scene anchor %q is absent from the current outline", progression.Anchor.ID)
 		}
 		timingRank := 1
 		isActive := anchorIndex < targetIndex

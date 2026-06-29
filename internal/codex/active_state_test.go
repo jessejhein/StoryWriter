@@ -1,3 +1,6 @@
+// BDD Scenario: 3.3.3 - Apply multiple progressions deterministically
+// Requirements: M3-R06, M3-R07, M3-R08
+// Test purpose: Plain-English description of the pure active-state resolution rules for chronology, before-after timing, document-order tie breaks, and stable scene anchors after reorder.
 package codex
 
 import (
@@ -5,9 +8,6 @@ import (
 	"testing"
 )
 
-// BDD Scenario: 3.3.3 - Apply multiple progressions deterministically
-// Requirements: M3-R06, M3-R07, M3-R08
-// Test purpose: Plain-English description of the pure active-state resolution rules for chronology, before-after timing, document-order tie breaks, and stable scene anchors after reorder.
 func TestResolveActiveStateAppliesProgressionsInChronology(t *testing.T) {
 	t.Parallel()
 

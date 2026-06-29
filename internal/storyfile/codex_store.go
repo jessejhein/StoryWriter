@@ -294,13 +294,13 @@ func parseProgressionDocument(path string, contents []byte) (codex.ProgressionDo
 	if err != nil {
 		return codex.ProgressionDocument{}, err
 	}
-	sceneIDs := make(map[string]struct{}, len(progressions))
-	for _, progression := range progressions {
-		sceneIDs[progression.Anchor.ID] = struct{}{}
-	}
-	normalized, err := codex.NormalizeProgressions(entryID, progressions, sceneIDs)
+	normalized, err := codex.NormalizeStoredProgressions(entryID, progressions)
 	if err != nil {
 		return codex.ProgressionDocument{}, fmt.Errorf("decode %s: %w", path, err)
+	}
+	expectedPath := filepath.ToSlash(filepath.Join("progressions", entryID+".yaml"))
+	if path != expectedPath {
+		return codex.ProgressionDocument{}, fmt.Errorf("%s does not match canonical path %s", path, expectedPath)
 	}
 	revision := codex.ComputeRevision(contents)
 	return codex.ProgressionDocument{

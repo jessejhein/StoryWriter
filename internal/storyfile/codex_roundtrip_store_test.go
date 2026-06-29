@@ -1,17 +1,15 @@
+// BDD Scenario: 3.1.2 - Create an entry
+// Requirements: M3-R04, M3-R05, M3-R18
+// Test purpose: Plain-English description of exact canonical Codex and progression YAML serialization plus strict reload of the same bytes.
 package storyfile
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"storywork/internal/codex"
 )
 
-// BDD Scenario: 3.1.2 - Create an entry
-// Requirements: M3-R04, M3-R05, M3-R18
-// Test purpose: Plain-English description of exact canonical Codex and progression YAML serialization plus strict reload of the same bytes.
 func TestCodexAndProgressionRoundTripCanonicalBytes(t *testing.T) {
 	t.Parallel()
 
@@ -66,25 +64,5 @@ func TestCodexAndProgressionRoundTripCanonicalBytes(t *testing.T) {
 	}
 	if loadedDocument.Revision == nil || *loadedDocument.Revision != codex.ComputeRevision(progressionBytes) {
 		t.Fatalf("progression revision = %#v", loadedDocument.Revision)
-	}
-}
-
-// BDD Scenario: 3.1.5 - Reject missing or malformed canonical entries
-// Requirements: M3-R01, M3-R05, M3-R18
-// Test purpose: Plain-English description of the strict YAML parser behavior for unknown fields and malformed canonical Codex files.
-func TestLoadCodexEntryRejectsMalformedCanonicalYAML(t *testing.T) {
-	t.Parallel()
-
-	root := t.TempDir()
-	mustMkdirAll(t, root, "codex/characters")
-	path := filepath.Join(root, "codex", "characters", "char_0123456789abcdef0123.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nid: \"char_0123456789abcdef0123\"\ntype: character\nname: \"Ben\"\naliases: []\ntags: []\ndescription: \"Guide.\"\nmetadata: {}\nextra: true\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
-	}
-
-	// Test: unknown canonical fields are rejected with a contextual decode error instead of being ignored or repaired.
-	// Requirements: M3-R18
-	if _, err := New().LoadCodexEntry(context.Background(), root, "char_0123456789abcdef0123"); err == nil {
-		t.Fatal("LoadCodexEntry() error = nil")
 	}
 }

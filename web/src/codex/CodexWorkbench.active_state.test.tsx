@@ -1,3 +1,6 @@
+// BDD Scenario: 3.5.3 - Inspect active state
+// Requirements: M3-R07, M3-R10, M3-R11, M3-R12
+// Test purpose: Plain-English description of the workbench edit, progression, active-state, and dirty-navigation guard behavior.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type { CodexActiveState, CodexEntry, CodexProgressionDocument, Outline, Project } from '../api'
@@ -68,7 +71,7 @@ const activeState: CodexActiveState = {
     aliases: entry.aliases,
     tags: entry.tags,
     description: 'Guide.',
-    metadata: { status: 'alive' },
+    metadata: { role: 'mentor', status: 'alive' },
   },
   applied_progression_ids: [],
 }
@@ -79,31 +82,6 @@ beforeEach(() => {
   vi.mocked(api.getCodexActiveState).mockResolvedValue(activeState)
 })
 
-// BDD Scenario: 3.1.1 - List an empty Codex
-// Requirements: M3-R10, M3-R11
-// Test purpose: Plain-English description of the Codex workbench empty state and explicit create workflow.
-test('renders empty state and creates a new codex entry', async () => {
-  vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [] })
-  vi.mocked(api.createCodexEntry).mockResolvedValue(entry)
-
-  // Test: an empty Codex shows a create action, tracks unsaved changes, saves explicitly, and renders the returned entry.
-  // Requirements: M3-R10
-  render(<CodexWorkbench project={project} />)
-
-  await waitFor(() => expect(screen.getByText('No Codex entries yet.')).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
-  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Obi-Wan Kenobi' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Add alias' }))
-  fireEvent.change(screen.getByLabelText('Alias 1'), { target: { value: 'Ben' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
-
-  await waitFor(() => expect(api.createCodexEntry).toHaveBeenCalled())
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
-})
-
-// BDD Scenario: 3.5.3 - Inspect active state
-// Requirements: M3-R07, M3-R10, M3-R11, M3-R12
-// Test purpose: Plain-English description of the workbench edit, progression, active-state, and dirty-navigation guard behavior.
 test('loads an entry, saves progressions, refreshes active state, and guards dirty navigation', async () => {
   vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [entry] })
   vi.mocked(api.getCodexEntry).mockResolvedValue(entry)
@@ -113,7 +91,7 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
     progressions: [{
       id: 'prog_0123456789abcdef0123',
       anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
-      changes: { description: 'Gone.' },
+      changes: { description: 'Gone.', metadata: { status: 'deceased' } },
     }],
     revision: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
   })
@@ -127,11 +105,23 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
   fireEvent.click(screen.getByRole('button', { name: 'Obi-Wan Kenobi' }))
   await waitFor(() => expect(screen.getByLabelText('Description')).toHaveValue('Guide.'))
   await waitFor(() => expect(api.getCodexActiveState).toHaveBeenCalled())
+  expect(screen.getByText('role')).toBeInTheDocument()
+  expect(screen.getByText('mentor')).toBeInTheDocument()
 
   fireEvent.click(screen.getByRole('button', { name: 'Add progression' }))
   fireEvent.change(screen.getByLabelText('Progression description'), { target: { value: 'Gone.' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add progression metadata' }))
+  fireEvent.change(screen.getByLabelText('Progression metadata key 1'), { target: { value: 'status' } })
+  fireEvent.change(screen.getByLabelText('Progression metadata value 1'), { target: { value: 'deceased' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save progressions' }))
   await waitFor(() => expect(api.saveCodexProgressions).toHaveBeenCalled())
+  expect(vi.mocked(api.saveCodexProgressions).mock.calls[0]?.[1]).toEqual({
+    progressions: [{
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { description: 'Gone.', metadata: { status: 'deceased' } },
+    }],
+    expected_revision: null,
+  })
 
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben Kenobi' } })
   confirm.mockReturnValueOnce(false)

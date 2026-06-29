@@ -25,6 +25,20 @@ export default function App() {
       .catch(() => setHealth('Backend unavailable'))
   }, [])
 
+  useEffect(() => {
+    if (!dirty) {
+      return
+    }
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [dirty])
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null

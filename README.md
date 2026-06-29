@@ -73,11 +73,10 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 2 are implemented. The app includes the local project
-foundation, canonical outline editing, and the Vim-friendly scene editor with
-revision conflict protection and one Git checkpoint per explicit save.
-Milestone 3 is specified but not implemented; its contract is in
-`docs/12_milestone_3_task_prompt.md`.
+Milestones 0 through 3 are implemented. The app includes the local project
+foundation, canonical outline editing, the Vim-friendly scene editor with
+revision conflict protection and one Git checkpoint per explicit save, plus the
+Codex workbench with timeline progressions and active-state resolution.
 
 ## Development
 
@@ -101,7 +100,7 @@ make dev-backend
 make dev-frontend
 ```
 
-The API listens on `127.0.0.1:8080`. Vite proxies `/api` requests to it.
+The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 
 ## Milestone 0 package map
 

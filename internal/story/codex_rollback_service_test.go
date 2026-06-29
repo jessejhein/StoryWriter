@@ -1,3 +1,6 @@
+// BDD Scenario: 3.4.4 - Roll back failures
+// Requirements: M3-R15, M3-R16
+// Test purpose: Plain-English description of rollback behavior for new Codex files and progression-file replacement when index or checkpoint work fails.
 package story
 
 import (
@@ -9,9 +12,6 @@ import (
 	"storywork/internal/project"
 )
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for new Codex files and progression-file replacement when index or checkpoint work fails.
 func TestCreateCodexEntryRollsBackWhenCheckpointFails(t *testing.T) {
 	t.Parallel()
 
