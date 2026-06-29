@@ -15,14 +15,13 @@ import (
 
 const (
 	// Version is the canonical schema version for Codex and progression documents.
-	Version                 = 1
-	maxNameRunes            = 200
-	maxTagRunes             = 64
-	maxDescriptionBytes     = 64 << 10
-	maxMetadataEntries      = 100
-	maxMetadataKeyRunes     = 100
-	maxMetadataValueBytes   = 4 << 10
-	maxActiveStateBodyBytes = 1 << 20
+	Version               = 1
+	maxNameRunes          = 200
+	maxTagRunes           = 64
+	maxDescriptionBytes   = 64 << 10
+	maxMetadataEntries    = 100
+	maxMetadataKeyRunes   = 100
+	maxMetadataValueBytes = 4 << 10
 )
 
 var (
@@ -85,6 +84,8 @@ const (
 )
 
 // Entry is one canonical Codex entry plus its optional loaded revision.
+// Canonical holds the exact canonical bytes the entry was loaded from; it is
+// excluded from JSON so transport responses stay canonical-shape only.
 type Entry struct {
 	Version     int               `json:"version,omitempty"`
 	ID          string            `json:"id"`
@@ -95,13 +96,19 @@ type Entry struct {
 	Description string            `json:"description"`
 	Metadata    map[string]string `json:"metadata"`
 	Revision    string            `json:"revision,omitempty"`
+	Canonical   []byte            `json:"-"`
 }
 
 // ProgressionDocument stores one entry's ordered canonical timeline changes.
+// Version mirrors the canonical schema version but is not part of the HTTP
+// response shape, so it is excluded from JSON serialization. Canonical holds
+// the exact canonical bytes the document was loaded from.
 type ProgressionDocument struct {
-	EntryID      string        `json:"entry_id"`
-	Progressions []Progression `json:"progressions"`
-	Revision     *string       `json:"revision"`
+	Version      int               `json:"-"`
+	EntryID      string            `json:"entry_id"`
+	Progressions []Progression     `json:"progressions"`
+	Revision     *string           `json:"revision"`
+	Canonical    []byte            `json:"-"`
 }
 
 // Progression applies one change set at a stable scene anchor.
@@ -305,38 +312,15 @@ func NormalizeEntry(entry Entry) (Entry, error) {
 
 // NormalizeProgressions canonicalizes a progression list and validates its scene anchors against the supplied outline.
 func NormalizeProgressions(entryID string, progressions []Progression, sceneIDs map[string]struct{}) ([]Progression, error) {
-	if err := ValidateEntryID(entryID); err != nil {
-		return nil, err
-	}
-	seenIDs := make(map[string]struct{}, len(progressions))
-	seenAnchors := make(map[string]struct{}, len(progressions))
-	next := make([]Progression, 0, len(progressions))
-	for index, progression := range progressions {
-		normalized, err := normalizeProgression(progression)
-		if err != nil {
-			return nil, fmt.Errorf("progression %d: %w", index, err)
-		}
-		if normalized.ID != "" {
-			if _, exists := seenIDs[normalized.ID]; exists {
-				return nil, fmt.Errorf("progression %q is duplicated: %w", normalized.ID, ErrInvalidProgression)
-			}
-			seenIDs[normalized.ID] = struct{}{}
-		}
-		if _, ok := sceneIDs[normalized.Anchor.ID]; !ok {
-			return nil, fmt.Errorf("scene anchor %q is unknown: %w", normalized.Anchor.ID, ErrInvalidProgression)
-		}
-		anchorKey := normalized.Anchor.ID + ":" + normalized.Anchor.Timing
-		if _, exists := seenAnchors[anchorKey]; exists {
-			return nil, fmt.Errorf("anchor %s is duplicated: %w", anchorKey, ErrInvalidProgression)
-		}
-		seenAnchors[anchorKey] = struct{}{}
-		next = append(next, normalized)
-	}
-	return next, nil
+	return normalizeProgressionList(entryID, progressions, sceneIDs)
 }
 
 // NormalizeStoredProgressions canonicalizes stored progressions without validating them against a current outline.
 func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]Progression, error) {
+	return normalizeProgressionList(entryID, progressions, nil)
+}
+
+func normalizeProgressionList(entryID string, progressions []Progression, sceneIDs map[string]struct{}) ([]Progression, error) {
 	if err := ValidateEntryID(entryID); err != nil {
 		return nil, err
 	}
@@ -354,6 +338,11 @@ func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]
 			}
 			seenIDs[normalized.ID] = struct{}{}
 		}
+		if sceneIDs != nil {
+			if _, ok := sceneIDs[normalized.Anchor.ID]; !ok {
+				return nil, fmt.Errorf("scene anchor %q is unknown: %w", normalized.Anchor.ID, ErrInvalidProgression)
+			}
+		}
 		anchorKey := normalized.Anchor.ID + ":" + normalized.Anchor.Timing
 		if _, exists := seenAnchors[anchorKey]; exists {
 			return nil, fmt.Errorf("anchor %s is duplicated: %w", anchorKey, ErrInvalidProgression)
@@ -362,23 +351,6 @@ func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]
 		next = append(next, normalized)
 	}
 	return next, nil
-}
-
-// NormalizeProgressionSaveRequest validates the optimistic-locking fields for a progression save request.
-func NormalizeProgressionSaveRequest(entryID string, request SaveProgressionsRequest, hasExisting bool) (SaveProgressionsRequest, error) {
-	if err := ValidateEntryID(entryID); err != nil {
-		return SaveProgressionsRequest{}, err
-	}
-	if request.ExpectedRevision == nil {
-		if hasExisting {
-			return SaveProgressionsRequest{}, fmt.Errorf("expected_revision is required for existing progression document: %w", ErrInvalidRevision)
-		}
-	} else if *request.ExpectedRevision != "" {
-		if err := ValidateRevision(*request.ExpectedRevision); err != nil {
-			return SaveProgressionsRequest{}, err
-		}
-	}
-	return request, nil
 }
 
 // SceneRef is the minimal scene-order input required for active-state resolution.
@@ -450,6 +422,10 @@ func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes [
 		return active[i].index < active[j].index
 	})
 	resolved := base
+	// The resolved entry is a derived projection, not a canonical document, so it
+	// carries no revision and no schema version tag.
+	resolved.Revision = ""
+	resolved.Version = 0
 	applied := make([]string, 0, len(active))
 	for _, item := range active {
 		if item.progression.Changes.Description != nil {
@@ -460,8 +436,6 @@ func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes [
 		}
 		applied = append(applied, item.progression.ID)
 	}
-	resolved.Revision = ""
-	resolved.Version = 0
 	return ActiveState{
 		SceneID:               targetSceneID,
 		Entry:                 resolved,
@@ -670,6 +644,7 @@ func normalizeProgression(progression Progression) (Progression, error) {
 
 func normalizeProgressionChange(changes ProgressionChange) (ProgressionChange, error) {
 	hasDescription := changes.Description != nil
+	metadataPresent := changes.Metadata != nil
 	if hasDescription {
 		description, err := normalizeDescription(*changes.Description)
 		if err != nil {
@@ -677,26 +652,22 @@ func normalizeProgressionChange(changes ProgressionChange) (ProgressionChange, e
 		}
 		changes.Description = &description
 	}
-	if changes.Metadata == nil {
-		changes.Metadata = map[string]string{}
+	if metadataPresent {
+		if len(changes.Metadata) == 0 {
+			return ProgressionChange{}, fmt.Errorf("progression metadata must be non-empty when present: %w", ErrInvalidProgression)
+		}
+		metadata, err := normalizeMetadata(changes.Metadata)
+		if err != nil {
+			return ProgressionChange{}, err
+		}
+		changes.Metadata = metadata
+	} else {
+		changes.Metadata = nil
 	}
-	metadata, err := normalizeMetadata(changes.Metadata)
-	if err != nil {
-		return ProgressionChange{}, err
-	}
-	if !hasDescription && len(metadata) == 0 {
+	if !hasDescription && !metadataPresent {
 		return ProgressionChange{}, fmt.Errorf("progression must change description or metadata: %w", ErrInvalidProgression)
 	}
-	changes.Metadata = metadata
 	return changes, nil
-}
-
-func sceneKeySet(scenes []SceneRef) map[string]struct{} {
-	set := make(map[string]struct{}, len(scenes))
-	for _, scene := range scenes {
-		set[scene.ID] = struct{}{}
-	}
-	return set
 }
 
 func cloneMetadata(metadata map[string]string) map[string]string {

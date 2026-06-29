@@ -39,13 +39,25 @@ type codexEntryResponse struct {
 	Tags        []string          `json:"tags"`
 	Description string            `json:"description"`
 	Metadata    map[string]string `json:"metadata"`
-	Revision    string            `json:"revision,omitempty"`
+	Revision    string            `json:"revision"`
+}
+
+// codexActiveEntryResponse is the resolved entry shape for active-state inspection.
+// It omits revision because the resolved projection is not a canonical document.
+type codexActiveEntryResponse struct {
+	ID          string            `json:"id"`
+	Type        codex.EntryType   `json:"type"`
+	Name        string            `json:"name"`
+	Aliases     []string          `json:"aliases"`
+	Tags        []string          `json:"tags"`
+	Description string            `json:"description"`
+	Metadata    map[string]string `json:"metadata"`
 }
 
 type codexActiveStateResponse struct {
-	SceneID               string             `json:"scene_id"`
-	Entry                 codexEntryResponse `json:"entry"`
-	AppliedProgressionIDs []string           `json:"applied_progression_ids"`
+	SceneID               string                   `json:"scene_id"`
+	Entry                 codexActiveEntryResponse `json:"entry"`
+	AppliedProgressionIDs []string                 `json:"applied_progression_ids"`
 }
 
 func newCodexEntryResponse(entry codex.Entry) codexEntryResponse {
@@ -59,6 +71,41 @@ func newCodexEntryResponse(entry codex.Entry) codexEntryResponse {
 		Metadata:    entry.Metadata,
 		Revision:    entry.Revision,
 	}
+}
+
+func newCodexActiveEntryResponse(entry codex.Entry) codexActiveEntryResponse {
+	return codexActiveEntryResponse{
+		ID:          entry.ID,
+		Type:        entry.Type,
+		Name:        entry.Name,
+		Aliases:     entry.Aliases,
+		Tags:        entry.Tags,
+		Description: entry.Description,
+		Metadata:    entry.Metadata,
+	}
+}
+
+// methodNotAllowed returns a handler that responds with 405 in the project JSON
+// error shape and sets the Allow header, for known routes with an unsupported
+// method. The spec requires JSON errors and an Allow header on 405.
+func methodNotAllowed(allow string) http.HandlerFunc {
+	return func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Allow", allow)
+		writeError(writer, http.StatusMethodNotAllowed, fmt.Errorf("method %s not allowed; allowed: %s", request.Method, allow))
+	}
+}
+
+// writeBodyLimitError maps a JSON body read error to the documented status. An
+// oversized Codex/progression mutation body is a 400 Bad Request per the
+// Milestone 3 status table (which lists no 413).
+func writeBodyLimitError(writer http.ResponseWriter, err error) {
+	status := http.StatusBadRequest
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeError(writer, status, fmt.Errorf("request body exceeds the 1 MiB limit"))
+		return
+	}
+	writeError(writer, status, err)
 }
 
 // StoryStore serves and mutates the active project's outline, scenes, and Codex state.
@@ -254,6 +301,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		writeJSON(writer, http.StatusOK, map[string][]codexEntryResponse{"entries": response})
 	})
+	mux.HandleFunc("/api/codex", methodNotAllowed("GET, POST"))
 	mux.HandleFunc("POST /api/codex", func(writer http.ResponseWriter, request *http.Request) {
 		var createRequest struct {
 			Type        codex.EntryType   `json:"type"`
@@ -271,12 +319,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			requiredJSONField{name: "description"},
 			requiredJSONField{name: "metadata"},
 		); err != nil {
-			status := http.StatusBadRequest
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				status = http.StatusRequestEntityTooLarge
-			}
-			writeError(writer, status, err)
+			writeBodyLimitError(writer, err)
 			return
 		}
 		entry, err := stories.CreateCodexEntry(request.Context(), codex.SaveEntryRequest{
@@ -301,6 +344,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		writeJSON(writer, http.StatusOK, newCodexEntryResponse(entry))
 	})
+	mux.HandleFunc("/api/codex/{entry_id}", methodNotAllowed("GET, PUT"))
 	mux.HandleFunc("PUT /api/codex/{entry_id}", func(writer http.ResponseWriter, request *http.Request) {
 		var updateRequest struct {
 			Name             string            `json:"name"`
@@ -318,19 +362,14 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			requiredJSONField{name: "metadata"},
 			requiredJSONField{name: "expected_revision"},
 		); err != nil {
-			status := http.StatusBadRequest
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				status = http.StatusRequestEntityTooLarge
-			}
-			writeError(writer, status, err)
+			writeBodyLimitError(writer, err)
 			return
 		}
 		entry, err := stories.UpdateCodexEntry(request.Context(), request.PathValue("entry_id"), codex.SaveEntryRequest{
 			Name:             updateRequest.Name,
 			Aliases:          updateRequest.Aliases,
 			Tags:             updateRequest.Tags,
-			Description:      updateRequest.Description,
+			Description:       updateRequest.Description,
 			Metadata:         updateRequest.Metadata,
 			ExpectedRevision: updateRequest.ExpectedRevision,
 		})
@@ -348,6 +387,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		writeJSON(writer, http.StatusOK, document)
 	})
+	mux.HandleFunc("/api/codex/{entry_id}/progressions", methodNotAllowed("GET, PUT"))
 	mux.HandleFunc("PUT /api/codex/{entry_id}/progressions", func(writer http.ResponseWriter, request *http.Request) {
 		var updateRequest struct {
 			Progressions     []codex.Progression `json:"progressions"`
@@ -357,12 +397,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			requiredJSONField{name: "progressions"},
 			requiredJSONField{name: "expected_revision", allowNull: true},
 		); err != nil {
-			status := http.StatusBadRequest
-			var maxBytesErr *http.MaxBytesError
-			if errors.As(err, &maxBytesErr) {
-				status = http.StatusRequestEntityTooLarge
-			}
-			writeError(writer, status, err)
+			writeBodyLimitError(writer, err)
 			return
 		}
 		document, err := stories.SaveProgressions(request.Context(), request.PathValue("entry_id"), codex.SaveProgressionsRequest{
@@ -388,10 +423,11 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		writeJSON(writer, http.StatusOK, codexActiveStateResponse{
 			SceneID:               activeState.SceneID,
-			Entry:                 newCodexEntryResponse(activeState.Entry),
+			Entry:                 newCodexActiveEntryResponse(activeState.Entry),
 			AppliedProgressionIDs: activeState.AppliedProgressionIDs,
 		})
 	})
+	mux.HandleFunc("/api/codex/{entry_id}/active", methodNotAllowed("GET"))
 	return mux
 }
 

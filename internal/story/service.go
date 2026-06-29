@@ -416,23 +416,26 @@ func (s *Service) LoadCodexEntry(ctx context.Context, entryID string) (codex.Ent
 
 // CreateCodexEntry creates and checkpoints one new canonical Codex entry.
 func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryRequest) (codex.Entry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// Step 1: resolve the active project before acquiring the lock so a missing
+	// project (409) does not block concurrent mutations.
 	current, err := s.currentProject()
 	if err != nil {
 		return codex.Entry{}, err
 	}
-	request, err = codex.NormalizeCreateRequest(request)
-	if err != nil {
-		return codex.Entry{}, err
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Step 3: verify the worktree is clean before any fallible canonical work.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
 		return codex.Entry{}, err
 	}
 	if !clean {
 		return codex.Entry{}, ErrDirtyWorktree
+	}
+	// Step 6: validate and normalize the complete next document under the lock.
+	request, err = codex.NormalizeCreateRequest(request)
+	if err != nil {
+		return codex.Entry{}, err
 	}
 	entryID, err := s.nextUnusedID(ctx, current.Path, codexNodeKind(request.Type))
 	if err != nil {
@@ -458,25 +461,20 @@ func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryR
 	if err != nil {
 		return codex.Entry{}, err
 	}
-	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{relativePath: entryBytes})
-	if err != nil {
+	// Steps 9-11: atomically replace, rebuild the index, and checkpoint.
+	if err := s.commitCodexMutation(ctx, current.Path, "Create Codex entry "+nextEntry.ID, relativePath, entryBytes); err != nil {
 		return codex.Entry{}, err
 	}
-	if err := s.index.Rebuild(ctx, current.Path); err != nil {
-		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
-	if err := s.git.CommitAll(ctx, current.Path, "Create Codex entry "+nextEntry.ID); err != nil {
-		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
+	// Step 12: return the representation of the exact bytes written.
 	nextEntry.Revision = codex.ComputeRevision(entryBytes)
+	nextEntry.Canonical = append([]byte(nil), entryBytes...)
 	return nextEntry, nil
 }
 
 // UpdateCodexEntry edits one existing canonical Codex entry.
 func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request codex.SaveEntryRequest) (codex.Entry, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// Step 1: resolve the active project and validate route/request syntax before
+	// acquiring the lock so 400s never touch the shared lock or the worktree check.
 	current, err := s.currentProject()
 	if err != nil {
 		return codex.Entry{}, err
@@ -484,6 +482,12 @@ func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request 
 	if err := codex.ValidateEntryID(entryID); err != nil {
 		return codex.Entry{}, err
 	}
+	if err := codex.ValidateRevision(request.ExpectedRevision); err != nil {
+		return codex.Entry{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Step 3: verify the worktree is clean.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
 		return codex.Entry{}, err
@@ -491,16 +495,16 @@ func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request 
 	if !clean {
 		return codex.Entry{}, ErrDirtyWorktree
 	}
-	if err := codex.ValidateRevision(request.ExpectedRevision); err != nil {
-		return codex.Entry{}, err
-	}
+	// Step 4: strictly reload the canonical state needed for the decision.
 	currentEntry, err := s.files.LoadCodexEntry(ctx, current.Path, entryID)
 	if err != nil {
 		return codex.Entry{}, err
 	}
+	// Step 5: compare the expected revision against the loaded canonical state.
 	if currentEntry.Revision != request.ExpectedRevision {
 		return codex.Entry{}, fmt.Errorf("entry %q revision changed: %w", entryID, ErrStaleRevision)
 	}
+	// Step 6: validate and normalize the complete next document in memory.
 	nextEntry, err := codex.NormalizeUpdateRequest(entryID, currentEntry, request)
 	if err != nil {
 		return codex.Entry{}, err
@@ -509,28 +513,21 @@ func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request 
 	if err != nil {
 		return codex.Entry{}, err
 	}
-	currentBytes, err := s.files.MarshalCodexEntry(currentEntry)
-	if err != nil {
-		return codex.Entry{}, err
-	}
-	if bytes.Equal(entryBytes, currentBytes) {
+	// Step 7: detect byte-identical no-op updates against the stored canonical bytes.
+	if bytes.Equal(entryBytes, currentEntry.Canonical) {
 		return codex.Entry{}, codex.ErrNoChanges
 	}
 	relativePath, err := codexEntryPath(nextEntry)
 	if err != nil {
 		return codex.Entry{}, err
 	}
-	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{relativePath: entryBytes})
-	if err != nil {
+	// Steps 9-11: atomically replace, rebuild the index, and checkpoint.
+	if err := s.commitCodexMutation(ctx, current.Path, "Edit Codex entry "+nextEntry.ID, relativePath, entryBytes); err != nil {
 		return codex.Entry{}, err
 	}
-	if err := s.index.Rebuild(ctx, current.Path); err != nil {
-		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
-	if err := s.git.CommitAll(ctx, current.Path, "Edit Codex entry "+nextEntry.ID); err != nil {
-		return codex.Entry{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
+	// Step 12: return the representation of the exact bytes written.
 	nextEntry.Revision = codex.ComputeRevision(entryBytes)
+	nextEntry.Canonical = append([]byte(nil), entryBytes...)
 	return nextEntry, nil
 }
 
@@ -565,9 +562,8 @@ func (s *Service) LoadProgressions(ctx context.Context, entryID string) (codex.P
 
 // SaveProgressions replaces one entry's ordered canonical progression list.
 func (s *Service) SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	// Step 1: resolve the active project and validate route/request syntax before
+	// acquiring the lock so 400s never touch the shared lock or the worktree check.
 	current, err := s.currentProject()
 	if err != nil {
 		return codex.ProgressionDocument{}, err
@@ -575,6 +571,12 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if err := codex.ValidateEntryID(entryID); err != nil {
 		return codex.ProgressionDocument{}, err
 	}
+	if err := validateProgressionExpectedRevision(request.ExpectedRevision); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Step 3: verify the worktree is clean.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
 		return codex.ProgressionDocument{}, err
@@ -582,6 +584,7 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if !clean {
 		return codex.ProgressionDocument{}, ErrDirtyWorktree
 	}
+	// Step 4: strictly reload all canonical state needed for the decision.
 	outline, err := s.files.Load(ctx, current.Path)
 	if err != nil {
 		return codex.ProgressionDocument{}, err
@@ -593,17 +596,22 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if err != nil {
 		return codex.ProgressionDocument{}, err
 	}
-	if err := validateProgressionExpectedRevision(currentDocument.Revision, request.ExpectedRevision); err != nil {
-		return codex.ProgressionDocument{}, err
+	// Step 5: compare the expected revision against the loaded canonical state.
+	// A null expected_revision is only valid for first creation; an existing
+	// document requires a non-null revision token, and a mismatch is stale.
+	if request.ExpectedRevision == nil && currentDocument.Revision != nil {
+		return codex.ProgressionDocument{}, codex.ErrInvalidRevision
 	}
 	if request.ExpectedRevision != nil && currentDocument.Revision != nil && *request.ExpectedRevision != *currentDocument.Revision {
 		return codex.ProgressionDocument{}, fmt.Errorf("progressions %q revision changed: %w", entryID, ErrStaleRevision)
 	}
-	sceneIDs := outlineSceneIDs(outline)
-	progressions := append([]codex.Progression(nil), request.Progressions...)
-	if len(progressions) == 0 && currentDocument.Revision == nil {
+	// Saving an empty list when no progression file exists is a no-op error.
+	if len(request.Progressions) == 0 && currentDocument.Revision == nil {
 		return codex.ProgressionDocument{}, codex.ErrNoChanges
 	}
+	// Step 6: validate and normalize the complete next document in memory.
+	sceneIDs := outlineSceneIDs(outline)
+	progressions := append([]codex.Progression(nil), request.Progressions...)
 	progressions, err = s.reconcileProgressionIDs(currentDocument.Progressions, progressions)
 	if err != nil {
 		return codex.ProgressionDocument{}, err
@@ -613,6 +621,7 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 		return codex.ProgressionDocument{}, err
 	}
 	nextDocument := codex.ProgressionDocument{
+		Version:      codex.Version,
 		EntryID:      entryID,
 		Progressions: progressions,
 	}
@@ -620,26 +629,19 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if err != nil {
 		return codex.ProgressionDocument{}, err
 	}
-	currentBytes, err := s.files.MarshalProgressions(codex.ProgressionDocument{
-		EntryID:      currentDocument.EntryID,
-		Progressions: currentDocument.Progressions,
-	})
-	if err == nil && bytes.Equal(documentBytes, currentBytes) {
+	// Step 7: detect byte-identical no-op updates against the stored canonical bytes.
+	if currentDocument.Canonical != nil && bytes.Equal(documentBytes, currentDocument.Canonical) {
 		return codex.ProgressionDocument{}, codex.ErrNoChanges
 	}
+	// Steps 9-11: atomically replace, rebuild the index, and checkpoint.
 	relativePath := filepath.ToSlash(filepath.Join("progressions", entryID+".yaml"))
-	rollback, err := s.files.WriteFiles(ctx, current.Path, map[string][]byte{relativePath: documentBytes})
-	if err != nil {
+	if err := s.commitCodexMutation(ctx, current.Path, "Edit progressions "+entryID, relativePath, documentBytes); err != nil {
 		return codex.ProgressionDocument{}, err
 	}
-	if err := s.index.Rebuild(ctx, current.Path); err != nil {
-		return codex.ProgressionDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
-	if err := s.git.CommitAll(ctx, current.Path, "Edit progressions "+entryID); err != nil {
-		return codex.ProgressionDocument{}, s.rollbackMutation(ctx, current.Path, rollback, err)
-	}
+	// Step 12: return the representation of the exact bytes written.
 	revision := codex.ComputeRevision(documentBytes)
 	nextDocument.Revision = &revision
+	nextDocument.Canonical = append([]byte(nil), documentBytes...)
 	return nextDocument, nil
 }
 
@@ -689,6 +691,25 @@ func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, m
 		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
 	return MutationResult{ChangedID: changedID, Outline: reloaded}, nil
+}
+
+// commitCodexMutation atomically replaces one canonical file, rebuilds the
+// disposable index, and creates exactly one Git commit. On write failure it
+// returns immediately without rollback work; on index or checkpoint failure
+// it restores the target, unstages app changes, and rebuilds the index from
+// restored files. The caller owns pre-request validation and no-op detection.
+func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message, relativePath string, contents []byte) error {
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{relativePath: contents})
+	if err != nil {
+		return err
+	}
+	if err := s.index.Rebuild(ctx, projectPath); err != nil {
+		return s.rollbackMutation(ctx, projectPath, rollback, err)
+	}
+	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
+		return s.rollbackMutation(ctx, projectPath, rollback, err)
+	}
+	return nil
 }
 
 func (s *Service) reconcileProgressionIDs(current, requested []codex.Progression) ([]codex.Progression, error) {
@@ -828,20 +849,18 @@ func codexEntryPath(entry codex.Entry) (string, error) {
 	return entityPath(codexNodeKind(entry.Type), entry.ID)
 }
 
-func validateProgressionExpectedRevision(current, expected *string) error {
+// validateProgressionExpectedRevision validates the request-side shape of a
+// progression save's expected revision token. A nil token selects first-creation
+// mode; a present token must match the SHA-256 revision shape. The value
+// comparison against the loaded canonical state happens under the lock.
+func validateProgressionExpectedRevision(expected *string) error {
 	if expected == nil {
-		if current != nil {
-			return codex.ErrInvalidRevision
-		}
 		return nil
 	}
 	if *expected == "" {
 		return codex.ErrInvalidRevision
 	}
-	if err := codex.ValidateRevision(*expected); err != nil {
-		return err
-	}
-	return nil
+	return codex.ValidateRevision(*expected)
 }
 
 func outlineSceneIDs(outline Outline) map[string]struct{} {

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,7 +35,7 @@ func (s *Store) LoadCodexEntries(_ context.Context, projectPath string) ([]codex
 			relative := filepath.ToSlash(strings.TrimPrefix(match, projectPath+string(os.PathSeparator)))
 			contents, err := s.readFile(match)
 			if err != nil {
-				return nil, fmt.Errorf("read %s: %w", relative, err)
+				return nil, fmt.Errorf("read %s: %w", relative, maskPathError(err))
 			}
 			entry, err := parseCodexEntry(relative, contents)
 			if err != nil {
@@ -58,7 +59,7 @@ func (s *Store) LoadCodexEntry(_ context.Context, projectPath, entryID string) (
 		if errors.Is(err, os.ErrNotExist) {
 			return codex.Entry{}, fmt.Errorf("entry %q: %w", entryID, codex.ErrEntryNotFound)
 		}
-		return codex.Entry{}, fmt.Errorf("read %s: %w", relativePath, err)
+		return codex.Entry{}, fmt.Errorf("read %s: %w", relativePath, maskPathError(err))
 	}
 	return parseCodexEntry(relativePath, contents)
 }
@@ -73,12 +74,13 @@ func (s *Store) LoadProgressions(_ context.Context, projectPath, entryID string)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return codex.ProgressionDocument{
+				Version:      codex.Version,
 				EntryID:      entryID,
 				Progressions: []codex.Progression{},
 				Revision:     nil,
 			}, nil
 		}
-		return codex.ProgressionDocument{}, fmt.Errorf("read %s: %w", relativePath, err)
+		return codex.ProgressionDocument{}, fmt.Errorf("read %s: %w", relativePath, maskPathError(err))
 	}
 	return parseProgressionDocument(relativePath, contents)
 }
@@ -95,13 +97,13 @@ func (s *Store) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 	var buffer strings.Builder
 	buffer.WriteString("version: 1\n")
 	buffer.WriteString("id: ")
-	buffer.WriteString(quoteYAMLScalar(normalized.ID))
+	buffer.WriteString(yamlScalar(normalized.ID))
 	buffer.WriteString("\n")
 	buffer.WriteString("type: ")
 	buffer.WriteString(string(normalized.Type))
 	buffer.WriteString("\n")
 	buffer.WriteString("name: ")
-	buffer.WriteString(quoteYAMLScalar(normalized.Name))
+	buffer.WriteString(yamlScalar(normalized.Name))
 	buffer.WriteString("\n")
 	if len(normalized.Aliases) == 0 {
 		buffer.WriteString("aliases: []\n")
@@ -109,7 +111,7 @@ func (s *Store) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 		buffer.WriteString("aliases:\n")
 		for _, alias := range normalized.Aliases {
 			buffer.WriteString("  - ")
-			buffer.WriteString(quoteYAMLScalar(alias))
+			buffer.WriteString(yamlScalar(alias))
 			buffer.WriteString("\n")
 		}
 	}
@@ -119,12 +121,12 @@ func (s *Store) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 		buffer.WriteString("tags:\n")
 		for _, tag := range normalized.Tags {
 			buffer.WriteString("  - ")
-			buffer.WriteString(quoteYAMLScalar(tag))
+			buffer.WriteString(yamlScalar(tag))
 			buffer.WriteString("\n")
 		}
 	}
 	buffer.WriteString("description: ")
-	buffer.WriteString(quoteYAMLScalar(normalized.Description))
+	buffer.WriteString(yamlScalar(normalized.Description))
 	buffer.WriteString("\n")
 	if len(normalized.Metadata) == 0 {
 		buffer.WriteString("metadata: {}\n")
@@ -133,9 +135,9 @@ func (s *Store) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 		keys := sortedMetadataKeys(normalized.Metadata)
 		for _, key := range keys {
 			buffer.WriteString("  ")
-			buffer.WriteString(quoteYAMLScalar(key))
+			buffer.WriteString(yamlScalar(key))
 			buffer.WriteString(": ")
-			buffer.WriteString(quoteYAMLScalar(normalized.Metadata[key]))
+			buffer.WriteString(yamlScalar(normalized.Metadata[key]))
 			buffer.WriteString("\n")
 		}
 	}
@@ -158,7 +160,7 @@ func (s *Store) MarshalProgressions(document codex.ProgressionDocument) ([]byte,
 	var buffer strings.Builder
 	buffer.WriteString("version: 1\n")
 	buffer.WriteString("entry_id: ")
-	buffer.WriteString(quoteYAMLScalar(document.EntryID))
+	buffer.WriteString(yamlScalar(document.EntryID))
 	buffer.WriteString("\n")
 	if len(normalized) == 0 {
 		buffer.WriteString("progressions: []\n")
@@ -169,7 +171,7 @@ func (s *Store) MarshalProgressions(document codex.ProgressionDocument) ([]byte,
 		buffer.WriteString("  -")
 		if progression.ID != "" {
 			buffer.WriteString(" id: ")
-			buffer.WriteString(quoteYAMLScalar(progression.ID))
+			buffer.WriteString(yamlScalar(progression.ID))
 			buffer.WriteString("\n")
 		} else {
 			buffer.WriteString("\n")
@@ -177,7 +179,7 @@ func (s *Store) MarshalProgressions(document codex.ProgressionDocument) ([]byte,
 		buffer.WriteString("    anchor:\n")
 		buffer.WriteString("      type: scene\n")
 		buffer.WriteString("      id: ")
-		buffer.WriteString(quoteYAMLScalar(progression.Anchor.ID))
+		buffer.WriteString(yamlScalar(progression.Anchor.ID))
 		buffer.WriteString("\n")
 		buffer.WriteString("      timing: ")
 		buffer.WriteString(progression.Anchor.Timing)
@@ -185,7 +187,7 @@ func (s *Store) MarshalProgressions(document codex.ProgressionDocument) ([]byte,
 		buffer.WriteString("    changes:\n")
 		if progression.Changes.Description != nil {
 			buffer.WriteString("      description: ")
-			buffer.WriteString(quoteYAMLScalar(*progression.Changes.Description))
+			buffer.WriteString(yamlScalar(*progression.Changes.Description))
 			buffer.WriteString("\n")
 		}
 		if len(progression.Changes.Metadata) == 0 {
@@ -196,9 +198,9 @@ func (s *Store) MarshalProgressions(document codex.ProgressionDocument) ([]byte,
 			buffer.WriteString("      metadata:\n")
 			for _, key := range sortedMetadataKeys(progression.Changes.Metadata) {
 				buffer.WriteString("        ")
-				buffer.WriteString(quoteYAMLScalar(key))
+				buffer.WriteString(yamlScalar(key))
 				buffer.WriteString(": ")
-				buffer.WriteString(quoteYAMLScalar(progression.Changes.Metadata[key]))
+				buffer.WriteString(yamlScalar(progression.Changes.Metadata[key]))
 				buffer.WriteString("\n")
 			}
 		}
@@ -271,6 +273,7 @@ func parseCodexEntry(path string, contents []byte) (codex.Entry, error) {
 		return codex.Entry{}, fmt.Errorf("%s does not match canonical path %s", path, relativePath)
 	}
 	normalized.Revision = codex.ComputeRevision(contents)
+	normalized.Canonical = append([]byte(nil), contents...)
 	return normalized, nil
 }
 
@@ -311,9 +314,11 @@ func parseProgressionDocument(path string, contents []byte) (codex.ProgressionDo
 	}
 	revision := codex.ComputeRevision(contents)
 	return codex.ProgressionDocument{
+		Version:      codex.Version,
 		EntryID:      entryID,
 		Progressions: normalized,
 		Revision:     &revision,
+		Canonical:    append([]byte(nil), contents...),
 	}, nil
 }
 
@@ -445,9 +450,6 @@ func decodeProgressions(path string, node *yaml.Node) ([]codex.Progression, erro
 		}
 		return progressions, nil
 	}
-	if node.Kind == yaml.SequenceNode && len(node.Content) == 0 {
-		return []codex.Progression{}, nil
-	}
 	return nil, fmt.Errorf("decode %s progressions: expected sequence", path)
 }
 
@@ -493,4 +495,81 @@ func sortedMetadataKeys(metadata map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// maskPathError strips absolute filesystem paths from OS-level errors so the
+// active project root never leaks through HTTP responses. The contract forbids
+// exposing filesystem paths outside the active project root; wrapping with a
+// relative path keeps errors contextual without revealing host layout.
+func maskPathError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) {
+		return fmt.Errorf("%s: %v", filepath.Base(pathErr.Path), pathErr.Err)
+	}
+	return err
+}
+
+// yamlScalar formats a string as a YAML scalar using the minimum quoting
+// required by the canonical contract: plain scalars for safe values (IDs,
+// tags, metadata keys, simple names), and double-quoted scalars for values
+// that contain characters YAML would otherwise misinterpret (newlines,
+// leading indicators, quotes, trailing whitespace, or empty strings).
+// Quoted scalars use Go-style double-quoting so embedded newlines serialize
+// as the documented `\n` escape rather than as block scalars.
+func yamlScalar(value string) string {
+	if value == "" {
+		return `""`
+	}
+	if needsYAMLQuoting(value) {
+		return strconv.Quote(value)
+	}
+	return value
+}
+
+// needsYAMLQuoting reports whether a plain scalar would be ambiguous or
+// invalid for the YAML emitter. This intentionally stays conservative so
+// canonical bytes remain stable and diffable.
+func needsYAMLQuoting(value string) bool {
+	if value == "" {
+		return true
+	}
+	// Quote if the value starts with a YAML indicator character or whitespace.
+	switch value[0] {
+	case '!', '&', '*', '-', '?', ':', '>', '|', '%', '@', '`', '"', '\'', '#', ',', '[', ']', '{', '}', ' ', '\t':
+		return true
+	}
+	// Quote if the value ends with whitespace.
+	if value[len(value)-1] == ' ' || value[len(value)-1] == '\t' {
+		return true
+	}
+	// Quote if the value contains a newline, colon-space, hash-space, or any
+	// control character. Newlines must serialize as the documented \n escape.
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if ch == '\n' || ch == '\t' || ch == '\r' || ch == 0 {
+			return true
+		}
+		if ch == ':' && i+1 < len(value) && (value[i+1] == ' ' || value[i+1] == '\t') {
+			return true
+		}
+		if ch == ' ' && i+1 < len(value) && value[i+1] == '#' {
+			return true
+		}
+		if ch < 0x20 {
+			return true
+		}
+	}
+	// Quote reserved YAML keywords that would otherwise parse as booleans,
+	// null, or numbers when the field is a string.
+	switch value {
+	case "null", "Null", "NULL", "~",
+		"true", "True", "TRUE", "false", "False", "FALSE",
+		"yes", "Yes", "YES", "no", "No", "NO",
+		"on", "On", "ON", "off", "Off", "OFF":
+		return true
+	}
+	return false
 }
