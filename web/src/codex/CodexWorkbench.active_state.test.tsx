@@ -205,6 +205,69 @@ test('supports remove and reorder controls for aliases, tags, and progressions',
   })
 })
 
+test('supports removing metadata rows and preserving explicit empty progression descriptions', async () => {
+  vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [entry] })
+  vi.mocked(api.getCodexEntry).mockResolvedValue({
+    ...entry,
+    metadata: { role: 'mentor', status: 'alive' },
+  })
+  vi.mocked(api.getCodexProgressions).mockResolvedValue({
+    entry_id: entry.id,
+    progressions: [{
+      id: 'prog_0123456789abcdef0123',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { description: 'Guide.', metadata: { status: 'alive' } },
+    }],
+    revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  })
+  vi.mocked(api.updateCodexEntry).mockResolvedValue(entry)
+  vi.mocked(api.saveCodexProgressions).mockResolvedValue({
+    entry_id: entry.id,
+    progressions: [{
+      id: 'prog_0123456789abcdef0123',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { description: '', metadata: { role: 'force-ghost' } },
+    }],
+    revision: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+  })
+
+  render(<CodexWorkbench project={project} />)
+
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Obi-Wan Kenobi' }))
+  await waitFor(() => expect(screen.getByLabelText('Metadata key 2')).toHaveValue('status'))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Remove metadata 2' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
+  await waitFor(() => expect(api.updateCodexEntry).toHaveBeenCalled())
+  expect(vi.mocked(api.updateCodexEntry).mock.calls[0]?.[1]).toEqual({
+    type: 'character',
+    name: 'Obi-Wan Kenobi',
+    aliases: ['Ben'],
+    tags: ['mentor'],
+    description: 'Guide.',
+    metadata: { role: 'mentor' },
+    expected_revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  })
+
+  await waitFor(() => expect(screen.getByLabelText('Progression description')).toHaveValue('Guide.'))
+  fireEvent.change(screen.getByLabelText('Progression description'), { target: { value: '' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Remove progression metadata 1' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Add progression metadata' }))
+  fireEvent.change(screen.getByLabelText('Progression metadata key 1'), { target: { value: 'role' } })
+  fireEvent.change(screen.getByLabelText('Progression metadata value 1'), { target: { value: 'force-ghost' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save progressions' }))
+  await waitFor(() => expect(api.saveCodexProgressions).toHaveBeenCalled())
+  expect(vi.mocked(api.saveCodexProgressions).mock.calls[0]?.[1]).toEqual({
+    progressions: [{
+      id: 'prog_0123456789abcdef0123',
+      anchor: { type: 'scene', id: 'scn_0123456789abcdef0123', timing: 'after' },
+      changes: { description: '', metadata: { role: 'force-ghost' } },
+    }],
+    expected_revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+  })
+})
+
 test('ignores stale entry and active-state responses after switching selection', async () => {
   const firstEntry = entry
   const secondEntry: CodexEntry = {

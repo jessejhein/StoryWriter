@@ -31,6 +31,36 @@ type ActiveProjectSession interface {
 	Set(project.Project)
 }
 
+type codexEntryResponse struct {
+	ID          string            `json:"id"`
+	Type        codex.EntryType   `json:"type"`
+	Name        string            `json:"name"`
+	Aliases     []string          `json:"aliases"`
+	Tags        []string          `json:"tags"`
+	Description string            `json:"description"`
+	Metadata    map[string]string `json:"metadata"`
+	Revision    string            `json:"revision,omitempty"`
+}
+
+type codexActiveStateResponse struct {
+	SceneID               string             `json:"scene_id"`
+	Entry                 codexEntryResponse `json:"entry"`
+	AppliedProgressionIDs []string           `json:"applied_progression_ids"`
+}
+
+func newCodexEntryResponse(entry codex.Entry) codexEntryResponse {
+	return codexEntryResponse{
+		ID:          entry.ID,
+		Type:        entry.Type,
+		Name:        entry.Name,
+		Aliases:     entry.Aliases,
+		Tags:        entry.Tags,
+		Description: entry.Description,
+		Metadata:    entry.Metadata,
+		Revision:    entry.Revision,
+	}
+}
+
 // StoryStore serves and mutates the active project's outline, scenes, and Codex state.
 type StoryStore interface {
 	// Outline returns the active project's hierarchical outline.
@@ -218,7 +248,11 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string][]codex.Entry{"entries": entries})
+		response := make([]codexEntryResponse, 0, len(entries))
+		for _, entry := range entries {
+			response = append(response, newCodexEntryResponse(entry))
+		}
+		writeJSON(writer, http.StatusOK, map[string][]codexEntryResponse{"entries": response})
 	})
 	mux.HandleFunc("POST /api/codex", func(writer http.ResponseWriter, request *http.Request) {
 		var createRequest struct {
@@ -257,7 +291,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusCreated, entry)
+		writeJSON(writer, http.StatusCreated, newCodexEntryResponse(entry))
 	})
 	mux.HandleFunc("GET /api/codex/{entry_id}", func(writer http.ResponseWriter, request *http.Request) {
 		entry, err := stories.LoadCodexEntry(request.Context(), request.PathValue("entry_id"))
@@ -265,7 +299,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, entry)
+		writeJSON(writer, http.StatusOK, newCodexEntryResponse(entry))
 	})
 	mux.HandleFunc("PUT /api/codex/{entry_id}", func(writer http.ResponseWriter, request *http.Request) {
 		var updateRequest struct {
@@ -304,7 +338,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, entry)
+		writeJSON(writer, http.StatusOK, newCodexEntryResponse(entry))
 	})
 	mux.HandleFunc("GET /api/codex/{entry_id}/progressions", func(writer http.ResponseWriter, request *http.Request) {
 		document, err := stories.LoadProgressions(request.Context(), request.PathValue("entry_id"))
@@ -352,7 +386,11 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, activeState)
+		writeJSON(writer, http.StatusOK, codexActiveStateResponse{
+			SceneID:               activeState.SceneID,
+			Entry:                 newCodexEntryResponse(activeState.Entry),
+			AppliedProgressionIDs: activeState.AppliedProgressionIDs,
+		})
 	})
 	return mux
 }

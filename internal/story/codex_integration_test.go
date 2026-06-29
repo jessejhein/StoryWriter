@@ -27,6 +27,8 @@ import (
 func TestMilestone3CodexWithRealAdapters(t *testing.T) {
 	t.Parallel()
 
+	// Test: the real-adapter Milestone 3 acceptance path preserves exact canonical Codex bytes, stable anchors, clean checkpoints, and stale/dirty protections across reload.
+	// Requirements: M3-R05, M3-R07, M3-R08, M3-R15, M3-R17, M3-R21
 	ctx := context.Background()
 	projectPath := filepath.Join(t.TempDir(), "codex-novel")
 	git := gitstore.New("git")

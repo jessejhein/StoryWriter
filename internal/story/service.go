@@ -491,6 +491,9 @@ func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request 
 	if !clean {
 		return codex.Entry{}, ErrDirtyWorktree
 	}
+	if err := codex.ValidateRevision(request.ExpectedRevision); err != nil {
+		return codex.Entry{}, err
+	}
 	currentEntry, err := s.files.LoadCodexEntry(ctx, current.Path, entryID)
 	if err != nil {
 		return codex.Entry{}, err

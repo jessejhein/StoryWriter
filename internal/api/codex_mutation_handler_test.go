@@ -4,6 +4,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -38,6 +39,13 @@ func TestCodexCreateAndUpdateRoutesValidateJSONAndMapStatuses(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want %d", response.Code, http.StatusCreated)
 	}
+	var created map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatalf("create response JSON error = %v", err)
+	}
+	if _, ok := created["version"]; ok {
+		t.Fatalf("create response leaked version: %s", response.Body.String())
+	}
 	if service.saveCodexRequest.Type != codex.TypeCharacter || service.saveCodexRequest.Name != "Obi-Wan Kenobi" {
 		t.Fatalf("create request = %#v", service.saveCodexRequest)
 	}
@@ -49,6 +57,13 @@ func TestCodexCreateAndUpdateRoutesValidateJSONAndMapStatuses(t *testing.T) {
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123", strings.NewReader(updateBody)))
 	if response.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want %d", response.Code, http.StatusOK)
+	}
+	var updated map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("update response JSON error = %v", err)
+	}
+	if _, ok := updated["version"]; ok {
+		t.Fatalf("update response leaked version: %s", response.Body.String())
 	}
 	if service.codexEntryID != "char_0123456789abcdef0123" || service.saveCodexRequest.ExpectedRevision == "" {
 		t.Fatalf("update request = %#v %q", service.saveCodexRequest, service.codexEntryID)
@@ -67,6 +82,7 @@ func TestCodexCreateAndUpdateRoutesValidateJSONAndMapStatuses(t *testing.T) {
 		{name: "missing create metadata", method: http.MethodPost, path: "/api/codex", body: `{"type":"character","name":"Ben","aliases":[],"tags":[],"description":""}`, status: http.StatusBadRequest},
 		{name: "missing update aliases", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: `{"name":"Ben Kenobi","tags":["mentor"],"description":"Guide.","metadata":{"status":"alive"},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, status: http.StatusBadRequest},
 		{name: "missing update expected revision", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: `{"name":"Ben Kenobi","aliases":["Ben"],"tags":["mentor"],"description":"Guide.","metadata":{"status":"alive"}}`, status: http.StatusBadRequest},
+		{name: "invalid update revision shape", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: `{"name":"Ben Kenobi","aliases":["Ben"],"tags":["mentor"],"description":"Guide.","metadata":{"status":"alive"},"expected_revision":"stale"}`, err: codex.ErrInvalidRevision, status: http.StatusBadRequest},
 		{name: "bad type", method: http.MethodPost, path: "/api/codex", body: createBody, err: codex.ErrInvalidType, status: http.StatusBadRequest},
 		{name: "stale revision", method: http.MethodPut, path: "/api/codex/char_0123456789abcdef0123", body: updateBody, err: story.ErrStaleRevision, status: http.StatusConflict},
 		{name: "missing entry", method: http.MethodGet, path: "/api/codex/char_0123456789abcdef0123", err: codex.ErrEntryNotFound, status: http.StatusNotFound},

@@ -98,10 +98,14 @@ type fakeFileStore struct {
 	codexEntries             []codex.Entry
 	loadCodexEntriesErr      error
 	codexEntry               codex.Entry
+	loadCodexEntryCalls      int
 	loadCodexEntryErr        error
 	codexProgressions        codex.ProgressionDocument
+	loadProgressionsCalls    int
 	loadCodexProgressionsErr error
 	codexEntryBytes          []byte
+	codexEntryMarshalCalls   int
+	codexEntryBytesSequence  [][]byte
 	marshalCodexEntryErr     error
 	progressionBytes         []byte
 	marshalProgressionsErr   error
@@ -148,6 +152,7 @@ func (s *fakeFileStore) LoadCodexEntries(context.Context, string) ([]codex.Entry
 }
 
 func (s *fakeFileStore) LoadCodexEntry(context.Context, string, string) (codex.Entry, error) {
+	s.loadCodexEntryCalls++
 	if s.loadCodexEntryErr != nil {
 		return codex.Entry{}, s.loadCodexEntryErr
 	}
@@ -155,6 +160,7 @@ func (s *fakeFileStore) LoadCodexEntry(context.Context, string, string) (codex.E
 }
 
 func (s *fakeFileStore) LoadProgressions(context.Context, string, string) (codex.ProgressionDocument, error) {
+	s.loadProgressionsCalls++
 	if s.loadCodexProgressionsErr != nil {
 		return codex.ProgressionDocument{}, s.loadCodexProgressionsErr
 	}
@@ -203,6 +209,10 @@ func (s *fakeFileStore) MarshalSceneDocument(scene SceneDocument) ([]byte, error
 func (s *fakeFileStore) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 	if s.marshalCodexEntryErr != nil {
 		return nil, s.marshalCodexEntryErr
+	}
+	s.codexEntryMarshalCalls++
+	if len(s.codexEntryBytesSequence) >= s.codexEntryMarshalCalls {
+		return s.codexEntryBytesSequence[s.codexEntryMarshalCalls-1], nil
 	}
 	if s.codexEntryBytes != nil {
 		return s.codexEntryBytes, nil

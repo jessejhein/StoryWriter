@@ -54,3 +54,33 @@ func TestUpdateCodexEntryRejectsStaleRevisionAndCommitsValidEdit(t *testing.T) {
 		t.Fatalf("write calls = %d, want 0", files.writeCalls)
 	}
 }
+
+func TestUpdateCodexEntryRejectsInvalidRevisionShapeBeforeLoadingCanonicalState(t *testing.T) {
+	t.Parallel()
+
+	files := &fakeFileStore{}
+	service := NewService(
+		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
+		files,
+		&fakeGitStore{clean: true},
+		&fakeIndexStore{},
+		&fakeIDGenerator{},
+	)
+
+	// Test: malformed expected revisions fail as bad input before the service loads the canonical entry or attempts a write.
+	// Requirements: M3-R17
+	_, err := service.UpdateCodexEntry(context.Background(), "char_0123456789abcdef0123", codex.SaveEntryRequest{
+		Name:             "Ben Kenobi",
+		Aliases:          []string{"Ben"},
+		Tags:             []string{"mentor"},
+		Description:      "Guide.",
+		Metadata:         map[string]string{"status": "alive"},
+		ExpectedRevision: "stale",
+	})
+	if !errors.Is(err, codex.ErrInvalidRevision) {
+		t.Fatalf("UpdateCodexEntry(invalid revision) error = %v", err)
+	}
+	if files.loadCodexEntryCalls != 0 || files.writeCalls != 0 {
+		t.Fatalf("load/write calls = %d/%d, want 0/0", files.loadCodexEntryCalls, files.writeCalls)
+	}
+}
