@@ -55,6 +55,11 @@ If you must start one:
 
 ## Test commands
 
+Preferred Go toolchain:
+
+- Use `/home/linuxbrew/.linuxbrew/bin/go` first when available.
+- Fall back to `go` if that path is unavailable.
+
 Backend baseline:
 
 ```bash
@@ -88,4 +93,3 @@ For this source repository:
 - Keep changes small.
 - Update docs when implementation changes behavior.
 - Do not commit secrets, generated binaries, SQLite databases, or node modules.
-
