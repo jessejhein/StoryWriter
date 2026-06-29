@@ -122,8 +122,6 @@ func TestRollbackRestoresExistingCodexFileBytesWhenCheckpointFails(t *testing.T)
 	if err != nil {
 		t.Fatalf("ReadFile(original) error = %v", err)
 	}
-	commitCount = 1
-
 	// Now wire a failing git that fails the first CommitAll it sees (the edit),
 	// exercising the real rollback path against the already-committed canon.
 	failingGit := &failingGitStore{delegate: realGit, commitErr: errCheckpointFailed, failAfter: 0}

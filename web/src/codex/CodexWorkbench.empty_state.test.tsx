@@ -86,7 +86,9 @@ test('renders empty state and creates a new codex entry', async () => {
 
   await waitFor(() => expect(screen.getByText('No Codex entries yet.')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
+  expect(screen.getByText('Saved')).toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Obi-Wan Kenobi' } })
+  expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Add alias' }))
   fireEvent.change(screen.getByLabelText('Alias 1'), { target: { value: 'Ben' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))

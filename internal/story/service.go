@@ -416,15 +416,14 @@ func (s *Service) LoadCodexEntry(ctx context.Context, entryID string) (codex.Ent
 
 // CreateCodexEntry creates and checkpoints one new canonical Codex entry.
 func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryRequest) (codex.Entry, error) {
-	// Step 1: resolve the active project before acquiring the lock so a missing
-	// project (409) does not block concurrent mutations.
+	// Step 1: resolve the active project before acquiring the shared mutation lock.
 	current, err := s.currentProject()
 	if err != nil {
 		return codex.Entry{}, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Step 3: verify the worktree is clean before any fallible canonical work.
+	// Step 3: verify the worktree is clean before loading canonical state.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
 		return codex.Entry{}, err
@@ -432,7 +431,7 @@ func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryR
 	if !clean {
 		return codex.Entry{}, ErrDirtyWorktree
 	}
-	// Step 6: validate and normalize the complete next document under the lock.
+	// Step 6: validate and normalize the complete next document in memory.
 	request, err = codex.NormalizeCreateRequest(request)
 	if err != nil {
 		return codex.Entry{}, err

@@ -23,6 +23,7 @@ import {
   type CodexProgression,
   type Outline,
   type Project,
+  type SaveCodexEntryRequest,
 } from '../api'
 
 type Props = {
@@ -91,7 +92,7 @@ function entryToDraft(entry: CodexEntry): EntryDraft {
   }
 }
 
-function draftToRequest(draft: EntryDraft) {
+function draftToRequest(draft: EntryDraft): SaveCodexEntryRequest {
   return {
     type: draft.type,
     name: draft.name,
@@ -303,7 +304,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
     setProgressions([])
     setSavedProgressionsSnapshot(normalizeProgressionRows([]))
     setProgressionRevision(null)
-    setEntryStatus('Unsaved changes')
+    setEntryStatus('Saved')
     setProgressionStatus('Saved')
     setActiveState(null)
   }
@@ -318,9 +319,13 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
     setError('')
     setEntryStatus('Saving')
     try {
+      const request = draftToRequest(entryDraft)
+      if (entryDraft.id) {
+        delete request.type
+      }
       const saved = entryDraft.id
-        ? await updateCodexEntry(entryDraft.id, draftToRequest(entryDraft))
-        : await createCodexEntry(draftToRequest(entryDraft))
+        ? await updateCodexEntry(entryDraft.id, request)
+        : await createCodexEntry(request)
       const draft = entryToDraft(saved)
       setEntryDraft(draft)
       setSavedEntrySnapshot(normalizeDraft(draft))

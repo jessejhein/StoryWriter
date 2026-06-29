@@ -84,3 +84,46 @@ func TestUpdateCodexEntryRejectsInvalidRevisionShapeBeforeLoadingCanonicalState(
 		t.Fatalf("load/write calls = %d/%d, want 0/0", files.loadCodexEntryCalls, files.writeCalls)
 	}
 }
+
+func TestUpdateCodexEntryRejectsByteIdenticalCanonicalContent(t *testing.T) {
+	t.Parallel()
+
+	current := codex.Entry{
+		ID:          "char_0123456789abcdef0123",
+		Type:        codex.TypeCharacter,
+		Name:        "Ben",
+		Aliases:     []string{},
+		Tags:        []string{},
+		Description: "Guide.",
+		Metadata:    map[string]string{},
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Canonical:   []byte("canonical-entry"),
+	}
+	files := &fakeFileStore{codexEntry: current, codexEntryBytes: []byte("canonical-entry")}
+	git := &fakeGitStore{clean: true}
+	index := &fakeIndexStore{}
+	service := NewService(
+		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
+		files,
+		git,
+		index,
+		&fakeIDGenerator{},
+	)
+
+	// Test: an update whose canonical bytes match storage returns the typed no-change error with no write, index, or Git side effects.
+	// Requirements: M3-R03, M3-R15
+	_, err := service.UpdateCodexEntry(context.Background(), current.ID, codex.SaveEntryRequest{
+		Name:             current.Name,
+		Aliases:          current.Aliases,
+		Tags:             current.Tags,
+		Description:      current.Description,
+		Metadata:         current.Metadata,
+		ExpectedRevision: current.Revision,
+	})
+	if !errors.Is(err, codex.ErrNoChanges) {
+		t.Fatalf("UpdateCodexEntry() error = %v, want %v", err, codex.ErrNoChanges)
+	}
+	if files.writeCalls != 0 || index.rebuildCalls != 0 || git.commitCalls != 0 {
+		t.Fatalf("write/rebuild/commit calls = %d/%d/%d, want 0/0/0", files.writeCalls, index.rebuildCalls, git.commitCalls)
+	}
+}

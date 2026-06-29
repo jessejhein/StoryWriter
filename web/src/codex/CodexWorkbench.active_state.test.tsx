@@ -251,7 +251,6 @@ test('supports removing metadata rows and preserving explicit empty progression 
   fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
   await waitFor(() => expect(api.updateCodexEntry).toHaveBeenCalled())
   expect(vi.mocked(api.updateCodexEntry).mock.calls[0]?.[1]).toEqual({
-    type: 'character',
     name: 'Obi-Wan Kenobi',
     aliases: ['Ben'],
     tags: ['mentor'],

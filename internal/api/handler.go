@@ -369,7 +369,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			Name:             updateRequest.Name,
 			Aliases:          updateRequest.Aliases,
 			Tags:             updateRequest.Tags,
-			Description:       updateRequest.Description,
+			Description:      updateRequest.Description,
 			Metadata:         updateRequest.Metadata,
 			ExpectedRevision: updateRequest.ExpectedRevision,
 		})

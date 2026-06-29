@@ -104,11 +104,11 @@ type Entry struct {
 // response shape, so it is excluded from JSON serialization. Canonical holds
 // the exact canonical bytes the document was loaded from.
 type ProgressionDocument struct {
-	Version      int               `json:"-"`
-	EntryID      string            `json:"entry_id"`
-	Progressions []Progression     `json:"progressions"`
-	Revision     *string           `json:"revision"`
-	Canonical    []byte            `json:"-"`
+	Version      int           `json:"-"`
+	EntryID      string        `json:"entry_id"`
+	Progressions []Progression `json:"progressions"`
+	Revision     *string       `json:"revision"`
+	Canonical    []byte        `json:"-"`
 }
 
 // Progression applies one change set at a stable scene anchor.
@@ -422,10 +422,6 @@ func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes [
 		return active[i].index < active[j].index
 	})
 	resolved := base
-	// The resolved entry is a derived projection, not a canonical document, so it
-	// carries no revision and no schema version tag.
-	resolved.Revision = ""
-	resolved.Version = 0
 	applied := make([]string, 0, len(active))
 	for _, item := range active {
 		if item.progression.Changes.Description != nil {

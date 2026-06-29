@@ -10,19 +10,41 @@ import (
 	"testing"
 )
 
-func TestLoadProgressionsRejectsEntryIDMismatch(t *testing.T) {
+func TestLoadProgressionsRejectsMalformedCanonicalDocuments(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
-	mustMkdirAll(t, root, "progressions")
-	path := filepath.Join(root, "progressions", "char_0123456789abcdef0123.yaml")
-	if err := os.WriteFile(path, []byte("version: 1\nentry_id: \"char_99999999999999999999\"\nprogressions: []\n"), 0o644); err != nil {
-		t.Fatalf("WriteFile() error = %v", err)
+	cases := []struct {
+		name     string
+		contents string
+	}{
+		{name: "entry ID disagrees with filename", contents: "version: 1\nentry_id: char_99999999999999999999\nprogressions: []\n"},
+		{name: "unsupported version", contents: "version: 2\nentry_id: char_0123456789abcdef0123\nprogressions: []\n"},
+		{name: "unknown top-level field", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions: []\nextra: true\n"},
+		{name: "malformed progression ID", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: bad\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes:\n      description: Changed.\n"},
+		{name: "non-scene anchor", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: chapter\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes:\n      description: Changed.\n"},
+		{name: "duplicate anchor field", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      id: scn_0123456789abcdef0124\n      timing: after\n    changes:\n      description: Changed.\n"},
+		{name: "invalid timing", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: during\n    changes:\n      description: Changed.\n"},
+		{name: "ineffective changes", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes: {}\n"},
+		{name: "empty metadata", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes:\n      description: Changed.\n      metadata: {}\n"},
 	}
 
-	// Test: a progression file whose entry_id disagrees with its filename is rejected as malformed canonical state.
-	// Requirements: M3-R18
-	if _, err := New().LoadProgressions(context.Background(), root, "char_0123456789abcdef0123"); err == nil {
-		t.Fatal("LoadProgressions() error = nil")
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			mustMkdirAll(t, root, "progressions")
+			path := filepath.Join(root, "progressions", "char_0123456789abcdef0123.yaml")
+			if err := os.WriteFile(path, []byte(testCase.contents), 0o644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+
+			// Test: malformed, unsupported, or inconsistent canonical progression documents are rejected rather than repaired.
+			// Requirements: M3-R05, M3-R18
+			if _, err := New().LoadProgressions(context.Background(), root, "char_0123456789abcdef0123"); err == nil {
+				t.Fatal("LoadProgressions() error = nil")
+			}
+		})
 	}
 }

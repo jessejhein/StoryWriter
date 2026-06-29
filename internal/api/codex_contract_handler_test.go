@@ -190,7 +190,7 @@ func TestCodexProgressionResponseShape(t *testing.T) {
 	document := codex.ProgressionDocument{
 		EntryID: "char_0123456789abcdef0123",
 		Progressions: []codex.Progression{{
-			ID:     "prog_0123456789abcdef0123",
+			ID:      "prog_0123456789abcdef0123",
 			Anchor:  codex.ProgressionAnchor{Type: "scene", ID: "scn_0123456789abcdef0123", Timing: "after"},
 			Changes: codex.ProgressionChange{Description: ptrString("Gone."), Metadata: map[string]string{"status": "deceased"}},
 		}},
@@ -205,8 +205,8 @@ func TestCodexProgressionResponseShape(t *testing.T) {
 	var body struct {
 		EntryID      string `json:"entry_id"`
 		Progressions []struct {
-			ID      string `json:"id"`
-			Anchor  struct {
+			ID     string `json:"id"`
+			Anchor struct {
 				Type   string `json:"type"`
 				ID     string `json:"id"`
 				Timing string `json:"timing"`

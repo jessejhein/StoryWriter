@@ -1,12 +1,13 @@
 // BDD Scenario: 3.1.5 - Reject missing or malformed canonical entries
-// Requirements: M3-R01, M3-R05, M3-R18
-// Test purpose: Plain-English description of the strict YAML parser behavior for unknown fields and malformed canonical Codex files.
+// Requirements: M3-R01, M3-R09, M3-R18
+// Test purpose: Strict Codex reads reject malformed files and keep host filesystem paths out of errors.
 package storyfile
 
 import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -24,5 +25,27 @@ func TestLoadCodexEntryRejectsMalformedCanonicalYAML(t *testing.T) {
 	// Requirements: M3-R18
 	if _, err := New().LoadCodexEntry(context.Background(), root, "char_0123456789abcdef0123"); err == nil {
 		t.Fatal("LoadCodexEntry() error = nil")
+	}
+}
+
+func TestLoadCodexEntryMasksHostFilesystemPath(t *testing.T) {
+	t.Parallel()
+
+	store := New()
+	store.readFile = func(string) ([]byte, error) {
+		return nil, &os.PathError{Op: "open", Path: "/private/story/codex/characters/char_0123456789abcdef0123.yaml", Err: os.ErrPermission}
+	}
+
+	// Test: adapter errors retain the canonical relative path but do not expose the host project root.
+	// Requirements: M3-R09, M3-R18
+	_, err := store.LoadCodexEntry(context.Background(), "/private/story", "char_0123456789abcdef0123")
+	if err == nil {
+		t.Fatal("LoadCodexEntry() error = nil")
+	}
+	if strings.Contains(err.Error(), "/private/story") {
+		t.Fatalf("LoadCodexEntry() leaked host path: %v", err)
+	}
+	if !strings.Contains(err.Error(), "codex/characters/char_0123456789abcdef0123.yaml") {
+		t.Fatalf("LoadCodexEntry() error lacks canonical context: %v", err)
 	}
 }

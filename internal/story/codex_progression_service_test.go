@@ -177,3 +177,48 @@ func TestSaveProgressionsRejectsInventedProgressionID(t *testing.T) {
 		t.Fatalf("write calls = %d, want 0", files.writeCalls)
 	}
 }
+
+func TestSaveProgressionsRejectsByteIdenticalCanonicalContent(t *testing.T) {
+	t.Parallel()
+
+	revision := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	description := "Gone."
+	progression := codex.Progression{
+		ID:      "prog_0123456789abcdef0123",
+		Anchor:  codex.ProgressionAnchor{Type: "scene", ID: "scn_00000000000000000001", Timing: "after"},
+		Changes: codex.ProgressionChange{Description: &description},
+	}
+	files := &fakeFileStore{
+		loadOutline: mustSceneOutline(t),
+		codexEntry: codex.Entry{
+			ID: "char_0123456789abcdef0123", Type: codex.TypeCharacter, Name: "Ben",
+			Aliases: []string{}, Tags: []string{}, Description: "Guide.", Metadata: map[string]string{},
+		},
+		codexProgressions: codex.ProgressionDocument{
+			Version: codex.Version, EntryID: "char_0123456789abcdef0123",
+			Progressions: []codex.Progression{progression}, Revision: &revision, Canonical: []byte("canonical-progressions"),
+		},
+		progressionBytes: []byte("canonical-progressions"),
+	}
+	git := &fakeGitStore{clean: true}
+	index := &fakeIndexStore{}
+	service := NewService(
+		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
+		files,
+		git,
+		index,
+		&fakeIDGenerator{},
+	)
+
+	// Test: a progression replacement whose canonical bytes match storage returns no-change without persistence side effects.
+	// Requirements: M3-R05, M3-R15
+	_, err := service.SaveProgressions(context.Background(), "char_0123456789abcdef0123", codex.SaveProgressionsRequest{
+		Progressions: []codex.Progression{progression}, ExpectedRevision: &revision,
+	})
+	if !errors.Is(err, codex.ErrNoChanges) {
+		t.Fatalf("SaveProgressions() error = %v, want %v", err, codex.ErrNoChanges)
+	}
+	if files.writeCalls != 0 || index.rebuildCalls != 0 || git.commitCalls != 0 {
+		t.Fatalf("write/rebuild/commit calls = %d/%d/%d, want 0/0/0", files.writeCalls, index.rebuildCalls, git.commitCalls)
+	}
+}
