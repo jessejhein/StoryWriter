@@ -1,3 +1,11 @@
+/**
+ * SceneEditor.tsx
+ *
+ * Hosts the Milestone 2 canonical scene editor. It loads one scene by stable
+ * ID, tracks editable metadata and markdown, and performs explicit saves with
+ * optimistic revision checks.
+ */
+
 import { useEffect, useState } from 'react'
 import type { Project, SaveSceneRequest, SceneDocument } from '../api'
 import { APIError, getScene, saveScene } from '../api'
@@ -60,6 +68,12 @@ function validateDraft(draft: Draft | null): string | null {
   return null
 }
 
+/**
+ * SceneEditor
+ *
+ * Renders the scene metadata form, CodeMirror editor surface, and save or
+ * reload actions for one canonical scene document.
+ */
 export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }: Props) {
   const [baseline, setBaseline] = useState<SceneDocument | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)

@@ -1,5 +1,6 @@
-// Package project creates and opens portable story project folders.
 package project
+
+// service.go orchestrates project-folder creation, validation, and derived-index setup.
 
 import (
 	"bufio"
@@ -21,15 +22,21 @@ var nonIdentifier = regexp.MustCompile(`[^a-z0-9]+`)
 
 // GitStore is the project history boundary.
 type GitStore interface {
+	// Init creates a repository at path.
 	Init(ctx context.Context, path string) error
+	// CommitAll stages the project files and records one commit.
 	CommitAll(ctx context.Context, path, message string) error
+	// IsRepo reports whether path is a repository root.
 	IsRepo(ctx context.Context, path string) (bool, error)
 }
 
 // IndexStore is the disposable index boundary.
 type IndexStore interface {
+	// Init creates the initial derived index for a new project.
 	Init(ctx context.Context, projectPath string) error
+	// Rebuild recreates the derived index from canonical files.
 	Rebuild(ctx context.Context, projectPath string) error
+	// Verify checks that the derived index exists and is readable.
 	Verify(ctx context.Context, projectPath string) error
 }
 
@@ -55,7 +62,7 @@ type Service struct {
 	now   func() time.Time
 }
 
-// NewService creates a project service.
+// NewService creates a project service that uses the supplied Git, index, and clock dependencies.
 func NewService(git GitStore, index IndexStore, now func() time.Time) *Service {
 	return &Service{git: git, index: index, now: now}
 }

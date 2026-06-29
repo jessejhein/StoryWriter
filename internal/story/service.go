@@ -1,5 +1,7 @@
 package story
 
+// service.go coordinates active-project reads, canonical mutations, indexing, and checkpoints.
+
 import (
 	"bytes"
 	"context"
@@ -16,53 +18,81 @@ import (
 type NodeKind string
 
 const (
-	NodeKindArc         NodeKind = "arc"
-	NodeKindChapter     NodeKind = "chapter"
-	NodeKindScene       NodeKind = "scene"
-	NodeKindCharacter   NodeKind = "character"
-	NodeKindLocation    NodeKind = "location"
-	NodeKindLore        NodeKind = "lore"
-	NodeKindCustom      NodeKind = "custom"
+	// NodeKindArc identifies generated IDs for arcs.
+	NodeKindArc NodeKind = "arc"
+	// NodeKindChapter identifies generated IDs for chapters.
+	NodeKindChapter NodeKind = "chapter"
+	// NodeKindScene identifies generated IDs for scenes.
+	NodeKindScene NodeKind = "scene"
+	// NodeKindCharacter identifies generated IDs for character Codex entries.
+	NodeKindCharacter NodeKind = "character"
+	// NodeKindLocation identifies generated IDs for location Codex entries.
+	NodeKindLocation NodeKind = "location"
+	// NodeKindLore identifies generated IDs for lore Codex entries.
+	NodeKindLore NodeKind = "lore"
+	// NodeKindCustom identifies generated IDs for custom Codex entries.
+	NodeKindCustom NodeKind = "custom"
+	// NodeKindProgression identifies generated IDs for Codex progressions.
 	NodeKindProgression NodeKind = "progression"
 )
 
 // Session resolves the active project for the current backend process.
 type Session interface {
+	// Current returns the active project when one has been selected.
 	Current() (project.Project, bool)
 }
 
 // FileStore loads, marshals, and atomically writes canonical story files.
 type FileStore interface {
+	// Load returns the canonical outline and referenced structure files.
 	Load(ctx context.Context, projectPath string) (Outline, error)
+	// LoadScene returns one canonical scene document.
 	LoadScene(ctx context.Context, projectPath, sceneID string) (SceneDocument, error)
+	// LoadCodexEntries returns every canonical Codex entry.
 	LoadCodexEntries(ctx context.Context, projectPath string) ([]codex.Entry, error)
+	// LoadCodexEntry returns one canonical Codex entry.
 	LoadCodexEntry(ctx context.Context, projectPath, entryID string) (codex.Entry, error)
+	// LoadProgressions returns one canonical progression document.
 	LoadProgressions(ctx context.Context, projectPath, entryID string) (codex.ProgressionDocument, error)
+	// Exists reports whether one canonical relative path exists.
 	Exists(ctx context.Context, projectPath, relativePath string) (bool, error)
+	// MarshalOutline encodes the canonical outline ordering file.
 	MarshalOutline(outline Outline) ([]byte, error)
+	// MarshalArc encodes one canonical arc file.
 	MarshalArc(arc Arc) ([]byte, error)
+	// MarshalChapter encodes one canonical chapter file.
 	MarshalChapter(chapter Chapter) ([]byte, error)
+	// MarshalScene encodes a new canonical scene file.
 	MarshalScene(scene Scene) ([]byte, error)
+	// MarshalSceneDocument encodes a full canonical scene document.
 	MarshalSceneDocument(scene SceneDocument) ([]byte, error)
+	// MarshalCodexEntry encodes one canonical Codex entry file.
 	MarshalCodexEntry(entry codex.Entry) ([]byte, error)
+	// MarshalProgressions encodes one canonical progression document.
 	MarshalProgressions(document codex.ProgressionDocument) ([]byte, error)
+	// WriteFiles atomically replaces the supplied canonical files and returns a rollback closure.
 	WriteFiles(ctx context.Context, projectPath string, files map[string][]byte) (func() error, error)
 }
 
 // GitStore guards mutation safety and records checkpoints.
 type GitStore interface {
+	// IsClean reports whether the project worktree is free of tracked changes.
 	IsClean(ctx context.Context, path string) (bool, error)
+	// CommitAll stages and commits the current canonical mutation.
 	CommitAll(ctx context.Context, path, message string) error
+	// UnstageAll removes staged changes without discarding the working tree.
 	UnstageAll(ctx context.Context, path string) error
 }
 
 // IndexStore rebuilds the disposable project index.
 type IndexStore interface {
+	// Rebuild recreates the derived index from canonical project files.
 	Rebuild(ctx context.Context, projectPath string) error
 }
 
 // IDGenerator returns stable opaque IDs for new structure nodes.
 type IDGenerator interface {
+	// Next returns the next generated ID for the requested node kind.
 	Next(kind NodeKind) (string, error)
 }
 
@@ -82,7 +112,7 @@ type Service struct {
 	mu      sync.RWMutex
 }
 
-// NewService creates the structural mutation service.
+// NewService creates the active-project story service with the supplied boundaries.
 func NewService(session Session, files FileStore, git GitStore, index IndexStore, ids IDGenerator) *Service {
 	return &Service{
 		session: session,

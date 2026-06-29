@@ -1,3 +1,11 @@
+/**
+ * CodexWorkbench.tsx
+ *
+ * Provides the Milestone 3 Codex workspace for managing canonical entries,
+ * editing ordered progressions, and inspecting resolved active state at a
+ * selected scene.
+ */
+
 import { ChangeEvent, useEffect, useState } from 'react'
 import {
   APIError,
@@ -132,6 +140,12 @@ function compareCodexEntries(left: CodexEntry, right: CodexEntry) {
   return 0
 }
 
+/**
+ * CodexWorkbench
+ *
+ * Renders the active project's Codex editor, progression editor, and
+ * active-state inspector with explicit save and dirty-state behavior.
+ */
 export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   const [entries, setEntries] = useState<CodexEntry[]>([])
   const [outline, setOutline] = useState<Outline | null>(null)

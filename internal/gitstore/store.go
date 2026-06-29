@@ -1,5 +1,6 @@
-// Package gitstore adapts the Git command-line client for story project history.
 package gitstore
+
+// store.go implements the Git adapter used for project integrity checks and checkpoints.
 
 import (
 	"context"

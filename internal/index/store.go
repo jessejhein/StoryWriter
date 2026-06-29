@@ -1,5 +1,6 @@
-// Package index maintains the disposable SQLite index for a story project.
 package index
+
+// store.go rebuilds and verifies the disposable SQLite index for canonical files.
 
 import (
 	"context"

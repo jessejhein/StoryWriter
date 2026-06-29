@@ -1,3 +1,11 @@
+/**
+ * App.tsx
+ *
+ * Hosts the local-first Storywork shell. It creates or opens a project,
+ * switches between the outline, scene editor, and Codex workbench views,
+ * and centralizes cross-view dirty-state navigation guards.
+ */
+
 import { FormEvent, useEffect, useState } from 'react'
 import { createProject, getHealth, openProject, type Project } from './api'
 import CodexWorkbench from './codex/CodexWorkbench'
@@ -10,6 +18,11 @@ type ProjectView =
   | { mode: 'codex' }
   | { mode: 'scene'; sceneID: string }
 
+/**
+ * App
+ *
+ * Renders the root Storywork UI and coordinates project-level navigation.
+ */
 export default function App() {
   const [health, setHealth] = useState('Connecting')
   const [name, setName] = useState('')

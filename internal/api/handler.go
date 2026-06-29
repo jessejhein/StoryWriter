@@ -1,5 +1,6 @@
-// Package api provides the local HTTP API.
 package api
+
+// handler.go defines the Storywork HTTP routes and JSON error-mapping policy.
 
 import (
 	"context"
@@ -17,34 +18,51 @@ import (
 
 // ProjectStore is the project application boundary used by HTTP handlers.
 type ProjectStore interface {
+	// Create provisions a new portable project folder and returns its summary.
 	Create(ctx context.Context, request project.CreateRequest) (project.Project, error)
+	// Open validates an existing project folder and returns its summary.
 	Open(ctx context.Context, path string) (project.Project, error)
 }
 
 // ActiveProjectSession stores the current project for later outline routes.
 type ActiveProjectSession interface {
+	// Set replaces the current active project for later requests.
 	Set(project.Project)
 }
 
-// StoryStore serves and mutates the active project's outline.
+// StoryStore serves and mutates the active project's outline, scenes, and Codex state.
 type StoryStore interface {
+	// Outline returns the active project's hierarchical outline.
 	Outline(ctx context.Context) (story.Outline, error)
+	// CreateArc appends one new top-level arc.
 	CreateArc(ctx context.Context, title string) (story.MutationResult, error)
+	// CreateChapter appends one new chapter under an existing arc.
 	CreateChapter(ctx context.Context, arcID, title string) (story.MutationResult, error)
+	// CreateScene appends one new scene under an existing chapter.
 	CreateScene(ctx context.Context, chapterID, title string) (story.MutationResult, error)
+	// Reorder reorders chapters or scenes using stable IDs.
 	Reorder(ctx context.Context, request story.ReorderRequest) (story.MutationResult, error)
+	// LoadScene returns one canonical scene for editor use.
 	LoadScene(ctx context.Context, sceneID string) (story.SceneDocument, error)
+	// SaveScene validates and persists one explicit scene edit.
 	SaveScene(ctx context.Context, sceneID string, request story.SaveSceneRequest) (story.SceneDocument, error)
+	// CodexEntries returns the active project's validated Codex list.
 	CodexEntries(ctx context.Context) ([]codex.Entry, error)
+	// LoadCodexEntry returns one validated canonical Codex entry.
 	LoadCodexEntry(ctx context.Context, entryID string) (codex.Entry, error)
+	// CreateCodexEntry creates one new canonical Codex entry.
 	CreateCodexEntry(ctx context.Context, request codex.SaveEntryRequest) (codex.Entry, error)
+	// UpdateCodexEntry edits one existing canonical Codex entry.
 	UpdateCodexEntry(ctx context.Context, entryID string, request codex.SaveEntryRequest) (codex.Entry, error)
+	// LoadProgressions returns one entry's ordered progression document.
 	LoadProgressions(ctx context.Context, entryID string) (codex.ProgressionDocument, error)
+	// SaveProgressions replaces one entry's ordered progression document.
 	SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error)
+	// ResolveActiveCodexState resolves one entry as of a target scene.
 	ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error)
 }
 
-// NewHandler creates the Milestone 0 API router.
+// NewHandler creates the full local Storywork HTTP router for the current milestone set.
 func NewHandler(projects ProjectStore, session ActiveProjectSession, stories StoryStore, version string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(writer http.ResponseWriter, _ *http.Request) {

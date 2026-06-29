@@ -1,5 +1,6 @@
-// Package codex defines the pure Milestone 3 Codex domain model.
 package codex
+
+// model.go defines Codex entries, progression validation, and active-state resolution.
 
 import (
 	"crypto/sha256"
@@ -13,6 +14,7 @@ import (
 )
 
 const (
+	// Version is the canonical schema version for Codex and progression documents.
 	Version                 = 1
 	maxNameRunes            = 200
 	maxTagRunes             = 64
@@ -24,18 +26,30 @@ const (
 )
 
 var (
-	ErrInvalidType        = errors.New("invalid codex type")
-	ErrInvalidID          = errors.New("invalid codex ID")
-	ErrInvalidName        = errors.New("invalid codex name")
-	ErrInvalidAlias       = errors.New("invalid codex alias")
-	ErrInvalidTag         = errors.New("invalid codex tag")
+	// ErrInvalidType reports an unsupported Codex entry type.
+	ErrInvalidType = errors.New("invalid codex type")
+	// ErrInvalidID reports a malformed Codex or progression ID.
+	ErrInvalidID = errors.New("invalid codex ID")
+	// ErrInvalidName reports an invalid canonical entry name.
+	ErrInvalidName = errors.New("invalid codex name")
+	// ErrInvalidAlias reports invalid aliases for a Codex entry.
+	ErrInvalidAlias = errors.New("invalid codex alias")
+	// ErrInvalidTag reports invalid Codex tags.
+	ErrInvalidTag = errors.New("invalid codex tag")
+	// ErrInvalidDescription reports invalid canonical description content.
 	ErrInvalidDescription = errors.New("invalid codex description")
-	ErrInvalidMetadata    = errors.New("invalid codex metadata")
-	ErrInvalidRevision    = errors.New("invalid codex revision")
+	// ErrInvalidMetadata reports invalid Codex metadata keys or values.
+	ErrInvalidMetadata = errors.New("invalid codex metadata")
+	// ErrInvalidRevision reports an invalid Codex revision token.
+	ErrInvalidRevision = errors.New("invalid codex revision")
+	// ErrInvalidProgression reports invalid progression structure or changes.
 	ErrInvalidProgression = errors.New("invalid codex progression")
-	ErrEntryNotFound      = errors.New("codex entry not found")
-	ErrSceneNotFound      = errors.New("scene not found")
-	ErrNoChanges          = errors.New("codex save has no changes")
+	// ErrEntryNotFound reports a missing canonical Codex entry.
+	ErrEntryNotFound = errors.New("codex entry not found")
+	// ErrSceneNotFound reports a missing scene used during active-state resolution.
+	ErrSceneNotFound = errors.New("scene not found")
+	// ErrNoChanges reports a Codex save request with no effective canonical change.
+	ErrNoChanges = errors.New("codex save has no changes")
 )
 
 var (
@@ -56,15 +70,21 @@ var typeOrder = map[EntryType]int{
 	TypeCustom:    3,
 }
 
+// EntryType identifies one supported Codex entry category.
 type EntryType string
 
 const (
+	// TypeCharacter stores canonical character facts.
 	TypeCharacter EntryType = "character"
-	TypeLocation  EntryType = "location"
-	TypeLore      EntryType = "lore"
-	TypeCustom    EntryType = "custom"
+	// TypeLocation stores canonical location facts.
+	TypeLocation EntryType = "location"
+	// TypeLore stores canonical lore facts.
+	TypeLore EntryType = "lore"
+	// TypeCustom stores canonical custom Codex facts.
+	TypeCustom EntryType = "custom"
 )
 
+// Entry is one canonical Codex entry plus its optional loaded revision.
 type Entry struct {
 	Version     int               `json:"version,omitempty"`
 	ID          string            `json:"id"`
@@ -77,35 +97,41 @@ type Entry struct {
 	Revision    string            `json:"revision,omitempty"`
 }
 
+// ProgressionDocument stores one entry's ordered canonical timeline changes.
 type ProgressionDocument struct {
 	EntryID      string        `json:"entry_id"`
 	Progressions []Progression `json:"progressions"`
 	Revision     *string       `json:"revision"`
 }
 
+// Progression applies one change set at a stable scene anchor.
 type Progression struct {
 	ID      string            `json:"id,omitempty"`
 	Anchor  ProgressionAnchor `json:"anchor"`
 	Changes ProgressionChange `json:"changes"`
 }
 
+// ProgressionAnchor identifies the stable scene and timing for one progression.
 type ProgressionAnchor struct {
 	Type   string `json:"type"`
 	ID     string `json:"id"`
 	Timing string `json:"timing"`
 }
 
+// ProgressionChange contains the canonical fields a progression may override.
 type ProgressionChange struct {
 	Description *string           `json:"description,omitempty"`
 	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
+// ActiveState is the resolved Codex entry state as of one target scene.
 type ActiveState struct {
 	SceneID               string   `json:"scene_id"`
 	Entry                 Entry    `json:"entry"`
 	AppliedProgressionIDs []string `json:"applied_progression_ids"`
 }
 
+// SaveEntryRequest carries normalized create or update input from callers.
 type SaveEntryRequest struct {
 	Type             EntryType
 	Name             string
@@ -116,11 +142,13 @@ type SaveEntryRequest struct {
 	ExpectedRevision string
 }
 
+// SaveProgressionsRequest carries one full ordered progression replacement request.
 type SaveProgressionsRequest struct {
 	Progressions     []Progression
 	ExpectedRevision *string
 }
 
+// ValidateEntryType verifies that value is one supported Codex entry type.
 func ValidateEntryType(value EntryType) (EntryType, error) {
 	switch value {
 	case TypeCharacter, TypeLocation, TypeLore, TypeCustom:
@@ -130,6 +158,7 @@ func ValidateEntryType(value EntryType) (EntryType, error) {
 	}
 }
 
+// ValidateEntryID verifies the shape of one stable Codex entry ID.
 func ValidateEntryID(id string) error {
 	switch {
 	case characterIDPattern.MatchString(id):
@@ -145,6 +174,7 @@ func ValidateEntryID(id string) error {
 	}
 }
 
+// ValidateEntryIDForType verifies that id matches both the generic ID shape and the requested entry type.
 func ValidateEntryIDForType(entryType EntryType, id string) error {
 	if _, err := ValidateEntryType(entryType); err != nil {
 		return err
@@ -158,6 +188,7 @@ func ValidateEntryIDForType(entryType EntryType, id string) error {
 	return nil
 }
 
+// ValidateProgressionID verifies the shape of one stable progression ID.
 func ValidateProgressionID(id string) error {
 	if !progressionIDPattern.MatchString(id) {
 		return fmt.Errorf("progression ID %q is invalid: %w", id, ErrInvalidID)
@@ -165,6 +196,7 @@ func ValidateProgressionID(id string) error {
 	return nil
 }
 
+// ValidateSceneID verifies the shape of a stable scene ID used by progressions.
 func ValidateSceneID(id string) error {
 	if !sceneIDPattern.MatchString(id) {
 		return fmt.Errorf("scene ID %q is invalid: %w", id, ErrInvalidID)
@@ -172,6 +204,7 @@ func ValidateSceneID(id string) error {
 	return nil
 }
 
+// ValidateRevision verifies the opaque SHA-256 revision token shape.
 func ValidateRevision(value string) error {
 	if !revisionPattern.MatchString(value) {
 		return fmt.Errorf("revision %q is invalid: %w", value, ErrInvalidRevision)
@@ -179,6 +212,7 @@ func ValidateRevision(value string) error {
 	return nil
 }
 
+// NormalizeCreateRequest trims and validates a create request before ID assignment.
 func NormalizeCreateRequest(request SaveEntryRequest) (SaveEntryRequest, error) {
 	entryType, err := ValidateEntryType(request.Type)
 	if err != nil {
@@ -206,6 +240,7 @@ func NormalizeCreateRequest(request SaveEntryRequest) (SaveEntryRequest, error) 
 	return request, nil
 }
 
+// NormalizeUpdateRequest trims, validates, and applies mutable fields to an existing entry.
 func NormalizeUpdateRequest(entryID string, current Entry, request SaveEntryRequest) (Entry, error) {
 	if err := ValidateEntryID(entryID); err != nil {
 		return Entry{}, err
@@ -232,6 +267,7 @@ func NormalizeUpdateRequest(entryID string, current Entry, request SaveEntryRequ
 	return next, nil
 }
 
+// NormalizeEntry canonicalizes one Codex entry independent of storage or transport.
 func NormalizeEntry(entry Entry) (Entry, error) {
 	entry.Version = Version
 	entry.Metadata = cloneMetadata(entry.Metadata)
@@ -267,6 +303,7 @@ func NormalizeEntry(entry Entry) (Entry, error) {
 	return entry, nil
 }
 
+// NormalizeProgressions canonicalizes a progression list and validates its scene anchors against the supplied outline.
 func NormalizeProgressions(entryID string, progressions []Progression, sceneIDs map[string]struct{}) ([]Progression, error) {
 	if err := ValidateEntryID(entryID); err != nil {
 		return nil, err
@@ -298,6 +335,7 @@ func NormalizeProgressions(entryID string, progressions []Progression, sceneIDs 
 	return next, nil
 }
 
+// NormalizeStoredProgressions canonicalizes stored progressions without validating them against a current outline.
 func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]Progression, error) {
 	if err := ValidateEntryID(entryID); err != nil {
 		return nil, err
@@ -326,6 +364,7 @@ func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]
 	return next, nil
 }
 
+// NormalizeProgressionSaveRequest validates the optimistic-locking fields for a progression save request.
 func NormalizeProgressionSaveRequest(entryID string, request SaveProgressionsRequest, hasExisting bool) (SaveProgressionsRequest, error) {
 	if err := ValidateEntryID(entryID); err != nil {
 		return SaveProgressionsRequest{}, err
@@ -342,10 +381,12 @@ func NormalizeProgressionSaveRequest(entryID string, request SaveProgressionsReq
 	return request, nil
 }
 
+// SceneRef is the minimal scene-order input required for active-state resolution.
 type SceneRef struct {
 	ID string
 }
 
+// ResolveActiveState deterministically resolves one entry's state at targetSceneID using the supplied current outline order.
 func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes []SceneRef, targetSceneID string) (ActiveState, error) {
 	if err := ValidateSceneID(targetSceneID); err != nil {
 		return ActiveState{}, err
@@ -428,11 +469,13 @@ func ResolveActiveState(entry Entry, progressions []Progression, orderedScenes [
 	}, nil
 }
 
+// ComputeRevision returns the fixed revision token for canonical bytes.
 func ComputeRevision(contents []byte) string {
 	digest := sha256.Sum256(contents)
 	return "sha256:" + hex.EncodeToString(digest[:])
 }
 
+// SortEntries orders entries by type, then display name, then stable ID.
 func SortEntries(entries []Entry) {
 	sort.Slice(entries, func(i, j int) bool {
 		if typeOrder[entries[i].Type] != typeOrder[entries[j].Type] {
@@ -445,6 +488,7 @@ func SortEntries(entries []Entry) {
 	})
 }
 
+// DirectoryForType returns the canonical subdirectory name for one entry type.
 func DirectoryForType(entryType EntryType) (string, error) {
 	switch entryType {
 	case TypeCharacter:
@@ -460,6 +504,7 @@ func DirectoryForType(entryType EntryType) (string, error) {
 	}
 }
 
+// TypeForID infers the entry type from one validated stable entry ID.
 func TypeForID(id string) (EntryType, error) {
 	switch {
 	case characterIDPattern.MatchString(id):

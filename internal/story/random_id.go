@@ -1,5 +1,7 @@
 package story
 
+// random_id.go implements the production cryptographic ID generator.
+
 import (
 	"crypto/rand"
 	"encoding/hex"

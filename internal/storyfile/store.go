@@ -1,5 +1,6 @@
-// Package storyfile loads and writes canonical Milestone 1 story files.
 package storyfile
+
+// store.go implements outline and scene file loading plus atomic canonical writes.
 
 import (
 	"bytes"
@@ -70,7 +71,7 @@ type snapshotEntry struct {
 	contents     []byte
 }
 
-// Store loads and writes canonical story files.
+// Store loads, validates, marshals, and atomically writes canonical story files.
 type Store struct {
 	readFile  func(string) ([]byte, error)
 	writeFile func(string, []byte, os.FileMode) error
@@ -80,7 +81,7 @@ type Store struct {
 	stat      func(string) (os.FileInfo, error)
 }
 
-// New creates a story file store.
+// New creates a file-backed canonical store that reads and writes the local filesystem.
 func New() *Store {
 	return &Store{
 		readFile:  os.ReadFile,

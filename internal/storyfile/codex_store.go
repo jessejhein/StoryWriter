@@ -1,5 +1,7 @@
 package storyfile
 
+// codex_store.go implements canonical Codex entry and progression file loading and serialization.
+
 import (
 	"context"
 	"errors"
@@ -14,6 +16,7 @@ import (
 	"storywork/internal/codex"
 )
 
+// LoadCodexEntries reads, validates, and sorts every canonical Codex entry in the project.
 func (s *Store) LoadCodexEntries(_ context.Context, projectPath string) ([]codex.Entry, error) {
 	var entries []codex.Entry
 	for _, entryType := range []codex.EntryType{codex.TypeCharacter, codex.TypeLocation, codex.TypeLore, codex.TypeCustom} {
@@ -44,6 +47,7 @@ func (s *Store) LoadCodexEntries(_ context.Context, projectPath string) ([]codex
 	return entries, nil
 }
 
+// LoadCodexEntry reads and validates one canonical Codex entry by stable ID.
 func (s *Store) LoadCodexEntry(_ context.Context, projectPath, entryID string) (codex.Entry, error) {
 	relativePath, err := codexEntryPath(entryID)
 	if err != nil {
@@ -59,6 +63,7 @@ func (s *Store) LoadCodexEntry(_ context.Context, projectPath, entryID string) (
 	return parseCodexEntry(relativePath, contents)
 }
 
+// LoadProgressions reads one canonical progression document or returns an empty logical document when none exists.
 func (s *Store) LoadProgressions(_ context.Context, projectPath, entryID string) (codex.ProgressionDocument, error) {
 	if err := codex.ValidateEntryID(entryID); err != nil {
 		return codex.ProgressionDocument{}, err
@@ -78,6 +83,7 @@ func (s *Store) LoadProgressions(_ context.Context, projectPath, entryID string)
 	return parseProgressionDocument(relativePath, contents)
 }
 
+// MarshalCodexEntry encodes one canonical Codex entry file.
 func (s *Store) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 	normalized, err := codex.NormalizeEntry(entry)
 	if err != nil {
@@ -136,6 +142,7 @@ func (s *Store) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
 	return []byte(buffer.String()), nil
 }
 
+// MarshalProgressions encodes one canonical progression document.
 func (s *Store) MarshalProgressions(document codex.ProgressionDocument) ([]byte, error) {
 	if err := codex.ValidateEntryID(document.EntryID); err != nil {
 		return nil, err

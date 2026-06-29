@@ -1,3 +1,11 @@
+/**
+ * CodeMirrorSurface.tsx
+ *
+ * Wraps a CodeMirror editor instance for the scene editor. It owns the editor
+ * lifecycle and keeps the external React value synchronized with CodeMirror's
+ * document state.
+ */
+
 import { useEffect, useEffectEvent, useRef } from 'react'
 import { EditorSelection } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
@@ -8,6 +16,11 @@ type Props = {
   onChange: (value: string) => void
 }
 
+/**
+ * CodeMirrorSurface
+ *
+ * Renders the imperative CodeMirror host used for canonical scene markdown.
+ */
 export default function CodeMirrorSurface({ value, onChange }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)

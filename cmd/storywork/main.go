@@ -1,5 +1,7 @@
 package main
 
+// main.go starts the production Storywork HTTP server and handles graceful shutdown.
+
 import (
 	"context"
 	"errors"
@@ -15,6 +17,7 @@ import (
 
 const version = "0.0.0-dev"
 
+// main starts the local API server and shuts it down on process signals.
 func main() {
 	address := os.Getenv("STORYWORK_ADDR")
 	if address == "" {

@@ -1,5 +1,6 @@
-// Package story defines the pure outline model and mutation rules.
 package story
+
+// model.go defines the pure outline model, validation rules, and in-memory mutations.
 
 import (
 	"crypto/sha256"
@@ -13,24 +14,38 @@ import (
 )
 
 const (
+	// OutlineVersion is the canonical schema version for outline, arc, chapter, and scene files.
 	OutlineVersion = 1
 	maxTitleRunes  = 200
 )
 
 var (
-	ErrInvalidTitle    = errors.New("invalid title")
-	ErrInvalidID       = errors.New("invalid ID")
-	ErrParentNotFound  = errors.New("parent not found")
-	ErrInvalidReorder  = errors.New("invalid reorder")
+	// ErrInvalidTitle reports an empty or out-of-bounds title.
+	ErrInvalidTitle = errors.New("invalid title")
+	// ErrInvalidID reports a malformed stable ID.
+	ErrInvalidID = errors.New("invalid ID")
+	// ErrParentNotFound reports a missing arc or chapter parent.
+	ErrParentNotFound = errors.New("parent not found")
+	// ErrInvalidReorder reports an invalid reorder request or permutation.
+	ErrInvalidReorder = errors.New("invalid reorder")
+	// ErrNoActiveProject reports that no project has been selected for the current process.
 	ErrNoActiveProject = errors.New("no active project")
-	ErrDirtyWorktree   = errors.New("story project has uncommitted changes")
-	ErrSceneNotFound   = errors.New("scene not found")
-	ErrInvalidPOV      = errors.New("invalid pov")
-	ErrInvalidStatus   = errors.New("invalid status")
+	// ErrDirtyWorktree reports project mutations attempted against a dirty Git worktree.
+	ErrDirtyWorktree = errors.New("story project has uncommitted changes")
+	// ErrSceneNotFound reports a missing canonical scene.
+	ErrSceneNotFound = errors.New("scene not found")
+	// ErrInvalidPOV reports an invalid point-of-view field.
+	ErrInvalidPOV = errors.New("invalid pov")
+	// ErrInvalidStatus reports an unsupported scene status value.
+	ErrInvalidStatus = errors.New("invalid status")
+	// ErrInvalidMarkdown reports invalid scene markdown content.
 	ErrInvalidMarkdown = errors.New("invalid markdown")
+	// ErrInvalidRevision reports an invalid revision token.
 	ErrInvalidRevision = errors.New("invalid revision")
-	ErrStaleRevision   = errors.New("stale scene revision")
-	ErrNoSceneChanges  = errors.New("scene save has no changes")
+	// ErrStaleRevision reports a scene save against older canonical bytes.
+	ErrStaleRevision = errors.New("stale scene revision")
+	// ErrNoSceneChanges reports a scene save with no effective canonical change.
+	ErrNoSceneChanges = errors.New("scene save has no changes")
 )
 
 var revisionPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
