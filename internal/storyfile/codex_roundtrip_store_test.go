@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.2 - Create an entry
-// Requirements: M3-R04, M3-R05, M3-R18
-// Test purpose: Canonical Codex and progression YAML round-trips without changing exact bytes or revisions.
+// Requirements: M3-R04
+// Test purpose: Canonical Codex entry YAML round-trips without changing exact bytes or revisions.
 package storyfile
 
 import (
@@ -10,7 +10,9 @@ import (
 	"storywork/internal/codex"
 )
 
-func TestCodexAndProgressionRoundTripCanonicalBytes(t *testing.T) {
+// Test: the store marshals exact canonical entry YAML bytes and reloads the same logical document with a stable revision.
+// Requirements: M3-R04
+func TestCodexEntryRoundTripCanonicalBytes(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -25,29 +27,12 @@ func TestCodexAndProgressionRoundTripCanonicalBytes(t *testing.T) {
 		Description: "Guide.\n",
 		Metadata:    map[string]string{"role": "mentor", "status": "alive"},
 	}
-	description := "Gone.\n"
-	document := codex.ProgressionDocument{
-		EntryID: "char_0123456789abcdef0123",
-		Progressions: []codex.Progression{{
-			ID:      "prog_0123456789abcdef0123",
-			Anchor:  codex.ProgressionAnchor{Type: "scene", ID: "scn_0123456789abcdef0123", Timing: "after"},
-			Changes: codex.ProgressionChange{Description: &description, Metadata: map[string]string{"status": "deceased"}},
-		}},
-	}
-
-	// Test: the store marshals exact canonical YAML bytes and reloads the same logical documents with stable revisions.
-	// Requirements: M3-R04
 	entryBytes, err := store.MarshalCodexEntry(entry)
 	if err != nil {
 		t.Fatalf("MarshalCodexEntry() error = %v", err)
 	}
-	progressionBytes, err := store.MarshalProgressions(document)
-	if err != nil {
-		t.Fatalf("MarshalProgressions() error = %v", err)
-	}
 	if _, err := store.WriteFiles(context.Background(), root, map[string][]byte{
 		"codex/characters/char_0123456789abcdef0123.yaml": entryBytes,
-		"progressions/char_0123456789abcdef0123.yaml":     progressionBytes,
 	}); err != nil {
 		t.Fatalf("WriteFiles() error = %v", err)
 	}
@@ -57,12 +42,5 @@ func TestCodexAndProgressionRoundTripCanonicalBytes(t *testing.T) {
 	}
 	if loadedEntry.Revision != codex.ComputeRevision(entryBytes) {
 		t.Fatalf("entry revision = %q", loadedEntry.Revision)
-	}
-	loadedDocument, err := store.LoadProgressions(context.Background(), root, entry.ID)
-	if err != nil {
-		t.Fatalf("LoadProgressions() error = %v", err)
-	}
-	if loadedDocument.Revision == nil || *loadedDocument.Revision != codex.ComputeRevision(progressionBytes) {
-		t.Fatalf("progression revision = %#v", loadedDocument.Revision)
 	}
 }

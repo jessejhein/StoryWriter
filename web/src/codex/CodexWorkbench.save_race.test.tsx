@@ -1,5 +1,5 @@
-// BDD Scenario: 3.5.2 - Confirm destructive navigation
-// Requirements: M3-R11, M3-R12
+// BDD Scenario: 3.5.1 - Edit through explicit UI states
+// Requirements: M3-R11
 // Test purpose: Obsolete save outcomes cannot replace or mark failed a different entry selected while the request was in flight.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
@@ -56,11 +56,10 @@ beforeEach(() => {
 })
 
 // Test: navigating away during an entry save keeps the newly selected entry visible when the older save succeeds.
-// Requirements: M3-R11, M3-R12
+// Requirements: M3-R11
 test('ignores an entry save response after selecting another entry', async () => {
   const save = deferred<CodexEntry>()
   vi.mocked(api.updateCodexEntry).mockReturnValue(save.promise)
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
 
   render(<CodexWorkbench project={project} />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Ben' })).toBeInTheDocument())
@@ -69,6 +68,8 @@ test('ignores an entry save response after selecting another entry', async () =>
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben Kenobi' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
   fireEvent.click(screen.getByRole('button', { name: 'Leia' }))
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
   await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Leia'))
 
   save.resolve({ ...first, name: 'Ben Kenobi', revision: 'sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' })
@@ -77,11 +78,10 @@ test('ignores an entry save response after selecting another entry', async () =>
 })
 
 // Test: navigating away during a progression save keeps the newly selected entry visible when the older save succeeds.
-// Requirements: M3-R11, M3-R12
+// Requirements: M3-R11
 test('ignores a progression save response after selecting another entry', async () => {
   const save = deferred<CodexProgressionDocument>()
   vi.mocked(api.saveCodexProgressions).mockReturnValue(save.promise)
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
 
   render(<CodexWorkbench project={project} />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Ben' })).toBeInTheDocument())
@@ -90,6 +90,8 @@ test('ignores a progression save response after selecting another entry', async 
   fireEvent.click(screen.getByRole('button', { name: 'Add progression' }))
   fireEvent.click(screen.getByRole('button', { name: 'Save progressions' }))
   fireEvent.click(screen.getByRole('button', { name: 'Leia' }))
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
   await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Leia'))
 
   save.resolve({
@@ -103,11 +105,10 @@ test('ignores a progression save response after selecting another entry', async 
 })
 
 // Test: navigating away during an entry save keeps the newly selected entry clean when the older save fails.
-// Requirements: M3-R11, M3-R12
+// Requirements: M3-R11
 test('ignores an entry save failure after selecting another entry', async () => {
   const save = deferred<CodexEntry>()
   vi.mocked(api.updateCodexEntry).mockReturnValue(save.promise)
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
 
   render(<CodexWorkbench project={project} />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Ben' })).toBeInTheDocument())
@@ -116,6 +117,8 @@ test('ignores an entry save failure after selecting another entry', async () => 
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben Kenobi' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
   fireEvent.click(screen.getByRole('button', { name: 'Leia' }))
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
   await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Leia'))
 
   save.reject(new Error('obsolete entry failure'))
@@ -125,11 +128,10 @@ test('ignores an entry save failure after selecting another entry', async () => 
 })
 
 // Test: navigating away during a progression save keeps the newly selected entry clean when the older save fails.
-// Requirements: M3-R11, M3-R12
+// Requirements: M3-R11
 test('ignores a progression save failure after selecting another entry', async () => {
   const save = deferred<CodexProgressionDocument>()
   vi.mocked(api.saveCodexProgressions).mockReturnValue(save.promise)
-  vi.spyOn(window, 'confirm').mockReturnValue(true)
 
   render(<CodexWorkbench project={project} />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Ben' })).toBeInTheDocument())
@@ -138,6 +140,8 @@ test('ignores a progression save failure after selecting another entry', async (
   fireEvent.click(screen.getByRole('button', { name: 'Add progression' }))
   fireEvent.click(screen.getByRole('button', { name: 'Save progressions' }))
   fireEvent.click(screen.getByRole('button', { name: 'Leia' }))
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
   await waitFor(() => expect(screen.getByLabelText('Name')).toHaveValue('Leia'))
 
   save.reject(new Error('obsolete progression failure'))

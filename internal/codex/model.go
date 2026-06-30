@@ -320,6 +320,43 @@ func NormalizeStoredProgressions(entryID string, progressions []Progression) ([]
 	return normalizeProgressionList(entryID, progressions, nil)
 }
 
+// ReconcileProgressionIDs preserves valid existing progression IDs, reuses
+// current IDs for matching missing-ID anchors, and reports which rows still
+// need generated IDs after reconciliation.
+func ReconcileProgressionIDs(current []Progression, requested []Progression) ([]Progression, []int, error) {
+	currentByID := make(map[string]Progression, len(current))
+	currentByAnchor := make(map[string]Progression, len(current))
+	for _, progression := range current {
+		currentByID[progression.ID] = progression
+		currentByAnchor[progression.Anchor.ID+":"+progression.Anchor.Timing] = progression
+	}
+
+	next := append([]Progression(nil), requested...)
+	claimedCurrentIDs := make(map[string]struct{}, len(currentByID))
+	needsID := make([]int, 0, len(requested))
+	for index := range next {
+		if next[index].ID != "" {
+			if _, ok := currentByID[next[index].ID]; !ok {
+				return nil, nil, fmt.Errorf("progression ID %q must be omitted for new rows: %w", next[index].ID, ErrInvalidProgression)
+			}
+			if _, claimed := claimedCurrentIDs[next[index].ID]; claimed {
+				return nil, nil, fmt.Errorf("progression ID %q is duplicated in request: %w", next[index].ID, ErrInvalidProgression)
+			}
+			claimedCurrentIDs[next[index].ID] = struct{}{}
+			continue
+		}
+		if matched, ok := currentByAnchor[next[index].Anchor.ID+":"+next[index].Anchor.Timing]; ok {
+			if _, claimed := claimedCurrentIDs[matched.ID]; !claimed {
+				next[index].ID = matched.ID
+				claimedCurrentIDs[matched.ID] = struct{}{}
+				continue
+			}
+		}
+		needsID = append(needsID, index)
+	}
+	return next, needsID, nil
+}
+
 func normalizeProgressionList(entryID string, progressions []Progression, sceneIDs map[string]struct{}) ([]Progression, error) {
 	if err := ValidateEntryID(entryID); err != nil {
 		return nil, err

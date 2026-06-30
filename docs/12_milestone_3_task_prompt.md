@@ -673,8 +673,12 @@ Test purpose: Plain-English description of the behavior this file proves.
 ```
 
 One file covers exactly one BDD scenario. If a scenario needs several layers,
-use several files and keep the same scenario label. Every test case must have an
-adjacent comment with:
+use several files and keep the same scenario label. The only exception is the
+single required M3-R21 real-adapter acceptance file: it may span the acceptance
+steps listed below, must label itself as cross-scenario M3-R21 acceptance
+evidence, and must still give every asserted step its own adjacent `Test:` and
+`Requirements:` comment pair. Every other test file must stay within one BDD
+scenario. Every test case must have an adjacent comment with:
 
 ```text
 Test: Plain-English description of this individual test.

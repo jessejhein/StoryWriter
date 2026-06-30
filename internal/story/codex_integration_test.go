@@ -1,5 +1,5 @@
-// BDD Scenario: 3.2.1 - Save ordered progressions
-// Requirements: M3-R02, M3-R03, M3-R05, M3-R07, M3-R08, M3-R13, M3-R14, M3-R15, M3-R17, M3-R18, M3-R21
+// BDD Scenario: Cross-scenario M3-R21 acceptance evidence
+// Requirements: M3-R02, M3-R03, M3-R04, M3-R05, M3-R07, M3-R08, M3-R14, M3-R15, M3-R17, M3-R21
 // Test purpose: The real-adapter Milestone 3 acceptance path proves exact canonical Codex/progression bytes, one-commit checkpoints, stable anchors after reorder, full index manifest coverage, and zero side effects for stale/dirty mutations across a fresh service reload.
 package story_test
 

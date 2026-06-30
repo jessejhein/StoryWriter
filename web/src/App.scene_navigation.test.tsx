@@ -81,7 +81,6 @@ test('confirms dirty navigation before leaving the editor', async () => {
   vi.mocked(api.createProject).mockResolvedValue(project)
   vi.mocked(api.getOutline).mockResolvedValue(outline)
   vi.mocked(api.getScene).mockResolvedValue(scene)
-  const confirm = vi.spyOn(window, 'confirm')
 
   render(<App />)
 
@@ -97,12 +96,13 @@ test('confirms dirty navigation before leaving the editor', async () => {
 
   fireEvent.change(screen.getByLabelText('Scene Markdown'), { target: { value: 'Dirty draft.\n' } })
 
-  confirm.mockReturnValueOnce(false)
   fireEvent.click(screen.getByRole('button', { name: 'Back to outline' }))
-  expect(confirm).toHaveBeenCalled()
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
   expect(screen.getByLabelText('Scene Markdown')).toHaveValue('Dirty draft.\n')
 
-  confirm.mockReturnValueOnce(true)
   fireEvent.click(screen.getByRole('button', { name: 'Back to outline' }))
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
   await waitFor(() => expect(screen.queryByLabelText('Scene Markdown')).not.toBeInTheDocument())
 })

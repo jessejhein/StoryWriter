@@ -40,6 +40,8 @@ input:focus, select:focus { border-bottom: 3px solid var(--red); padding-bottom:
 button { border: 1px solid var(--ink); background: var(--ink); color: var(--paper); padding: 14px 18px; cursor: pointer; }
 button.secondary { background: transparent; color: var(--ink); }
 button:disabled { opacity: .35; cursor: not-allowed; }
+.dialog-backdrop { position: fixed; inset: 0; background: rgb(15 23 42 / .45); display: grid; place-items: center; padding: 1rem; }
+.dialog { width: min(28rem, 100%); background: #fffdf8; border: 1px solid #d4c9b7; border-radius: 1rem; padding: 1.25rem; box-shadow: 0 1.5rem 3rem rgb(15 23 42 / .2); }
 .error { color: var(--red); margin: 0; }
 .outline-shell { display: grid; grid-template-columns: .84fr 1.16fr; margin-top: 78px; background: linear-gradient(180deg, rgba(246, 240, 229, .96), rgba(240, 232, 217, .98)); border: 1px solid var(--ink); box-shadow: 12px 12px 0 rgba(41, 40, 32, .12); }
 .outline-meta { padding: clamp(30px, 5vw, 64px); border-right: 1px solid var(--rule); }

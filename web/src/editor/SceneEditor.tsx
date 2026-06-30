@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react'
 import type { Project, SaveSceneRequest, SceneDocument } from '../api'
 import { APIError, getScene, saveScene } from '../api'
+import ConfirmDialog from '../components/ConfirmDialog'
 import CodeMirrorSurface from './CodeMirrorSurface'
 
 type Props = {
@@ -80,6 +81,7 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [feedback, setFeedback] = useState<Feedback>(null)
+  const [confirmReload, setConfirmReload] = useState(false)
 
   const dirty = isDraftDirty(baseline, draft)
   const validationError = validateDraft(draft)
@@ -178,9 +180,6 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
   }
 
   async function reloadCanonical() {
-    if (dirty && !window.confirm('Discard the current draft and reload canonical content?')) {
-      return
-    }
     setLoading(true)
     try {
       const scene = await getScene(sceneID)
@@ -195,6 +194,14 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
     } finally {
       setLoading(false)
     }
+  }
+
+  function requestReloadCanonical() {
+    if (dirty) {
+      setConfirmReload(true)
+      return
+    }
+    void reloadCanonical()
   }
 
   const statusText = loading
@@ -238,7 +245,7 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
             <span>{feedback.message}</span>
             {(feedback.kind === 'error' || feedback.kind === 'conflict') && (
               <div className="scene-banner-actions">
-                <button type="button" className="secondary" onClick={() => void reloadCanonical()} disabled={loading || saving}>
+                <button type="button" className="secondary" onClick={requestReloadCanonical} disabled={loading || saving}>
                   Reload canonical
                 </button>
                 {dirty && (
@@ -310,13 +317,24 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
               <button type="button" onClick={() => void submitSave()} disabled={!canSave}>
                 Save scene
               </button>
-              <button type="button" className="secondary" onClick={() => void reloadCanonical()} disabled={loading || saving}>
+              <button type="button" className="secondary" onClick={requestReloadCanonical} disabled={loading || saving}>
                 Reload canonical
               </button>
             </div>
           </div>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmReload}
+        title="Discard scene draft?"
+        message="You have unsaved scene changes. Discard them and reload canonical content?"
+        confirmLabel="Discard draft"
+        onCancel={() => setConfirmReload(false)}
+        onConfirm={() => {
+          setConfirmReload(false)
+          void reloadCanonical()
+        }}
+      />
     </section>
   )
 }

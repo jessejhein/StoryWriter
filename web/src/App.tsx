@@ -8,6 +8,7 @@
 
 import { FormEvent, useEffect, useState } from 'react'
 import { createProject, getHealth, openProject, type Project } from './api'
+import ConfirmDialog from './components/ConfirmDialog'
 import CodexWorkbench from './codex/CodexWorkbench'
 import SceneEditor from './editor/SceneEditor'
 import OutlineWorkbench from './outline/OutlineWorkbench'
@@ -31,6 +32,7 @@ export default function App() {
   const [view, setView] = useState<ProjectView>({ mode: 'outline' })
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
+  const [pendingView, setPendingView] = useState<ProjectView | null>(null)
 
   useEffect(() => {
     getHealth()
@@ -67,10 +69,20 @@ export default function App() {
   }
 
   function navigate(nextView: ProjectView) {
-    if (dirty && JSON.stringify(view) !== JSON.stringify(nextView) && !window.confirm('Discard the current draft?')) {
+    if (dirty && !sameProjectView(view, nextView)) {
+      setPendingView(nextView)
       return
     }
     setView(nextView)
+    setDirty(false)
+  }
+
+  function confirmNavigation() {
+    if (!pendingView) {
+      return
+    }
+    setView(pendingView)
+    setPendingView(null)
     setDirty(false)
   }
 
@@ -127,8 +139,20 @@ export default function App() {
           ) : (
             <CodexWorkbench project={project} onDirtyChange={setDirty} />
           )}
+          <ConfirmDialog
+            open={pendingView !== null}
+            title="Discard current draft?"
+            message="You have unsaved changes in the current workspace. Discard them and continue?"
+            confirmLabel="Discard draft"
+            onConfirm={confirmNavigation}
+            onCancel={() => setPendingView(null)}
+          />
         </>
       )}
     </main>
   )
+}
+
+function sameProjectView(left: ProjectView, right: ProjectView) {
+  return left.mode === right.mode && (left.mode !== 'scene' || right.mode !== 'scene' || left.sceneID === right.sceneID)
 }

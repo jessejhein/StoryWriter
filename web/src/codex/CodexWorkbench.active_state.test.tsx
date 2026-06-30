@@ -1,6 +1,6 @@
 // BDD Scenario: 3.5.3 - Inspect active state
-// Requirements: M3-R07, M3-R10, M3-R11, M3-R12
-// Test purpose: Entry and progression controls preserve canonical state across edits, resolution refreshes, navigation, and request races.
+// Requirements: M3-R07, M3-R10, M3-R11
+// Test purpose: Entry and progression controls preserve canonical state while refreshing the active-state inspector and handling stale responses.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type { CodexActiveState, CodexEntry, CodexProgressionDocument, Outline, Project } from '../api'
@@ -92,7 +92,9 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 
-test('loads an entry, saves progressions, refreshes active state, and guards dirty navigation', async () => {
+// Test: selecting an entry loads its canonical state, progression saves are explicit, and the active-state inspector refreshes from the saved result.
+// Requirements: M3-R07, M3-R10, M3-R11
+test('loads an entry, saves progressions, and refreshes active state', async () => {
   vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [entry] })
   vi.mocked(api.getCodexEntry).mockResolvedValue(entry)
   vi.mocked(api.getCodexProgressions).mockResolvedValue(progressions)
@@ -112,10 +114,7 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
       entry: { ...activeState.entry, description: 'Gone.', metadata: { role: 'mentor', status: 'deceased' } },
       applied_progression_ids: ['prog_0123456789abcdef0123'],
     })
-  const confirm = vi.spyOn(window, 'confirm')
 
-  // Test: selecting an entry loads its canonical state, progression saves are explicit, and switching entries while dirty asks for confirmation.
-  // Requirements: M3-R12
   render(<CodexWorkbench project={project} />)
 
   await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
@@ -142,14 +141,10 @@ test('loads an entry, saves progressions, refreshes active state, and guards dir
   await waitFor(() => expect(api.getCodexActiveState).toHaveBeenCalledTimes(2))
   expect(screen.getByText('deceased')).toBeInTheDocument()
   expect(screen.getByText('Applied progressions: prog_0123456789abcdef0123')).toBeInTheDocument()
-
-  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben Kenobi' } })
-  confirm.mockReturnValueOnce(false)
-  fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
-  expect(confirm).toHaveBeenCalled()
-  expect(screen.getByLabelText('Name')).toHaveValue('Ben Kenobi')
 })
 
+// Test: alias, tag, and progression reorder and remove controls preserve the edited order in the save payload.
+// Requirements: M3-R10, M3-R11
 test('supports remove and reorder controls for aliases, tags, and progressions', async () => {
   const secondEntry: CodexEntry = {
     ...entry,
@@ -215,6 +210,8 @@ test('supports remove and reorder controls for aliases, tags, and progressions',
   })
 })
 
+// Test: entry and progression metadata rows can be removed while preserving explicit empty string description changes in the saved payloads.
+// Requirements: M3-R10, M3-R11
 test('supports removing metadata rows and preserving explicit empty progression descriptions', async () => {
   vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [entry] })
   vi.mocked(api.getCodexEntry).mockResolvedValue({
@@ -315,6 +312,8 @@ test('removes a progression description change without removing its metadata cha
   })
 })
 
+// Test: stale entry, progression, and active-state responses are ignored after the author switches selection.
+// Requirements: M3-R11
 test('ignores stale entry and active-state responses after switching selection', async () => {
   const firstEntry = entry
   const secondEntry: CodexEntry = {

@@ -78,8 +78,8 @@ func TestMutationFailureStagesRecoverCanonicalAndDerivedState(t *testing.T) {
 			configure: func(files *fakeFileStore, _ *fakeGitStore, _ *fakeIndexStore) {
 				files.writeErr = cause
 			},
-			wantUnstageCalls: 1,
-			wantRebuildCalls: 1,
+			wantUnstageCalls: 0,
+			wantRebuildCalls: 0,
 		},
 		{
 			name: "canonical reload",

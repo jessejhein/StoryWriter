@@ -40,7 +40,6 @@ test('confirms project-level navigation when codex draft is dirty', async () => 
   vi.mocked(api.createProject).mockResolvedValue(project)
   vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [] })
   vi.mocked(api.getOutline).mockResolvedValue({ version: 1, arcs: [] })
-  const confirm = vi.spyOn(window, 'confirm')
 
   // Test: leaving the Codex workbench for the outline asks before discarding an unsaved draft and preserves the draft on cancel.
   // Requirements: M3-R12
@@ -57,9 +56,9 @@ test('confirms project-level navigation when codex draft is dirty', async () => 
   fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben' } })
 
-  confirm.mockReturnValueOnce(false)
   fireEvent.click(screen.getByRole('button', { name: 'Outline' }))
-  expect(confirm).toHaveBeenCalled()
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
   expect(screen.getByLabelText('Name')).toHaveValue('Ben')
 
   const beforeUnload = new Event('beforeunload', { cancelable: true })

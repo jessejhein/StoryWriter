@@ -1,6 +1,6 @@
 // BDD Scenario: 3.3.3 - Apply multiple progressions deterministically
-// Requirements: M3-R06, M3-R07, M3-R08
-// Test purpose: Pure active-state resolution applies before/after changes deterministically against current scene chronology.
+// Requirements: M3-R06, M3-R07
+// Test purpose: Pure active-state resolution applies multiple progressions in chronology, before/after order, and document order while preserving base aliases and tags.
 package codex
 
 import (
@@ -8,7 +8,9 @@ import (
 	"testing"
 )
 
-func TestResolveActiveStateAppliesProgressionsInChronology(t *testing.T) {
+// Test: later chronology wins, before changes apply before after changes at one anchor, document order breaks ties, and aliases/tags stay on the base entry.
+// Requirements: M3-R06, M3-R07
+func TestResolveActiveStateAppliesProgressionsDeterministically(t *testing.T) {
 	t.Parallel()
 
 	beforeDescription := "Before scene one."
@@ -40,25 +42,8 @@ func TestResolveActiveStateAppliesProgressionsInChronology(t *testing.T) {
 		{
 			ID:      "prog_00000000000000000003",
 			Anchor:  ProgressionAnchor{Type: "scene", ID: "scn_00000000000000000002", Timing: "after"},
-			Changes: ProgressionChange{Description: &laterDescription, Metadata: map[string]string{"status": "recovered"}},
+			Changes: ProgressionChange{Description: &laterDescription, Metadata: map[string]string{"status": "recovered", "rank": "commander"}},
 		},
-	}
-
-	// Test: before applies at the anchor scene, after applies only later, and later chronology wins while aliases and tags stay on the base entry.
-	// Requirements: M3-R07
-	activeAtSceneOne, err := ResolveActiveState(entry, progressions, []SceneRef{
-		{ID: "scn_00000000000000000001"},
-		{ID: "scn_00000000000000000002"},
-		{ID: "scn_00000000000000000003"},
-	}, "scn_00000000000000000001")
-	if err != nil {
-		t.Fatalf("ResolveActiveState(scene one) error = %v", err)
-	}
-	if activeAtSceneOne.Entry.Description != "Before scene one." {
-		t.Fatalf("scene one description = %q", activeAtSceneOne.Entry.Description)
-	}
-	if !reflect.DeepEqual(activeAtSceneOne.AppliedProgressionIDs, []string{"prog_00000000000000000002"}) {
-		t.Fatalf("scene one applied IDs = %#v", activeAtSceneOne.AppliedProgressionIDs)
 	}
 
 	activeAtSceneThree, err := ResolveActiveState(entry, progressions, []SceneRef{
@@ -75,21 +60,14 @@ func TestResolveActiveStateAppliesProgressionsInChronology(t *testing.T) {
 	if !reflect.DeepEqual(activeAtSceneThree.Entry.Metadata, map[string]string{"rank": "commander", "status": "recovered"}) {
 		t.Fatalf("scene three metadata = %#v", activeAtSceneThree.Entry.Metadata)
 	}
+	if !reflect.DeepEqual(activeAtSceneThree.AppliedProgressionIDs, []string{
+		"prog_00000000000000000002",
+		"prog_00000000000000000001",
+		"prog_00000000000000000003",
+	}) {
+		t.Fatalf("scene three applied IDs = %#v", activeAtSceneThree.AppliedProgressionIDs)
+	}
 	if !reflect.DeepEqual(activeAtSceneThree.Entry.Aliases, []string{"General"}) || !reflect.DeepEqual(activeAtSceneThree.Entry.Tags, []string{"leader"}) {
 		t.Fatalf("base fields changed = %#v", activeAtSceneThree.Entry)
-	}
-
-	// Test: reordering scenes changes activation chronology without changing the stored scene anchor IDs.
-	// Requirements: M3-R08
-	activeAfterReorder, err := ResolveActiveState(entry, progressions[:1], []SceneRef{
-		{ID: "scn_00000000000000000002"},
-		{ID: "scn_00000000000000000001"},
-		{ID: "scn_00000000000000000003"},
-	}, "scn_00000000000000000002")
-	if err != nil {
-		t.Fatalf("ResolveActiveState(reordered scene) error = %v", err)
-	}
-	if len(activeAfterReorder.AppliedProgressionIDs) != 0 {
-		t.Fatalf("applied IDs after reorder = %#v, want none", activeAfterReorder.AppliedProgressionIDs)
 	}
 }

@@ -22,7 +22,6 @@ test('leaves the codex after the author confirms discarding a dirty draft', asyn
     }
     return { ok: false, status: 404, json: async () => ({ error: 'not found' }) }
   }))
-  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
 
   // Test: confirming destructive navigation leaves the dirty Codex form and opens the requested workspace.
   // Requirements: M3-R12
@@ -37,8 +36,8 @@ test('leaves the codex after the author confirms discarding a dirty draft', asyn
   fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
   fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ben' } })
   fireEvent.click(screen.getByRole('button', { name: 'Outline' }))
-
-  expect(confirm).toHaveBeenCalled()
+  await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
   await waitFor(() => expect(screen.getByText('No arcs yet')).toBeInTheDocument())
   expect(screen.queryByLabelText('Name')).not.toBeInTheDocument()
 })

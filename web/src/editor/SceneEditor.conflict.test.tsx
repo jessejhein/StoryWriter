@@ -57,3 +57,29 @@ test('retains the current draft on conflict and exposes retry actions', async ()
   expect(screen.getByRole('button', { name: 'Retry save' })).toBeInTheDocument()
   expect(screen.getAllByRole('button', { name: 'Reload canonical' })).toHaveLength(2)
 })
+
+// BDD trace:
+// - Requirement: M2-R05, M2-R15.
+// - Scenario: 2.5.3 — Navigate away with unsaved changes.
+// - Test purpose: verify reloading canonical scene content asks for confirmation
+//   when the current draft is dirty, preserves the draft on cancel, and reloads
+//   canonical content on confirm.
+test('confirms before reloading canonical content over a dirty draft', async () => {
+  vi.mocked(api.getScene).mockResolvedValue(scene)
+
+  render(<SceneEditor project={project} sceneID={scene.id} onBack={() => {}} onDirtyChange={() => {}} />)
+
+  await waitFor(() => expect(screen.getByText('Clean')).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText('Scene Markdown'), { target: { value: 'Dirty draft.\n' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Reload canonical' }))
+
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard scene draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(screen.getByLabelText('Scene Markdown')).toHaveValue('Dirty draft.\n')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Reload canonical' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard scene draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+
+  await waitFor(() => expect(screen.getByLabelText('Scene Markdown')).toHaveValue('Scene prose.\n'))
+})

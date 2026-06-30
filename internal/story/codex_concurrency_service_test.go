@@ -80,6 +80,8 @@ func TestCodexMutationsShareTheSceneMutationLock(t *testing.T) {
 		updateDone <- err
 	}()
 
+	// Test: while a scene save holds the shared mutation lock, a concurrent Codex mutation waits until the scene save finishes instead of observing interleaved mutation state.
+	// Requirements: M3-R13, M3-R14
 	select {
 	case err := <-updateDone:
 		t.Fatalf("Codex mutation completed before scene save was released: %v", err)

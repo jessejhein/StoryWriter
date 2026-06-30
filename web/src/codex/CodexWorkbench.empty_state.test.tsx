@@ -1,14 +1,13 @@
 // BDD Scenario: 3.1.1 - List an empty Codex
-// Requirements: M3-R10, M3-R11
-// Test purpose: The empty Codex workbench exposes an explicit create workflow and accurate dirty state.
+// Requirements: M3-R01, M3-R09, M3-R10, M3-R11
+// Test purpose: The empty Codex workbench exposes the documented empty state and an explicit create action.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
-import type { CodexActiveState, CodexEntry, Outline, Project } from '../api'
+import type { Outline, Project } from '../api'
 import CodexWorkbench from './CodexWorkbench'
 
 vi.mock('../api', () => ({
   getCodexEntries: vi.fn(),
-  createCodexEntry: vi.fn(),
   getCodexEntry: vi.fn(),
   updateCodexEntry: vi.fn(),
   getCodexProgressions: vi.fn(),
@@ -45,54 +44,19 @@ const outline: Outline = {
   }],
 }
 
-const entry: CodexEntry = {
-  id: 'char_0123456789abcdef0123',
-  type: 'character',
-  name: 'Obi-Wan Kenobi',
-  aliases: ['Ben'],
-  tags: ['mentor'],
-  description: 'Guide.',
-  metadata: { status: 'alive' },
-  revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-}
-
-const activeState: CodexActiveState = {
-  scene_id: 'scn_0123456789abcdef0123',
-  entry: {
-    id: entry.id,
-    type: entry.type,
-    name: entry.name,
-    aliases: entry.aliases,
-    tags: entry.tags,
-    description: 'Guide.',
-    metadata: { role: 'mentor', status: 'alive' },
-  },
-  applied_progression_ids: [],
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.getOutline).mockResolvedValue(outline)
-  vi.mocked(api.getCodexActiveState).mockResolvedValue(activeState)
 })
 
-test('renders empty state and creates a new codex entry', async () => {
+// Test: an empty Codex renders the documented empty state and exposes a New entry action.
+// Requirements: M3-R01, M3-R09, M3-R10, M3-R11
+test('renders the empty codex state with a create action', async () => {
   vi.mocked(api.getCodexEntries).mockResolvedValue({ entries: [] })
-  vi.mocked(api.createCodexEntry).mockResolvedValue(entry)
-
-  // Test: an empty Codex shows a create action, tracks unsaved changes, saves explicitly, and renders the returned entry.
-  // Requirements: M3-R10
   render(<CodexWorkbench project={project} />)
 
   await waitFor(() => expect(screen.getByText('No Codex entries yet.')).toBeInTheDocument())
+  expect(screen.getByRole('button', { name: 'New entry' })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'New entry' }))
-  expect(screen.getByText('Saved')).toBeInTheDocument()
-  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Obi-Wan Kenobi' } })
-  expect(screen.getByText('Unsaved changes')).toBeInTheDocument()
-  fireEvent.click(screen.getByRole('button', { name: 'Add alias' }))
-  fireEvent.change(screen.getByLabelText('Alias 1'), { target: { value: 'Ben' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Save entry' }))
-
-  await waitFor(() => expect(api.createCodexEntry).toHaveBeenCalled())
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Obi-Wan Kenobi' })).toBeInTheDocument())
+  expect(screen.getByLabelText('Name')).toHaveValue('')
 })

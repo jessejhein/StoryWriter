@@ -637,22 +637,22 @@ func requireNonEmptyJSONString(raw json.RawMessage, context string) error {
 }
 
 func writeStoryError(writer http.ResponseWriter, err error) {
-	status := http.StatusInternalServerError
+	writeError(writer, statusForStoryError(err), err)
+}
+
+func statusForStoryError(err error) int {
 	switch {
-	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree):
-		status = http.StatusConflict
+	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree), errors.Is(err, story.ErrStaleRevision):
+		return http.StatusConflict
 	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder), errors.Is(err, story.ErrInvalidPOV), errors.Is(err, story.ErrInvalidStatus), errors.Is(err, story.ErrInvalidMarkdown), errors.Is(err, story.ErrInvalidRevision), errors.Is(err, story.ErrNoSceneChanges):
-		status = http.StatusBadRequest
+		return http.StatusBadRequest
 	case errors.Is(err, codex.ErrInvalidType), errors.Is(err, codex.ErrInvalidID), errors.Is(err, codex.ErrInvalidName), errors.Is(err, codex.ErrInvalidAlias), errors.Is(err, codex.ErrInvalidTag), errors.Is(err, codex.ErrInvalidDescription), errors.Is(err, codex.ErrInvalidMetadata), errors.Is(err, codex.ErrInvalidRevision), errors.Is(err, codex.ErrInvalidProgression), errors.Is(err, codex.ErrNoChanges):
-		status = http.StatusBadRequest
-	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound):
-		status = http.StatusNotFound
-	case errors.Is(err, codex.ErrEntryNotFound), errors.Is(err, codex.ErrSceneNotFound):
-		status = http.StatusNotFound
-	case errors.Is(err, story.ErrStaleRevision):
-		status = http.StatusConflict
+		return http.StatusBadRequest
+	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound), errors.Is(err, codex.ErrEntryNotFound), errors.Is(err, codex.ErrSceneNotFound):
+		return http.StatusNotFound
+	default:
+		return http.StatusInternalServerError
 	}
-	writeError(writer, status, err)
 }
 
 func writeError(writer http.ResponseWriter, status int, err error) {

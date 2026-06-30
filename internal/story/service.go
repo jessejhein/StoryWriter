@@ -614,9 +614,16 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	// Step 6: validate and normalize the complete next document in memory.
 	sceneIDs := outlineSceneIDs(outline)
 	progressions := append([]codex.Progression(nil), request.Progressions...)
-	progressions, err = s.reconcileProgressionIDs(currentDocument.Progressions, progressions)
+	progressions, needsID, err := codex.ReconcileProgressionIDs(currentDocument.Progressions, progressions)
 	if err != nil {
 		return codex.ProgressionDocument{}, err
+	}
+	for _, index := range needsID {
+		id, err := s.ids.Next(NodeKindProgression)
+		if err != nil {
+			return codex.ProgressionDocument{}, err
+		}
+		progressions[index].ID = id
 	}
 	progressions, err = codex.NormalizeProgressions(entryID, progressions, sceneIDs)
 	if err != nil {
@@ -678,19 +685,16 @@ func (s *Service) ResolveActiveCodexState(ctx context.Context, entryID, sceneID 
 }
 
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
-	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
-	if err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, nil, err)
-	}
-	reloaded, err := s.files.Load(ctx, projectPath)
-	if err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
-	}
-	if err := s.index.Rebuild(ctx, projectPath); err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
-	}
-	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
+	var reloaded Outline
+	if err := s.persistFiles(ctx, projectPath, message, files, func() error {
+		next, err := s.files.Load(ctx, projectPath)
+		if err != nil {
+			return err
+		}
+		reloaded = next
+		return nil
+	}); err != nil {
+		return MutationResult{}, err
 	}
 	return MutationResult{ChangedID: changedID, Outline: reloaded}, nil
 }
@@ -701,9 +705,18 @@ func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, m
 // it restores the target, unstages app changes, and rebuilds the index from
 // restored files. The caller owns pre-request validation and no-op detection.
 func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message, relativePath string, contents []byte) error {
-	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{relativePath: contents})
+	return s.persistFiles(ctx, projectPath, message, map[string][]byte{relativePath: contents}, nil)
+}
+
+func (s *Service) persistFiles(ctx context.Context, projectPath, message string, files map[string][]byte, afterWrite func() error) error {
+	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
 	if err != nil {
 		return err
+	}
+	if afterWrite != nil {
+		if err := afterWrite(); err != nil {
+			return s.rollbackMutation(ctx, projectPath, rollback, err)
+		}
 	}
 	if err := s.index.Rebuild(ctx, projectPath); err != nil {
 		return s.rollbackMutation(ctx, projectPath, rollback, err)
@@ -712,46 +725,6 @@ func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message,
 		return s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
 	return nil
-}
-
-// reconcileProgressionIDs preserves existing row IDs and assigns IDs only to genuinely new anchors.
-func (s *Service) reconcileProgressionIDs(current, requested []codex.Progression) ([]codex.Progression, error) {
-	currentByID := make(map[string]codex.Progression, len(current))
-	currentByAnchor := make(map[string]codex.Progression, len(current))
-	for _, progression := range current {
-		currentByID[progression.ID] = progression
-		currentByAnchor[progressionAnchorKey(progression)] = progression
-	}
-
-	next := append([]codex.Progression(nil), requested...)
-	claimedCurrentIDs := make(map[string]struct{}, len(currentByID))
-	for index := range next {
-		if next[index].ID != "" {
-			if _, ok := currentByID[next[index].ID]; !ok {
-				return nil, fmt.Errorf("progression ID %q must be omitted for new rows: %w", next[index].ID, codex.ErrInvalidProgression)
-			}
-			claimedCurrentIDs[next[index].ID] = struct{}{}
-			continue
-		}
-		if matched, ok := currentByAnchor[progressionAnchorKey(next[index])]; ok {
-			if _, claimed := claimedCurrentIDs[matched.ID]; !claimed {
-				next[index].ID = matched.ID
-				claimedCurrentIDs[matched.ID] = struct{}{}
-				continue
-			}
-		}
-		id, err := s.ids.Next(NodeKindProgression)
-		if err != nil {
-			return nil, err
-		}
-		next[index].ID = id
-	}
-	return next, nil
-}
-
-// progressionAnchorKey identifies one stable scene-and-timing progression slot.
-func progressionAnchorKey(progression codex.Progression) string {
-	return progression.Anchor.ID + ":" + progression.Anchor.Timing
 }
 
 func (s *Service) rollbackMutation(ctx context.Context, projectPath string, rollback func() error, cause error) error {
