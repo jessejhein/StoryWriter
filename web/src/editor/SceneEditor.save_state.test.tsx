@@ -6,6 +6,11 @@ import SceneEditor from './SceneEditor'
 vi.mock('../api', () => ({
   getScene: vi.fn(),
   saveScene: vi.fn(),
+  getStyles: vi.fn(),
+  getAvailableActions: vi.fn(),
+  runAction: vi.fn(),
+  acceptAction: vi.fn(),
+  rejectAction: vi.fn(),
 }))
 
 vi.mock('./CodeMirrorSurface', () => ({

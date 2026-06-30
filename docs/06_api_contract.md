@@ -210,10 +210,54 @@ GET /api/story-state/as-of/{scene_id}
 
 ## Agents and styles
 
+Milestone 4 implements the exact registry and action contract documented in
+`docs/13_milestone_4_task_prompt.md`. All routes require an active project.
+
 ```http
 GET /api/agents
 GET /api/styles
-GET /api/actions/available?surface=editor&scene_id=scn_0001&selection_words=200
+GET /api/actions/available?surface=editor&input_scope=selection&scene_id=scn_0001&selection_words=200
+```
+
+Agent list response:
+
+```json
+{
+  "agents": [
+    {
+      "id": "line_polish",
+      "name": "Line Polish",
+      "description": "Rewrite selected prose for clarity, cadence, and flow while preserving meaning.",
+      "surfaces": ["editor"],
+      "input_scopes": ["selection"],
+      "min_words": 20,
+      "max_words": 1500,
+      "required_context": ["selected_text", "style_sheet"],
+      "optional_context": ["surrounding_paragraphs"],
+      "forbidden_context": ["global_codex_rag", "raw_import_notes"],
+      "rag_mode": "none",
+      "output_mode": "patch",
+      "requires_acceptance": true
+    }
+  ]
+}
+```
+
+Style list response:
+
+```json
+{
+  "styles": [
+    {
+      "id": "precise_editor",
+      "name": "Precise Editor",
+      "provider_profile_id": "mock_default",
+      "model": "mock",
+      "temperature": 0.2,
+      "system_prompt": "You are a careful prose editor."
+    }
+  ]
+}
 ```
 
 Available actions response:
@@ -222,10 +266,12 @@ Available actions response:
 {
   "actions": [
     {
-      "agent_id": "local_voice_texture",
-      "name": "Local Voice Texture Pass",
+      "agent_id": "line_polish",
+      "name": "Line Polish",
+      "description": "Rewrite selected prose for clarity, cadence, and flow while preserving meaning.",
       "output_mode": "patch",
-      "requires_acceptance": true
+      "requires_acceptance": true,
+      "style_ids": ["precise_editor"]
     }
   ]
 }
@@ -241,13 +287,15 @@ Request:
 
 ```json
 {
-  "agent_id": "local_voice_texture",
-  "style_id": "dry_modern_fantasy",
+  "agent_id": "line_polish",
+  "style_id": "precise_editor",
   "surface": "editor",
+  "input_scope": "selection",
   "scene_id": "scn_0001",
+  "scene_revision": "sha256:...",
   "selection": {
-    "start": 120,
-    "end": 640,
+    "start_byte": 120,
+    "end_byte": 640,
     "text": "Selected prose..."
   }
 }
@@ -257,11 +305,20 @@ Response for patch:
 
 ```json
 {
-  "run_id": "run_0001",
+  "run_id": "run_0123456789abcdef0123",
+  "status": "pending",
+  "agent_id": "line_polish",
+  "style_id": "precise_editor",
+  "scene_id": "scn_0001",
+  "scene_revision": "sha256:...",
+  "selection": {
+    "start_byte": 120,
+    "end_byte": 640
+  },
   "output_mode": "patch",
   "patch": {
     "original": "Selected prose...",
-    "replacement": "Rewritten prose..."
+    "replacement": "Mock polished: Selected prose..."
   },
   "context_summary": {
     "packs_used": ["selected_text", "style_sheet"],
@@ -277,7 +334,25 @@ POST /api/actions/{run_id}/accept
 POST /api/actions/{run_id}/reject
 ```
 
+Accept request:
+
+```json
+{"expected_revision":"sha256:..."}
+```
+
+Reject requests have no body. Unknown or duplicate availability query keys,
+missing required selection fields, malformed IDs/revisions, and any reject body
+are rejected with `400 Bad Request` before the action service is called.
+
 Accepting a patch writes to canonical files only after explicit author action.
+
+Milestone 4 status rules:
+
+- `400 Bad Request`: malformed query or JSON, invalid registry authoring on an explicit run, invalid byte range, selected-text mismatch, inapplicable agent, incompatible style, or no-op replacement.
+- `404 Not Found`: missing agent, style, scene, or run.
+- `409 Conflict`: no active project, dirty worktree, stale revision, or a non-pending run decision.
+- `503 Service Unavailable`: transient run capacity exhaustion or provider cancellation/unavailability.
+- `500 Internal Server Error`: malformed canonical registry state discovered during list/availability, filesystem/index/Git failure, or rollback failure.
 
 ## Import
 

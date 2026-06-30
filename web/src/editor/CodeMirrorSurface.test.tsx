@@ -9,13 +9,20 @@ const vimMock = vi.fn(() => ({ type: 'vim' }))
 class EditorViewMock {
   static lineWrapping = { type: 'lineWrapping' }
   static updateListener = { of: updateListenerOfMock }
-  state: { doc: { toString: () => string; length: number }; selection: { main: { head: number } } }
+  state: { doc: { toString: () => string; length: number; sliceString: (from: number, to: number) => string }; selection: { main: { head: number; from: number; to: number } } }
   dispatch = vi.fn()
   destroy = vi.fn()
 
   constructor(config: { doc: string }) {
     editorViewMock(config)
-    this.state = { doc: { toString: () => config.doc, length: config.doc.length }, selection: { main: { head: 0 } } }
+    this.state = {
+      doc: {
+        toString: () => config.doc,
+        length: config.doc.length,
+        sliceString: (from, to) => config.doc.slice(from, to),
+      },
+      selection: { main: { head: 0, from: 0, to: 0 } },
+    }
   }
 }
 

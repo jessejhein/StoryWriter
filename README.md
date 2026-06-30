@@ -35,6 +35,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 13. `docs/10_milestone_1_task_prompt.md`
 14. `docs/11_milestone_2_task_prompt.md`
 15. `docs/12_milestone_3_task_prompt.md`
+16. `docs/13_milestone_4_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -74,11 +75,25 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 3 are implemented. The app includes the local project
-foundation, canonical outline editing, the Vim-friendly scene editor with
-revision conflict protection and one Git checkpoint per explicit save, plus the
-Codex workbench with strict progression validation, stable IDs, reorder/remove
-controls, and active-state resolution.
+Milestones 0 through 4 are implemented and the full check suite is green as of
+June 30, 2026. The app includes the local project foundation, canonical outline
+editing, the Vim-friendly scene editor with revision conflict protection and
+one Git checkpoint per explicit save, the Codex workbench with strict
+progression validation and active-state resolution, plus the Milestone 4
+agent/style registry and mock AI patch workflow.
+
+Milestone 4 adds:
+
+- strict project-local `agents/*.yaml` and `styles/*.yaml` loading,
+- deterministic registry listing and applicability filtering,
+- a provider-neutral mock Line Polish run path with minimal context,
+- transient reviewable runs with explicit reject/accept,
+- revision-safe patch acceptance using the existing scene lock, rollback, index rebuild, and exactly one Git commit.
+
+Milestone 5 is now the next incomplete phase. Its durable Milestone 4 contract,
+working sequence, and completion evidence remain in
+`docs/13_milestone_4_task_prompt.md`, `.plans/milestone_4_implementation.md`,
+`.plans/milestone_4_status.md`, and `.plans/milestone_4_test_evidence.md`.
 
 ## Development
 
@@ -104,7 +119,7 @@ make dev-frontend
 
 The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 
-## Milestone 0 package map
+## Current package map
 
 - `cmd/storywork`: process startup and graceful shutdown only.
 - `internal/app`: production dependency composition.
@@ -112,6 +127,11 @@ The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 - `internal/project`: project creation/opening orchestration.
 - `internal/gitstore`: Git command adapter.
 - `internal/index`: rebuildable SQLite index adapter.
+- `internal/agent`: strict agent/style registry, applicability, context policy, and mock provider boundaries.
+- `internal/action`: transient AI action orchestration and accept/reject run lifecycle.
+- `internal/story`: canonical outline, scene, and Codex mutation orchestration.
+- `internal/codex`: pure Codex validation and active-state decisions.
+- `internal/storyfile`: strict canonical story-file adapters.
 - `templates`: embedded canonical starter files.
 - `web`: React/Vite local UI.
 

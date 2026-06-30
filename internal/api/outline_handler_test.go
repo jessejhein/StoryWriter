@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"storywork/internal/action"
+	"storywork/internal/agent"
 	"storywork/internal/api"
 	"storywork/internal/codex"
 	"storywork/internal/project"
@@ -61,6 +63,24 @@ type storyServiceStub struct {
 	saveProgressionsReq  codex.SaveProgressionsRequest
 	activeEntryID        string
 	activeSceneID        string
+	agents               []agent.Agent
+	styles               []agent.Style
+	availableActions     []action.AvailableAction
+	actionRun            action.Run
+	actionRunErr         error
+	agentsErr            error
+	stylesErr            error
+	availableActionsErr  error
+	actionAcceptErr      error
+	actionRejectErr      error
+	actionAcceptRun      action.Run
+	actionRejectRun      action.Run
+	actionAcceptScene    story.SceneDocument
+	actionRunRequest     action.RunRequest
+	actionAcceptRunID    string
+	actionAcceptRevision string
+	actionRejectRunID    string
+	availableInput       agent.AvailabilityInput
 }
 
 func (s *storyServiceStub) Outline(context.Context) (story.Outline, error) {
@@ -135,6 +155,35 @@ func (s *storyServiceStub) ResolveActiveCodexState(_ context.Context, entryID, s
 	s.activeEntryID = entryID
 	s.activeSceneID = sceneID
 	return s.activeState, s.activeCodexErr
+}
+
+func (s *storyServiceStub) Agents(context.Context) ([]agent.Agent, error) {
+	return s.agents, s.agentsErr
+}
+
+func (s *storyServiceStub) Styles(context.Context) ([]agent.Style, error) {
+	return s.styles, s.stylesErr
+}
+
+func (s *storyServiceStub) AvailableActions(_ context.Context, input agent.AvailabilityInput) ([]action.AvailableAction, error) {
+	s.availableInput = input
+	return s.availableActions, s.availableActionsErr
+}
+
+func (s *storyServiceStub) Run(_ context.Context, request action.RunRequest) (action.Run, error) {
+	s.actionRunRequest = request
+	return s.actionRun, s.actionRunErr
+}
+
+func (s *storyServiceStub) Accept(_ context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error) {
+	s.actionAcceptRunID = runID
+	s.actionAcceptRevision = expectedRevision
+	return s.actionAcceptRun, s.actionAcceptScene, s.actionAcceptErr
+}
+
+func (s *storyServiceStub) Reject(_ context.Context, runID string) (action.Run, error) {
+	s.actionRejectRunID = runID
+	return s.actionRejectRun, s.actionRejectErr
 }
 
 // BDD trace:

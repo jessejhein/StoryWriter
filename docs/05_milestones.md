@@ -6,6 +6,14 @@ Build a local-first AI writing workshop that turns messy Markdown notes into a s
 
 Each milestone is a sprint. Each sprint must leave the app working.
 
+## Current status
+
+- Milestones 0 through 4: implemented; full check and race suites green on June 30, 2026.
+- Milestone 5: next incomplete phase.
+- Milestones 6 through 9: roadmap only.
+
+The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
+
 ---
 
 ## Milestone 0 — Foundation and local project skeleton
