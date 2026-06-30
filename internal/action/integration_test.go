@@ -99,8 +99,10 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadScene() error = %v", err)
 	}
+	prefix := "Prelude: "
 	selectedText := "Alpha beta gamma delta echo foxtrot golf hotel india juliet kilo lima Luz ágil mike november oscar papa quebec romeo sierra tango umbrella."
-	markdown := selectedText + "\nOmega settles.\n"
+	suffix := " [tail marker]"
+	markdown := prefix + selectedText + suffix + "\nOmega settles.\n"
 	savedScene, err := storyService.SaveScene(ctx, loadedScene.ID, story.SaveSceneRequest{
 		Title: "The Duel",
 		FrontMatter: story.SceneFrontMatter{
@@ -170,8 +172,8 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	}
 	commitCountBeforeRun := gitCommitCount(t, ctx, projectPath)
 
-	startByte := 0
-	endByte := len([]byte(selectedText))
+	startByte := len([]byte(prefix))
+	endByte := startByte + len([]byte(selectedText))
 	firstRun, err := actionService.Run(ctx, action.RunRequest{
 		AgentID:       "line_polish",
 		StyleID:       "precise_editor",
@@ -247,8 +249,9 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if acceptedRun.Status != action.RunAccepted {
 		t.Fatalf("accepted status = %q, want accepted", acceptedRun.Status)
 	}
-	if !strings.Contains(acceptedScene.Markdown, "Mock polished: "+selectedText) {
-		t.Fatalf("accepted markdown = %q", acceptedScene.Markdown)
+	expectedAcceptedMarkdown := prefix + "Mock polished: " + selectedText + suffix + "\nOmega settles.\n"
+	if acceptedScene.Markdown != expectedAcceptedMarkdown {
+		t.Fatalf("accepted markdown = %q, want %q", acceptedScene.Markdown, expectedAcceptedMarkdown)
 	}
 	if gitCommitCount(t, ctx, projectPath) != commitCountBeforeRun+1 {
 		t.Fatalf("commit count after accept = %d, want %d", gitCommitCount(t, ctx, projectPath), commitCountBeforeRun+1)

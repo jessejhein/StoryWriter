@@ -144,4 +144,12 @@ func TestRegistryValidationApplicabilityAndContext(t *testing.T) {
 	if _, err := ValidateAgent(invalid); err == nil || !errors.Is(err, ErrInvalidAgent) {
 		t.Fatalf("ValidateAgent(disjoint context) error = %v, want ErrInvalidAgent", err)
 	}
+
+	multiScopeSelection := chapterRefiner
+	multiScopeSelection.ID = "chapter_and_selection"
+	multiScopeSelection.AppliesWhen.InputScopes = []InputScope{InputScopeChapter, InputScopeSelection}
+	multiScopeSelection.ContextPolicy.Required = []ContextPack{ContextCurrentChapter, ContextChapterSummary, ContextStyleSheet}
+	if _, err := ValidateAgent(multiScopeSelection); err == nil || !errors.Is(err, ErrInvalidAgent) {
+		t.Fatalf("ValidateAgent(multi scope selection) error = %v, want ErrInvalidAgent", err)
+	}
 }

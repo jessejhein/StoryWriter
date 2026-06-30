@@ -529,6 +529,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 				writeError(writer, http.StatusBadRequest, fmt.Errorf("selection_words must be an integer"))
 				return
 			}
+			if value < 0 {
+				writeError(writer, http.StatusBadRequest, fmt.Errorf("selection_words must be greater than or equal to zero"))
+				return
+			}
 			selectionWords = value
 		}
 		input := agent.AvailabilityInput{
@@ -536,6 +540,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			InputScope:     agent.InputScope(request.URL.Query().Get("input_scope")),
 			SceneID:        request.URL.Query().Get("scene_id"),
 			SelectionWords: selectionWords,
+		}
+		if err := validateAvailabilityInput(input); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
 		}
 		actions, err := stories.AvailableActions(request.Context(), input)
 		if err != nil {
@@ -840,6 +848,23 @@ func requireNonEmptyJSONString(raw json.RawMessage, context string) error {
 
 func writeStoryError(writer http.ResponseWriter, err error) {
 	writeError(writer, statusForStoryError(err), err)
+}
+
+func validateAvailabilityInput(input agent.AvailabilityInput) error {
+	switch input.Surface {
+	case agent.SurfaceEditor, agent.SurfaceChapterView:
+	default:
+		return fmt.Errorf("surface must be one of %q or %q", agent.SurfaceEditor, agent.SurfaceChapterView)
+	}
+	switch input.InputScope {
+	case agent.InputScopeSelection, agent.InputScopeChapter:
+	default:
+		return fmt.Errorf("input_scope must be one of %q or %q", agent.InputScopeSelection, agent.InputScopeChapter)
+	}
+	if input.Surface == agent.SurfaceEditor && input.InputScope == agent.InputScopeSelection && strings.TrimSpace(input.SceneID) == "" {
+		return fmt.Errorf("scene_id is required for editor selection availability")
+	}
+	return nil
 }
 
 func statusForStoryError(err error) int {

@@ -208,7 +208,7 @@ func ValidateAgent(agent Agent) (Agent, error) {
 	if !agent.Output.RequiresDiffPreview {
 		return Agent{}, fmt.Errorf("agent %q must require diff preview: %w", agent.ID, ErrInvalidAgent)
 	}
-	if agent.AppliesWhen.InputScopes[0] == InputScopeSelection {
+	if slices.Contains(agent.AppliesWhen.InputScopes, InputScopeSelection) {
 		if !slices.Contains(agent.ContextPolicy.Required, ContextSelectedText) || !slices.Contains(agent.ContextPolicy.Required, ContextStyleSheet) {
 			return Agent{}, fmt.Errorf("agent %q selection execution requires selected_text and style_sheet: %w", agent.ID, ErrInvalidAgent)
 		}

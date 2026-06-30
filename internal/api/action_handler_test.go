@@ -1,8 +1,10 @@
 package api_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -94,18 +96,57 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	for _, testCase := range []struct {
-		name   string
-		method string
-		path   string
-		body   string
-		status int
+		name         string
+		method       string
+		path         string
+		body         string
+		status       int
+		expectedJSON string
 	}{
-		{name: "list agents", method: http.MethodGet, path: "/api/agents", status: http.StatusOK},
-		{name: "list styles", method: http.MethodGet, path: "/api/styles", status: http.StatusOK},
-		{name: "available actions", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_0123456789abcdef0123&selection_words=200", status: http.StatusOK},
-		{name: "run action", method: http.MethodPost, path: "/api/actions/run", body: `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":120,"end_byte":640,"text":"Selected prose..."}}`, status: http.StatusCreated},
-		{name: "accept action", method: http.MethodPost, path: "/api/actions/run_0123456789abcdef0123/accept", body: `{"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, status: http.StatusOK},
-		{name: "reject action", method: http.MethodPost, path: "/api/actions/run_0123456789abcdef0123/reject", status: http.StatusOK},
+		{
+			name:         "list agents",
+			method:       http.MethodGet,
+			path:         "/api/agents",
+			status:       http.StatusOK,
+			expectedJSON: `{"agents":[{"id":"line_polish","name":"Line Polish","description":"Rewrite selected prose.","surfaces":["editor"],"input_scopes":["selection"],"min_words":20,"max_words":1500,"required_context":["selected_text","style_sheet"],"optional_context":["surrounding_paragraphs"],"forbidden_context":["global_codex_rag","raw_import_notes"],"rag_mode":"none","output_mode":"patch","requires_acceptance":true}]}`,
+		},
+		{
+			name:         "list styles",
+			method:       http.MethodGet,
+			path:         "/api/styles",
+			status:       http.StatusOK,
+			expectedJSON: `{"styles":[{"id":"precise_editor","name":"Precise Editor","provider_profile_id":"mock_default","model":"mock","temperature":0.2,"system_prompt":"You are a careful prose editor."}]}`,
+		},
+		{
+			name:         "available actions",
+			method:       http.MethodGet,
+			path:         "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_0123456789abcdef0123&selection_words=200",
+			status:       http.StatusOK,
+			expectedJSON: `{"actions":[{"agent_id":"line_polish","name":"Line Polish","description":"Rewrite selected prose.","output_mode":"patch","requires_acceptance":true,"style_ids":["precise_editor"]}]}`,
+		},
+		{
+			name:         "run action",
+			method:       http.MethodPost,
+			path:         "/api/actions/run",
+			body:         `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":120,"end_byte":640,"text":"Selected prose..."}}`,
+			status:       http.StatusCreated,
+			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"pending","agent_id":"line_polish","style_id":"precise_editor","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":120,"end_byte":640},"output_mode":"patch","patch":{"original":"Selected prose...","replacement":"Mock polished: Selected prose..."},"context_summary":{"packs_used":["selected_text","style_sheet"],"rag_mode":"none"}}`,
+		},
+		{
+			name:         "accept action",
+			method:       http.MethodPost,
+			path:         "/api/actions/run_0123456789abcdef0123/accept",
+			body:         `{"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+			status:       http.StatusOK,
+			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"accepted","scene":{"id":"scn_0123456789abcdef0123","chapter_id":"ch_0123456789abcdef0123","title":"The Duel","frontmatter":{"pov":"Luke","status":"draft","exclude_from_ai":false},"markdown":"Updated prose...","revision":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`,
+		},
+		{
+			name:         "reject action",
+			method:       http.MethodPost,
+			path:         "/api/actions/run_0123456789abcdef0123/reject",
+			status:       http.StatusOK,
+			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"rejected"}`,
+		},
 	} {
 		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body))
 		response := httptest.NewRecorder()
@@ -113,6 +154,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 		if response.Code != testCase.status {
 			t.Fatalf("%s status = %d, want %d", testCase.name, response.Code, testCase.status)
 		}
+		assertJSONShape(t, response.Body.Bytes(), testCase.expectedJSON)
 	}
 
 	runRequest := stub.actionRunRequest
@@ -143,7 +185,11 @@ func TestActionRouteStatusMapping(t *testing.T) {
 		stub   storyServiceStub
 		status int
 	}{
-		{name: "invalid availability query", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_1&selection_words=oops", status: http.StatusBadRequest},
+		{name: "invalid availability selection words", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_1&selection_words=oops", status: http.StatusBadRequest},
+		{name: "invalid availability negative selection words", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_1&selection_words=-1", status: http.StatusBadRequest},
+		{name: "invalid availability surface", method: http.MethodGet, path: "/api/actions/available?surface=codex&input_scope=selection&scene_id=scn_1&selection_words=200", status: http.StatusBadRequest},
+		{name: "invalid availability input scope", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=scene&scene_id=scn_1&selection_words=200", status: http.StatusBadRequest},
+		{name: "missing availability scene id", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&selection_words=200", status: http.StatusBadRequest},
 		{name: "registry failure on list", method: http.MethodGet, path: "/api/agents", stub: storyServiceStub{agentsErr: agent.ErrRegistryLoad}, status: http.StatusInternalServerError},
 		{name: "agent missing on run", method: http.MethodPost, path: "/api/actions/run", body: `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":0,"end_byte":5,"text":"Alpha"}}`, stub: storyServiceStub{actionRunErr: action.ErrAgentNotFound}, status: http.StatusNotFound},
 		{name: "selection mismatch on run", method: http.MethodPost, path: "/api/actions/run", body: `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":0,"end_byte":5,"text":"Alpha"}}`, stub: storyServiceStub{actionRunErr: story.ErrInvalidSelection}, status: http.StatusBadRequest},
@@ -181,5 +227,21 @@ func TestActionRouteStatusMapping(t *testing.T) {
 		if allow := response.Header().Get("Allow"); allow != testCase.allow {
 			t.Fatalf("Allow = %q, want %q", allow, testCase.allow)
 		}
+	}
+}
+
+func assertJSONShape(t *testing.T, body []byte, expected string) {
+	t.Helper()
+
+	var got any
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("json.Unmarshal(got) error = %v; body=%s", err, string(body))
+	}
+	var want any
+	if err := json.Unmarshal([]byte(expected), &want); err != nil {
+		t.Fatalf("json.Unmarshal(want) error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("JSON body = %s, want %s", string(body), expected)
 	}
 }
