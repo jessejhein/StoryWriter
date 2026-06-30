@@ -348,7 +348,7 @@ export function acceptAction(runID: string, expectedRevision: string): Promise<A
 }
 
 export function rejectAction(runID: string): Promise<ActionDecisionResponse> {
-  return postJSON(`/api/actions/${runID}/reject`, {})
+  return request(`/api/actions/${runID}/reject`, { method: 'POST' })
 }
 
 /** getCodexEntries loads the active project's full Codex list. */

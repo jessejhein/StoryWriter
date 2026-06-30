@@ -522,6 +522,14 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, map[string]any{"styles": response})
 	})
 	mux.HandleFunc("GET /api/actions/available", func(writer http.ResponseWriter, request *http.Request) {
+		if err := validateExactQuery(request, "surface", "input_scope", "scene_id", "selection_words"); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if !request.URL.Query().Has("selection_words") {
+			writeError(writer, http.StatusBadRequest, errors.New("selection_words is required"))
+			return
+		}
 		selectionWords := 0
 		if raw := request.URL.Query().Get("selection_words"); raw != "" {
 			value, err := strconv.Atoi(raw)
@@ -560,10 +568,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			InputScope    string `json:"input_scope"`
 			SceneID       string `json:"scene_id"`
 			SceneRevision string `json:"scene_revision"`
-			Selection     struct {
-				StartByte int    `json:"start_byte"`
-				EndByte   int    `json:"end_byte"`
-				Text      string `json:"text"`
+			Selection     *struct {
+				StartByte *int    `json:"start_byte"`
+				EndByte   *int    `json:"end_byte"`
+				Text      *string `json:"text"`
 			} `json:"selection"`
 		}
 		if err := decodeJSONWithRequiredFields(writer, request, &runRequest, 1<<20,
@@ -578,19 +586,21 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeBodyLimitError(writer, err)
 			return
 		}
-		run, err := stories.Run(request.Context(), action.RunRequest{
-			AgentID:       runRequest.AgentID,
-			StyleID:       runRequest.StyleID,
-			Surface:       agent.Surface(runRequest.Surface),
-			InputScope:    agent.InputScope(runRequest.InputScope),
-			SceneID:       runRequest.SceneID,
-			SceneRevision: runRequest.SceneRevision,
-			Selection: action.Selection{
-				StartByte: runRequest.Selection.StartByte,
-				EndByte:   runRequest.Selection.EndByte,
-				Text:      runRequest.Selection.Text,
-			},
-		})
+		if runRequest.Selection == nil || runRequest.Selection.StartByte == nil || runRequest.Selection.EndByte == nil || runRequest.Selection.Text == nil {
+			writeError(writer, http.StatusBadRequest, errors.New("selection.start_byte, selection.end_byte, and selection.text are required"))
+			return
+		}
+		domainRequest := action.RunRequest{
+			AgentID: runRequest.AgentID, StyleID: runRequest.StyleID,
+			Surface: agent.Surface(runRequest.Surface), InputScope: agent.InputScope(runRequest.InputScope),
+			SceneID: runRequest.SceneID, SceneRevision: runRequest.SceneRevision,
+			Selection: action.Selection{StartByte: *runRequest.Selection.StartByte, EndByte: *runRequest.Selection.EndByte, Text: *runRequest.Selection.Text},
+		}
+		if err := action.ValidateRunRequest(domainRequest); err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		run, err := stories.Run(request.Context(), domainRequest)
 		if err != nil {
 			writeStoryError(writer, err)
 			return
@@ -615,11 +625,19 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		})
 	})
 	mux.HandleFunc("POST /api/actions/{run_id}/accept", func(writer http.ResponseWriter, request *http.Request) {
+		if err := action.ValidateRunID(request.PathValue("run_id")); err != nil {
+			writeStoryError(writer, err)
+			return
+		}
 		var acceptRequest struct {
 			ExpectedRevision string `json:"expected_revision"`
 		}
 		if err := decodeJSONWithRequiredFields(writer, request, &acceptRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
 			writeBodyLimitError(writer, err)
+			return
+		}
+		if err := story.ValidateRevision(acceptRequest.ExpectedRevision); err != nil {
+			writeStoryError(writer, err)
 			return
 		}
 		run, sceneDocument, err := stories.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
@@ -634,6 +652,14 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		})
 	})
 	mux.HandleFunc("POST /api/actions/{run_id}/reject", func(writer http.ResponseWriter, request *http.Request) {
+		if err := action.ValidateRunID(request.PathValue("run_id")); err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		if err := requireEmptyBody(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
 		run, err := stories.Reject(request.Context(), request.PathValue("run_id"))
 		if err != nil {
 			writeStoryError(writer, err)
@@ -649,6 +675,33 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 	mux.HandleFunc("/api/actions/{run_id}/accept", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/reject", methodNotAllowed("POST"))
 	return mux
+}
+
+func validateExactQuery(request *http.Request, allowed ...string) error {
+	allowedKeys := make(map[string]struct{}, len(allowed))
+	for _, key := range allowed {
+		allowedKeys[key] = struct{}{}
+	}
+	for key, values := range request.URL.Query() {
+		if _, ok := allowedKeys[key]; !ok {
+			return fmt.Errorf("unknown query parameter %q", key)
+		}
+		if len(values) != 1 {
+			return fmt.Errorf("query parameter %q must be provided once", key)
+		}
+	}
+	return nil
+}
+
+func requireEmptyBody(request *http.Request) error {
+	body, err := io.ReadAll(io.LimitReader(request.Body, 2))
+	if err != nil {
+		return fmt.Errorf("read request body: %w", err)
+	}
+	if len(body) != 0 {
+		return errors.New("request body must be empty")
+	}
+	return nil
 }
 
 func decodeJSON(request *http.Request, target any) error {
@@ -869,6 +922,8 @@ func validateAvailabilityInput(input agent.AvailabilityInput) error {
 
 func statusForStoryError(err error) int {
 	switch {
+	case errors.Is(err, agent.ErrRegistryLoad):
+		return http.StatusInternalServerError
 	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree), errors.Is(err, story.ErrStaleRevision):
 		return http.StatusConflict
 	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder), errors.Is(err, story.ErrInvalidPOV), errors.Is(err, story.ErrInvalidStatus), errors.Is(err, story.ErrInvalidMarkdown), errors.Is(err, story.ErrInvalidRevision), errors.Is(err, story.ErrNoSceneChanges):

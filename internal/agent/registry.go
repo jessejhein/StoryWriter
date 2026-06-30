@@ -77,7 +77,7 @@ func (l *Loader) LoadAgents(projectPath string) ([]Agent, error) {
 			} `yaml:"output"`
 		}
 		if err := decodeSingleYAML(contents, &document); err != nil {
-			return nil, fmt.Errorf("%s: %w", slashPath(file, projectPath), err)
+			return nil, fmt.Errorf("%s: %v: %w", slashPath(file, projectPath), err, ErrRegistryLoad)
 		}
 		item, err := ValidateAgent(Agent{
 			Version:     document.Version,
@@ -107,7 +107,7 @@ func (l *Loader) LoadAgents(projectPath string) ([]Agent, error) {
 			},
 		})
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", slashPath(file, projectPath), err)
+			return nil, fmt.Errorf("%s: %v: %w", slashPath(file, projectPath), err, ErrRegistryLoad)
 		}
 		if prior, ok := seen[item.ID]; ok {
 			return nil, fmt.Errorf("duplicate agent id %q in %s and %s: %w", item.ID, prior, slashPath(file, projectPath), ErrRegistryLoad)
@@ -138,12 +138,15 @@ func (l *Loader) LoadStyles(projectPath string) ([]Style, error) {
 			ProviderProfileID string `yaml:"provider_profile_id"`
 			Model             string `yaml:"model"`
 			Parameters        struct {
-				Temperature float64 `yaml:"temperature"`
+				Temperature *float64 `yaml:"temperature"`
 			} `yaml:"parameters"`
 			SystemPrompt string `yaml:"system_prompt"`
 		}
 		if err := decodeSingleYAML(contents, &document); err != nil {
-			return nil, fmt.Errorf("%s: %w", slashPath(file, projectPath), err)
+			return nil, fmt.Errorf("%s: %v: %w", slashPath(file, projectPath), err, ErrRegistryLoad)
+		}
+		if document.Parameters.Temperature == nil {
+			return nil, fmt.Errorf("%s: style temperature is required: %w", slashPath(file, projectPath), ErrRegistryLoad)
 		}
 		item, err := ValidateStyle(Style{
 			Version:           document.Version,
@@ -151,11 +154,11 @@ func (l *Loader) LoadStyles(projectPath string) ([]Style, error) {
 			Name:              document.Name,
 			ProviderProfileID: document.ProviderProfileID,
 			Model:             document.Model,
-			Temperature:       document.Parameters.Temperature,
+			Temperature:       *document.Parameters.Temperature,
 			SystemPrompt:      document.SystemPrompt,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", slashPath(file, projectPath), err)
+			return nil, fmt.Errorf("%s: %v: %w", slashPath(file, projectPath), err, ErrRegistryLoad)
 		}
 		if prior, ok := seen[item.ID]; ok {
 			return nil, fmt.Errorf("duplicate style id %q in %s and %s: %w", item.ID, prior, slashPath(file, projectPath), ErrRegistryLoad)

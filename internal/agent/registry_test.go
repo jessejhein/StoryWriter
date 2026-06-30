@@ -180,6 +180,34 @@ func TestLoaderStrictlyLoadsAndRejectsRegistryFiles(t *testing.T) {
 	}
 }
 
+// BDD trace:
+//   - Requirements: M4-R02, M4-R03.
+//   - Scenario: 4.1.2.
+//   - Test purpose: verify required style parameters cannot silently receive Go
+//     zero values when their YAML keys are absent.
+func TestLoaderRejectsStyleWithoutRequiredTemperature(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectPath, "styles"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(styles) error = %v", err)
+	}
+	mustWriteFile(t, filepath.Join(projectPath, "styles", "style.yaml"), strings.Join([]string{
+		"version: 1",
+		"id: precise_editor",
+		"name: Precise Editor",
+		"provider_profile_id: mock_default",
+		"model: mock",
+		"parameters: {}",
+		"system_prompt: You are a careful prose editor.",
+		"",
+	}, "\n"))
+
+	if _, err := NewLoader().LoadStyles(projectPath); err == nil || !strings.Contains(err.Error(), "temperature is required") {
+		t.Fatalf("LoadStyles(missing temperature) error = %v, want required-field failure", err)
+	}
+}
+
 func mustWriteFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {

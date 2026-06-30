@@ -180,6 +180,8 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
     end_byte: 33,
     text: 'Luz ágil',
   })
+  const rejectRequest = requests.find((request) => request.path === '/api/actions/run_0123456789abcdef0123/reject')
+  expect(rejectRequest?.init?.body).toBeUndefined()
   expect(requests.some((request) => request.path === '/api/scenes/scn_0123456789abcdef0123' && request.init?.method === 'PUT')).toBe(false)
 
   vi.unstubAllGlobals()

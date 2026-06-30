@@ -355,6 +355,31 @@ func TestRunStoreEvictsTerminalRunsAndRejectsLiveCapacity(t *testing.T) {
 	}
 }
 
+// BDD trace:
+//   - Requirements: M4-R10, M4-R15.
+//   - Scenario: 4.4.1, 4.4.2.
+//   - Test purpose: verify a colliding generated ID cannot replace an existing
+//     pending review run in transient memory.
+func TestRunStoreRejectsDuplicateRunIDs(t *testing.T) {
+	t.Parallel()
+
+	store := NewRunStore(time.Now)
+	runID := "run_0123456789abcdef0123"
+	if err := store.Insert(Run{RunID: runID, Status: RunPending, OriginalText: "first"}); err != nil {
+		t.Fatalf("Insert(first) error = %v", err)
+	}
+	if err := store.Insert(Run{RunID: runID, Status: RunPending, OriginalText: "replacement"}); !errors.Is(err, ErrDuplicateRunID) {
+		t.Fatalf("Insert(duplicate) error = %v, want ErrDuplicateRunID", err)
+	}
+	claimed, err := store.ClaimAccepting(runID)
+	if err != nil {
+		t.Fatalf("ClaimAccepting() error = %v", err)
+	}
+	if claimed.OriginalText != "first" {
+		t.Fatalf("stored original = %q, want first", claimed.OriginalText)
+	}
+}
+
 func formatRunID(i int) string {
 	return fmt.Sprintf("run_%020x", i)
 }

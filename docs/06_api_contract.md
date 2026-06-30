@@ -340,7 +340,9 @@ Accept request:
 {"expected_revision":"sha256:..."}
 ```
 
-Reject request uses an empty JSON object body through the frontend helper.
+Reject requests have no body. Unknown or duplicate availability query keys,
+missing required selection fields, malformed IDs/revisions, and any reject body
+are rejected with `400 Bad Request` before the action service is called.
 
 Accepting a patch writes to canonical files only after explicit author action.
 

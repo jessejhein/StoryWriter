@@ -230,6 +230,65 @@ func TestActionRouteStatusMapping(t *testing.T) {
 	}
 }
 
+// BDD trace:
+//   - Requirements: M4-R09, M4-R16.
+//   - Scenario: 4.3.3, 4.4.1, 4.4.2.
+//   - Test purpose: verify malformed action HTTP inputs fail at the transport
+//     boundary and never reach the action service.
+func TestActionRoutesRejectMalformedContractInputs(t *testing.T) {
+	t.Parallel()
+
+	store := &storyServiceStub{}
+	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, store, "test")
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+	}{
+		{name: "unknown availability query", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_0123456789abcdef0123&selection_words=20&extra=true"},
+		{name: "duplicate availability query", method: http.MethodGet, path: "/api/actions/available?surface=editor&surface=chapter_view&input_scope=selection&scene_id=scn_0123456789abcdef0123&selection_words=20"},
+		{name: "missing selection words", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_0123456789abcdef0123"},
+		{name: "missing nested selection text", method: http.MethodPost, path: "/api/actions/run", body: `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":0,"end_byte":10}}`},
+		{name: "malformed agent id", method: http.MethodPost, path: "/api/actions/run", body: `{"agent_id":"Line Polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":0,"end_byte":10,"text":"Alpha beta"}}`},
+		{name: "malformed run id", method: http.MethodPost, path: "/api/actions/not-a-run/accept", body: `{"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{name: "malformed accept revision", method: http.MethodPost, path: "/api/actions/run_0123456789abcdef0123/accept", body: `{"expected_revision":"bad"}`},
+		{name: "reject body", method: http.MethodPost, path: "/api/actions/run_0123456789abcdef0123/reject", body: `{}`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400; body = %s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+// BDD trace:
+//   - Requirements: M4-R03, M4-R16.
+//   - Scenario: 4.1.2.
+//   - Test purpose: verify invalid canonical registry state is an internal
+//     server error rather than being misreported as bad client input.
+func TestActionRegistryLoadFailuresReturnInternalServerError(t *testing.T) {
+	t.Parallel()
+
+	handler := api.NewHandler(
+		&projectStoreStub{},
+		&activeProjectSessionStub{},
+		&storyServiceStub{agentsErr: agent.ErrRegistryLoad},
+		"test",
+	)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/agents", nil))
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", response.Code, response.Body.String())
+	}
+}
+
 func assertJSONShape(t *testing.T, body []byte, expected string) {
 	t.Helper()
 

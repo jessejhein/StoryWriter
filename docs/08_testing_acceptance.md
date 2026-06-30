@@ -104,9 +104,14 @@ Named automated evidence:
 - `internal/action/service_test.go`
 - `internal/action/integration_test.go`
 - `internal/story/scene_selection_test.go`
+- `internal/story/scene_patch_rollback_service_test.go`
 - `internal/api/action_handler_test.go`
 - `web/src/editor/selection.test.ts`
 - `web/src/editor/SceneEditor.actions.boundary.test.tsx`
+
+This evidence includes strict required YAML parameters, malformed and duplicate
+HTTP input rejection, canonical-registry `500` mapping, duplicate transient-run
+ID protection, and acceptance rollback at write, index, and Git boundaries.
 
 ### Milestone 5
 

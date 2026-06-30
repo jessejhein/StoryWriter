@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -22,7 +23,10 @@ var (
 	ErrAgentNotFound       = errors.New("agent not found")
 	ErrStyleNotFound       = errors.New("style not found")
 	ErrProviderUnavailable = errors.New("provider unavailable")
+	ErrDuplicateRunID      = errors.New("duplicate action run ID")
 )
+
+var runIDPattern = regexp.MustCompile(`^run_[0-9a-f]{20}$`)
 
 type Session interface {
 	Current() (project.Project, bool)
@@ -110,6 +114,9 @@ func (s *RunStore) Insert(run Run) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if _, exists := s.runs[run.RunID]; exists {
+		return ErrDuplicateRunID
+	}
 	if len(s.runs) >= 1000 {
 		evicted := false
 		for _, runID := range append([]string(nil), s.order...) {
@@ -277,6 +284,9 @@ func (s *Service) AvailableActions(ctx context.Context, input agent.Availability
 }
 
 func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
+	if err := ValidateRunRequest(request); err != nil {
+		return Run{}, err
+	}
 	registry, err := s.registry()
 	if err != nil {
 		return Run{}, err
@@ -336,12 +346,7 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 	if generated.Replacement == selected {
 		return Run{}, story.ErrNoSceneChanges
 	}
-	runID, err := s.ids.Next()
-	if err != nil {
-		return Run{}, err
-	}
 	run := Run{
-		RunID:         runID,
 		Status:        RunPending,
 		AgentID:       agentDefinition.ID,
 		StyleID:       styleDefinition.ID,
@@ -355,18 +360,39 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 		Replacement:    generated.Replacement,
 		ContextSummary: summary,
 	}
-	if err := s.runs.Insert(run); err != nil {
-		return Run{}, err
+	for attempts := 0; attempts < 5; attempts++ {
+		runID, err := s.ids.Next()
+		if err != nil {
+			return Run{}, err
+		}
+		if err := ValidateRunID(runID); err != nil {
+			return Run{}, fmt.Errorf("generated run ID: %w", err)
+		}
+		run.RunID = runID
+		if err := s.runs.Insert(run); err == nil {
+			return run, nil
+		} else if !errors.Is(err, ErrDuplicateRunID) {
+			return Run{}, err
+		}
 	}
-	return run, nil
+	return Run{}, errors.New("generate unique action run ID after 5 attempts")
 }
 
 func (s *Service) Reject(ctx context.Context, runID string) (Run, error) {
 	_ = ctx
+	if err := ValidateRunID(runID); err != nil {
+		return Run{}, err
+	}
 	return s.runs.MarkRejected(runID)
 }
 
 func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (Run, story.SceneDocument, error) {
+	if err := ValidateRunID(runID); err != nil {
+		return Run{}, story.SceneDocument{}, err
+	}
+	if err := story.ValidateRevision(expectedRevision); err != nil {
+		return Run{}, story.SceneDocument{}, err
+	}
 	run, err := s.runs.ClaimAccepting(runID)
 	if err != nil {
 		return Run{}, story.SceneDocument{}, err
@@ -391,6 +417,39 @@ func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (R
 	}
 	return finalRun, scene, nil
 }
+
+// ValidateRunID validates the opaque action-run identifier syntax.
+func ValidateRunID(runID string) error {
+	if !runIDPattern.MatchString(runID) {
+		return fmt.Errorf("run_id %q is invalid: %w", runID, ErrInvalidRunRequest)
+	}
+	return nil
+}
+
+// ValidateRunRequest validates syntax before registry lookup or scene access.
+func ValidateRunRequest(request RunRequest) error {
+	if !registryRequestIDPattern.MatchString(request.AgentID) {
+		return fmt.Errorf("agent_id %q is invalid: %w", request.AgentID, ErrInvalidRunRequest)
+	}
+	if !registryRequestIDPattern.MatchString(request.StyleID) {
+		return fmt.Errorf("style_id %q is invalid: %w", request.StyleID, ErrInvalidRunRequest)
+	}
+	if request.Surface != agent.SurfaceEditor && request.Surface != agent.SurfaceChapterView {
+		return fmt.Errorf("surface %q is invalid: %w", request.Surface, ErrInvalidRunRequest)
+	}
+	if request.InputScope != agent.InputScopeSelection && request.InputScope != agent.InputScopeChapter {
+		return fmt.Errorf("input_scope %q is invalid: %w", request.InputScope, ErrInvalidRunRequest)
+	}
+	if err := story.ValidateSceneID(request.SceneID); err != nil {
+		return err
+	}
+	if err := story.ValidateRevision(request.SceneRevision); err != nil {
+		return err
+	}
+	return nil
+}
+
+var registryRequestIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 func (s *Service) registry() (agent.Registry, error) {
 	current, ok := s.session.Current()
