@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -400,6 +401,25 @@ func TestRunStoreRejectsDuplicateRunIDs(t *testing.T) {
 	}
 	if claimed.OriginalText != "first" {
 		t.Fatalf("stored original = %q, want first", claimed.OriginalText)
+	}
+}
+
+// BDD trace:
+//   - Requirement: M4-R10 transient run storage remains deterministic.
+//   - Scenario: removing an evicted run ID preserves insertion order without
+//     mutating the caller's order snapshot.
+//   - Test purpose: prevent subtle aliasing from in-place slice filtering.
+func TestRemoveIDPreservesOrderAndInput(t *testing.T) {
+	ids := []string{"run_first", "run_remove", "run_last"}
+	original := append([]string(nil), ids...)
+
+	got := removeID(ids, "run_remove")
+
+	if want := []string{"run_first", "run_last"}; !slices.Equal(got, want) {
+		t.Fatalf("removeID() = %v, want %v", got, want)
+	}
+	if !slices.Equal(ids, original) {
+		t.Fatalf("removeID() mutated input to %v, want %v", ids, original)
 	}
 }
 

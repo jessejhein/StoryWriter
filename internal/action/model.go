@@ -198,7 +198,7 @@ func (s *RunStore) MarkRejected(runID string) (Run, error) {
 }
 
 func removeID(ids []string, target string) []string {
-	result := ids[:0]
+	result := make([]string, 0, len(ids))
 	for _, item := range ids {
 		if item != target {
 			result = append(result, item)
