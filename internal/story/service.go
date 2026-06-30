@@ -1,5 +1,7 @@
 package story
 
+// service.go coordinates active-project reads, canonical mutations, indexing, and checkpoints.
+
 import (
 	"bytes"
 	"context"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"storywork/internal/codex"
 	"storywork/internal/project"
 )
 
@@ -15,43 +18,81 @@ import (
 type NodeKind string
 
 const (
-	NodeKindArc     NodeKind = "arc"
+	// NodeKindArc identifies generated IDs for arcs.
+	NodeKindArc NodeKind = "arc"
+	// NodeKindChapter identifies generated IDs for chapters.
 	NodeKindChapter NodeKind = "chapter"
-	NodeKindScene   NodeKind = "scene"
+	// NodeKindScene identifies generated IDs for scenes.
+	NodeKindScene NodeKind = "scene"
+	// NodeKindCharacter identifies generated IDs for character Codex entries.
+	NodeKindCharacter NodeKind = "character"
+	// NodeKindLocation identifies generated IDs for location Codex entries.
+	NodeKindLocation NodeKind = "location"
+	// NodeKindLore identifies generated IDs for lore Codex entries.
+	NodeKindLore NodeKind = "lore"
+	// NodeKindCustom identifies generated IDs for custom Codex entries.
+	NodeKindCustom NodeKind = "custom"
+	// NodeKindProgression identifies generated IDs for Codex progressions.
+	NodeKindProgression NodeKind = "progression"
 )
 
 // Session resolves the active project for the current backend process.
 type Session interface {
+	// Current returns the active project when one has been selected.
 	Current() (project.Project, bool)
 }
 
 // FileStore loads, marshals, and atomically writes canonical story files.
 type FileStore interface {
+	// Load returns the canonical outline and referenced structure files.
 	Load(ctx context.Context, projectPath string) (Outline, error)
+	// LoadScene returns one canonical scene document.
 	LoadScene(ctx context.Context, projectPath, sceneID string) (SceneDocument, error)
+	// LoadCodexEntries returns every canonical Codex entry.
+	LoadCodexEntries(ctx context.Context, projectPath string) ([]codex.Entry, error)
+	// LoadCodexEntry returns one canonical Codex entry.
+	LoadCodexEntry(ctx context.Context, projectPath, entryID string) (codex.Entry, error)
+	// LoadProgressions returns one canonical progression document.
+	LoadProgressions(ctx context.Context, projectPath, entryID string) (codex.ProgressionDocument, error)
+	// Exists reports whether one canonical relative path exists.
 	Exists(ctx context.Context, projectPath, relativePath string) (bool, error)
+	// MarshalOutline encodes the canonical outline ordering file.
 	MarshalOutline(outline Outline) ([]byte, error)
+	// MarshalArc encodes one canonical arc file.
 	MarshalArc(arc Arc) ([]byte, error)
+	// MarshalChapter encodes one canonical chapter file.
 	MarshalChapter(chapter Chapter) ([]byte, error)
+	// MarshalScene encodes a new canonical scene file.
 	MarshalScene(scene Scene) ([]byte, error)
+	// MarshalSceneDocument encodes a full canonical scene document.
 	MarshalSceneDocument(scene SceneDocument) ([]byte, error)
+	// MarshalCodexEntry encodes one canonical Codex entry file.
+	MarshalCodexEntry(entry codex.Entry) ([]byte, error)
+	// MarshalProgressions encodes one canonical progression document.
+	MarshalProgressions(document codex.ProgressionDocument) ([]byte, error)
+	// WriteFiles atomically replaces the supplied canonical files and returns a rollback closure.
 	WriteFiles(ctx context.Context, projectPath string, files map[string][]byte) (func() error, error)
 }
 
 // GitStore guards mutation safety and records checkpoints.
 type GitStore interface {
+	// IsClean reports whether the project worktree is free of tracked changes.
 	IsClean(ctx context.Context, path string) (bool, error)
+	// CommitAll stages and commits the current canonical mutation.
 	CommitAll(ctx context.Context, path, message string) error
+	// UnstageAll removes staged changes without discarding the working tree.
 	UnstageAll(ctx context.Context, path string) error
 }
 
 // IndexStore rebuilds the disposable project index.
 type IndexStore interface {
+	// Rebuild recreates the derived index from canonical project files.
 	Rebuild(ctx context.Context, projectPath string) error
 }
 
 // IDGenerator returns stable opaque IDs for new structure nodes.
 type IDGenerator interface {
+	// Next returns the next generated ID for the requested node kind.
 	Next(kind NodeKind) (string, error)
 }
 
@@ -71,7 +112,7 @@ type Service struct {
 	mu      sync.RWMutex
 }
 
-// NewService creates the structural mutation service.
+// NewService creates the active-project story service with the supplied boundaries.
 func NewService(session Session, files FileStore, git GitStore, index IndexStore, ids IDGenerator) *Service {
 	return &Service{
 		session: session,
@@ -346,22 +387,344 @@ func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSce
 	return nextScene, nil
 }
 
+// CodexEntries returns the current active project's validated Codex list.
+func (s *Service) CodexEntries(ctx context.Context) ([]codex.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return nil, err
+	}
+	return s.files.LoadCodexEntries(ctx, current.Path)
+}
+
+// LoadCodexEntry returns one validated canonical Codex entry.
+func (s *Service) LoadCodexEntry(ctx context.Context, entryID string) (codex.Entry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.Entry{}, err
+	}
+	return s.files.LoadCodexEntry(ctx, current.Path, entryID)
+}
+
+// CreateCodexEntry creates and checkpoints one new canonical Codex entry.
+func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryRequest) (codex.Entry, error) {
+	// Step 1: resolve the active project before acquiring the shared mutation lock.
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Step 3: verify the worktree is clean before loading canonical state.
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if !clean {
+		return codex.Entry{}, ErrDirtyWorktree
+	}
+	// Step 6: validate and normalize the complete next document in memory.
+	request, err = codex.NormalizeCreateRequest(request)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	entryID, err := s.nextUnusedID(ctx, current.Path, codexNodeKind(request.Type))
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	nextEntry, err := codex.NormalizeEntry(codex.Entry{
+		ID:          entryID,
+		Type:        request.Type,
+		Name:        request.Name,
+		Aliases:     request.Aliases,
+		Tags:        request.Tags,
+		Description: request.Description,
+		Metadata:    request.Metadata,
+	})
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	entryBytes, err := s.files.MarshalCodexEntry(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	relativePath, err := codexEntryPath(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	// Steps 9-11: atomically replace, rebuild the index, and checkpoint.
+	if err := s.commitCodexMutation(ctx, current.Path, "Create Codex entry "+nextEntry.ID, relativePath, entryBytes); err != nil {
+		return codex.Entry{}, err
+	}
+	// Step 12: return the representation of the exact bytes written.
+	nextEntry.Revision = codex.ComputeRevision(entryBytes)
+	nextEntry.Canonical = append([]byte(nil), entryBytes...)
+	return nextEntry, nil
+}
+
+// UpdateCodexEntry edits one existing canonical Codex entry.
+func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request codex.SaveEntryRequest) (codex.Entry, error) {
+	// Step 1: resolve the active project and validate route/request syntax before
+	// acquiring the lock so 400s never touch the shared lock or the worktree check.
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.Entry{}, err
+	}
+	if err := codex.ValidateRevision(request.ExpectedRevision); err != nil {
+		return codex.Entry{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Step 3: verify the worktree is clean.
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	if !clean {
+		return codex.Entry{}, ErrDirtyWorktree
+	}
+	// Step 4: strictly reload the canonical state needed for the decision.
+	currentEntry, err := s.files.LoadCodexEntry(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	// Step 5: compare the expected revision against the loaded canonical state.
+	if currentEntry.Revision != request.ExpectedRevision {
+		return codex.Entry{}, fmt.Errorf("entry %q revision changed: %w", entryID, ErrStaleRevision)
+	}
+	// Step 6: validate and normalize the complete next document in memory.
+	nextEntry, err := codex.NormalizeUpdateRequest(entryID, currentEntry, request)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	entryBytes, err := s.files.MarshalCodexEntry(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	// Step 7: detect byte-identical no-op updates against the stored canonical bytes.
+	if bytes.Equal(entryBytes, currentEntry.Canonical) {
+		return codex.Entry{}, codex.ErrNoChanges
+	}
+	relativePath, err := codexEntryPath(nextEntry)
+	if err != nil {
+		return codex.Entry{}, err
+	}
+	// Steps 9-11: atomically replace, rebuild the index, and checkpoint.
+	if err := s.commitCodexMutation(ctx, current.Path, "Edit Codex entry "+nextEntry.ID, relativePath, entryBytes); err != nil {
+		return codex.Entry{}, err
+	}
+	// Step 12: return the representation of the exact bytes written.
+	nextEntry.Revision = codex.ComputeRevision(entryBytes)
+	nextEntry.Canonical = append([]byte(nil), entryBytes...)
+	return nextEntry, nil
+}
+
+// LoadProgressions returns one entry's canonical progression document or an empty logical document.
+func (s *Service) LoadProgressions(ctx context.Context, entryID string) (codex.ProgressionDocument, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if _, err := s.files.LoadCodexEntry(ctx, current.Path, entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	document, err := s.files.LoadProgressions(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := validateProgressionAnchors(outlineSceneIDs(outline), document.Progressions); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	return document, nil
+}
+
+// SaveProgressions replaces one entry's ordered canonical progression list.
+func (s *Service) SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error) {
+	// Step 1: resolve the active project and validate route/request syntax before
+	// acquiring the lock so 400s never touch the shared lock or the worktree check.
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if err := validateProgressionExpectedRevision(request.ExpectedRevision); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Step 3: verify the worktree is clean.
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if !clean {
+		return codex.ProgressionDocument{}, ErrDirtyWorktree
+	}
+	// Step 4: strictly reload all canonical state needed for the decision.
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	if _, err := s.files.LoadCodexEntry(ctx, current.Path, entryID); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	currentDocument, err := s.files.LoadProgressions(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	// Step 5: compare the expected revision against the loaded canonical state.
+	// A null expected_revision is only valid for first creation; an existing
+	// document requires a non-null revision token, and a mismatch is stale.
+	if request.ExpectedRevision == nil && currentDocument.Revision != nil {
+		return codex.ProgressionDocument{}, codex.ErrInvalidRevision
+	}
+	if request.ExpectedRevision != nil && currentDocument.Revision == nil {
+		return codex.ProgressionDocument{}, codex.ErrInvalidRevision
+	}
+	if request.ExpectedRevision != nil && currentDocument.Revision != nil && *request.ExpectedRevision != *currentDocument.Revision {
+		return codex.ProgressionDocument{}, fmt.Errorf("progressions %q revision changed: %w", entryID, ErrStaleRevision)
+	}
+	// Saving an empty list when no progression file exists is a no-op error.
+	if len(request.Progressions) == 0 && currentDocument.Revision == nil {
+		return codex.ProgressionDocument{}, codex.ErrNoChanges
+	}
+	// Step 6: validate and normalize the complete next document in memory.
+	sceneIDs := outlineSceneIDs(outline)
+	progressions := append([]codex.Progression(nil), request.Progressions...)
+	progressions, needsID, err := codex.ReconcileProgressionIDs(currentDocument.Progressions, progressions)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	for _, index := range needsID {
+		id, err := s.ids.Next(NodeKindProgression)
+		if err != nil {
+			return codex.ProgressionDocument{}, err
+		}
+		progressions[index].ID = id
+	}
+	progressions, err = codex.NormalizeProgressions(entryID, progressions, sceneIDs)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	nextDocument := codex.ProgressionDocument{
+		Version:      codex.Version,
+		EntryID:      entryID,
+		Progressions: progressions,
+	}
+	documentBytes, err := s.files.MarshalProgressions(nextDocument)
+	if err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	// Step 7: detect byte-identical no-op updates against the stored canonical bytes.
+	if currentDocument.Canonical != nil && bytes.Equal(documentBytes, currentDocument.Canonical) {
+		return codex.ProgressionDocument{}, codex.ErrNoChanges
+	}
+	// Steps 9-11: atomically replace, rebuild the index, and checkpoint.
+	relativePath := filepath.ToSlash(filepath.Join("progressions", entryID+".yaml"))
+	if err := s.commitCodexMutation(ctx, current.Path, "Edit progressions "+entryID, relativePath, documentBytes); err != nil {
+		return codex.ProgressionDocument{}, err
+	}
+	// Step 12: return the representation of the exact bytes written.
+	revision := codex.ComputeRevision(documentBytes)
+	nextDocument.Revision = &revision
+	nextDocument.Canonical = append([]byte(nil), documentBytes...)
+	return nextDocument, nil
+}
+
+// ResolveActiveCodexState reads one entry and resolves its active state for a target scene.
+func (s *Service) ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	current, err := s.currentProject()
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	if err := codex.ValidateEntryID(entryID); err != nil {
+		return codex.ActiveState{}, err
+	}
+	if err := codex.ValidateSceneID(sceneID); err != nil {
+		return codex.ActiveState{}, err
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	entry, err := s.files.LoadCodexEntry(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	progressions, err := s.files.LoadProgressions(ctx, current.Path, entryID)
+	if err != nil {
+		return codex.ActiveState{}, err
+	}
+	return codex.ResolveActiveState(entry, progressions.Progressions, flattenOutlineScenes(outline), sceneID)
+}
+
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
-	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
-	if err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, nil, err)
-	}
-	reloaded, err := s.files.Load(ctx, projectPath)
-	if err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
-	}
-	if err := s.index.Rebuild(ctx, projectPath); err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
-	}
-	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
-		return MutationResult{}, s.rollbackMutation(ctx, projectPath, rollback, err)
+	var reloaded Outline
+	if err := s.persistFiles(ctx, projectPath, message, files, func() error {
+		next, err := s.files.Load(ctx, projectPath)
+		if err != nil {
+			return err
+		}
+		reloaded = next
+		return nil
+	}); err != nil {
+		return MutationResult{}, err
 	}
 	return MutationResult{ChangedID: changedID, Outline: reloaded}, nil
+}
+
+// commitCodexMutation atomically replaces one canonical file, rebuilds the
+// disposable index, and creates exactly one Git commit. On write failure it
+// returns immediately without rollback work; on index or checkpoint failure
+// it restores the target, unstages app changes, and rebuilds the index from
+// restored files. The caller owns pre-request validation and no-op detection.
+func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message, relativePath string, contents []byte) error {
+	return s.persistFiles(ctx, projectPath, message, map[string][]byte{relativePath: contents}, nil)
+}
+
+func (s *Service) persistFiles(ctx context.Context, projectPath, message string, files map[string][]byte, afterWrite func() error) error {
+	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
+	if err != nil {
+		return err
+	}
+	if afterWrite != nil {
+		if err := afterWrite(); err != nil {
+			return s.rollbackMutation(ctx, projectPath, rollback, err)
+		}
+	}
+	if err := s.index.Rebuild(ctx, projectPath); err != nil {
+		return s.rollbackMutation(ctx, projectPath, rollback, err)
+	}
+	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
+		return s.rollbackMutation(ctx, projectPath, rollback, err)
+	}
+	return nil
 }
 
 func (s *Service) rollbackMutation(ctx context.Context, projectPath string, rollback func() error, cause error) error {
@@ -429,9 +792,84 @@ func entityPath(kind NodeKind, id string) (string, error) {
 		return filepath.ToSlash(filepath.Join("chapters", id+".yaml")), nil
 	case NodeKindScene:
 		return filepath.ToSlash(filepath.Join("scenes", id+".md")), nil
+	case NodeKindCharacter:
+		return filepath.ToSlash(filepath.Join("codex", "characters", id+".yaml")), nil
+	case NodeKindLocation:
+		return filepath.ToSlash(filepath.Join("codex", "locations", id+".yaml")), nil
+	case NodeKindLore:
+		return filepath.ToSlash(filepath.Join("codex", "lore", id+".yaml")), nil
+	case NodeKindCustom:
+		return filepath.ToSlash(filepath.Join("codex", "custom", id+".yaml")), nil
+	case NodeKindProgression:
+		return filepath.ToSlash(filepath.Join("progressions", id+".yaml")), nil
 	default:
 		return "", fmt.Errorf("unknown node kind %q", kind)
 	}
+}
+
+func codexNodeKind(entryType codex.EntryType) NodeKind {
+	switch entryType {
+	case codex.TypeCharacter:
+		return NodeKindCharacter
+	case codex.TypeLocation:
+		return NodeKindLocation
+	case codex.TypeLore:
+		return NodeKindLore
+	case codex.TypeCustom:
+		return NodeKindCustom
+	default:
+		return NodeKind("")
+	}
+}
+
+func codexEntryPath(entry codex.Entry) (string, error) {
+	return entityPath(codexNodeKind(entry.Type), entry.ID)
+}
+
+// validateProgressionExpectedRevision validates the request-side shape of a
+// progression save's expected revision token. A nil token selects first-creation
+// mode; a present token must match the SHA-256 revision shape. The value
+// comparison against the loaded canonical state happens under the lock.
+func validateProgressionExpectedRevision(expected *string) error {
+	if expected == nil {
+		return nil
+	}
+	if *expected == "" {
+		return codex.ErrInvalidRevision
+	}
+	return codex.ValidateRevision(*expected)
+}
+
+// outlineSceneIDs builds the membership set used to validate stable anchors.
+func outlineSceneIDs(outline Outline) map[string]struct{} {
+	sceneIDs := make(map[string]struct{})
+	for _, scene := range flattenOutlineScenes(outline) {
+		sceneIDs[scene.ID] = struct{}{}
+	}
+	return sceneIDs
+}
+
+// flattenOutlineScenes converts canonical hierarchy order into active-state chronology.
+func flattenOutlineScenes(outline Outline) []codex.SceneRef {
+	scenes := make([]codex.SceneRef, 0)
+	for _, arc := range outline.Arcs {
+		for _, chapter := range arc.Chapters {
+			for _, scene := range chapter.Scenes {
+				scenes = append(scenes, codex.SceneRef{ID: scene.ID})
+			}
+		}
+	}
+	return scenes
+}
+
+// validateProgressionAnchors rejects stored anchors absent from the current outline.
+func validateProgressionAnchors(sceneIDs map[string]struct{}, progressions []codex.Progression) error {
+	for _, progression := range progressions {
+		if _, ok := sceneIDs[progression.Anchor.ID]; !ok {
+			return fmt.Errorf("progression %q references scene anchor %q absent from the current outline", progression.ID, progression.Anchor.ID)
+		}
+	}
+	return nil
 }
 
 func findChapter(outline Outline, chapterID string) (Chapter, error) {

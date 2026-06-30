@@ -1,23 +1,58 @@
+/**
+ * App.tsx
+ *
+ * Hosts the local-first Storywork shell. It creates or opens a project,
+ * switches between the outline, scene editor, and Codex workbench views,
+ * and centralizes cross-view dirty-state navigation guards.
+ */
+
 import { FormEvent, useEffect, useState } from 'react'
 import { createProject, getHealth, openProject, type Project } from './api'
+import ConfirmDialog from './components/ConfirmDialog'
+import CodexWorkbench from './codex/CodexWorkbench'
 import SceneEditor from './editor/SceneEditor'
 import OutlineWorkbench from './outline/OutlineWorkbench'
 import './styles.css'
 
+type ProjectView =
+  | { mode: 'outline' }
+  | { mode: 'codex' }
+  | { mode: 'scene'; sceneID: string }
+
+/**
+ * App
+ *
+ * Renders the root Storywork UI and coordinates project-level navigation.
+ */
 export default function App() {
   const [health, setHealth] = useState('Connecting')
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
   const [project, setProject] = useState<Project | null>(null)
-  const [selectedSceneID, setSelectedSceneID] = useState<string | null>(null)
-  const [editorDirty, setEditorDirty] = useState(false)
+  const [view, setView] = useState<ProjectView>({ mode: 'outline' })
+  const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
+  const [pendingView, setPendingView] = useState<ProjectView | null>(null)
 
   useEffect(() => {
     getHealth()
       .then(({ version }) => setHealth(`Online · ${version}`))
       .catch(() => setHealth('Backend unavailable'))
   }, [])
+
+  useEffect(() => {
+    if (!dirty) {
+      return
+    }
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, [dirty])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -26,21 +61,29 @@ export default function App() {
     setError('')
     try {
       setProject(mode === 'create' ? await createProject(name, path) : await openProject(path))
-      setSelectedSceneID(null)
-      setEditorDirty(false)
+      setView({ mode: 'outline' })
+      setDirty(false)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Request failed')
     }
   }
 
-  function navigateToScene(sceneID: string | null) {
-    if (editorDirty && selectedSceneID !== sceneID && !window.confirm('Discard the current scene draft?')) {
+  function navigate(nextView: ProjectView) {
+    if (dirty && !sameProjectView(view, nextView)) {
+      setPendingView(nextView)
       return
     }
-    setSelectedSceneID(sceneID)
-    if (sceneID === null) {
-      setEditorDirty(false)
+    setView(nextView)
+    setDirty(false)
+  }
+
+  function confirmNavigation() {
+    if (!pendingView) {
+      return
     }
+    setView(pendingView)
+    setPendingView(null)
+    setDirty(false)
   }
 
   return (
@@ -79,19 +122,37 @@ export default function App() {
 
       {project && (
         <>
-          {selectedSceneID === null ? (
-            <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigateToScene(sceneID)} />
-          ) : (
+          <nav className="project-nav">
+            <button type="button" onClick={() => navigate({ mode: 'outline' })}>Outline</button>
+            <button type="button" onClick={() => navigate({ mode: 'codex' })}>Codex</button>
+          </nav>
+          {view.mode === 'outline' ? (
+            <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigate({ mode: 'scene', sceneID })} />
+          ) : view.mode === 'scene' ? (
             <SceneEditor
-              key={selectedSceneID}
+              key={view.sceneID}
               project={project}
-              sceneID={selectedSceneID}
-              onBack={() => navigateToScene(null)}
-              onDirtyChange={setEditorDirty}
+              sceneID={view.sceneID}
+              onBack={() => navigate({ mode: 'outline' })}
+              onDirtyChange={setDirty}
             />
+          ) : (
+            <CodexWorkbench project={project} onDirtyChange={setDirty} />
           )}
+          <ConfirmDialog
+            open={pendingView !== null}
+            title="Discard current draft?"
+            message="You have unsaved changes in the current workspace. Discard them and continue?"
+            confirmLabel="Discard draft"
+            onConfirm={confirmNavigation}
+            onCancel={() => setPendingView(null)}
+          />
         </>
       )}
     </main>
   )
+}
+
+function sameProjectView(left: ProjectView, right: ProjectView) {
+  return left.mode === right.mode && (left.mode !== 'scene' || right.mode !== 'scene' || left.sceneID === right.sceneID)
 }

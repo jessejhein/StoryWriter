@@ -1,5 +1,6 @@
-// Package app composes the backend dependencies.
 package app
+
+// app.go wires the production adapters into the Storywork HTTP application.
 
 import (
 	"net/http"
@@ -14,7 +15,7 @@ import (
 	"storywork/internal/workspace"
 )
 
-// NewHandler creates the production HTTP application.
+// NewHandler creates the production HTTP application for the supplied version string.
 func NewHandler(version string) http.Handler {
 	git := gitstore.New("git")
 	disposableIndex := index.New()

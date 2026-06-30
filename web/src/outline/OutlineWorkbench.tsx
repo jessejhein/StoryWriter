@@ -1,3 +1,10 @@
+/**
+ * OutlineWorkbench.tsx
+ *
+ * Provides the Milestone 1 outline workspace for creating arcs, chapters,
+ * and scenes, viewing their hierarchy, and reordering children by stable ID.
+ */
+
 import { FormEvent, useEffect, useState } from 'react'
 import {
   createArc,
@@ -21,6 +28,12 @@ type Props = {
   onOpenScene?: (sceneID: string) => void
 }
 
+/**
+ * OutlineWorkbench
+ *
+ * Renders the canonical outline tree and the explicit mutation controls that
+ * operate on the active project.
+ */
 export default function OutlineWorkbench({ project, onOpenScene }: Props) {
   const [outline, setOutline] = useState<Outline | null>(null)
   const [loading, setLoading] = useState(true)

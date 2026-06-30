@@ -1,9 +1,14 @@
 package story
 
+// service_test_helpers_test.go provides deterministic service boundary fakes.
+
 import (
 	"context"
 	"errors"
+	"sort"
+	"strings"
 
+	"storywork/internal/codex"
 	"storywork/internal/project"
 )
 
@@ -71,27 +76,41 @@ func (i *fakeIndexStore) Rebuild(context.Context, string) error {
 }
 
 type fakeFileStore struct {
-	loadOutline     Outline
-	loadErr         error
-	reloadErr       error
-	loadCalls       int
-	loadHook        func(int)
-	marshaled       Outline
-	reloadPending   bool
-	exists          map[string]bool
-	existsErr       error
-	marshalErr      error
-	writeErr        error
-	writeCalls      int
-	writtenFiles    map[string][]byte
-	rollbackCalls   int
-	rollbackErr     error
-	scene           SceneDocument
-	loadSceneErr    error
-	sceneBytes      []byte
-	marshalSceneErr error
-	loadSceneCalls  int
-	reloadedScene   *SceneDocument
+	loadOutline              Outline
+	loadErr                  error
+	reloadErr                error
+	loadCalls                int
+	loadHook                 func(int)
+	marshaled                Outline
+	reloadPending            bool
+	exists                   map[string]bool
+	existsErr                error
+	marshalErr               error
+	writeErr                 error
+	writeCalls               int
+	writtenFiles             map[string][]byte
+	rollbackCalls            int
+	rollbackErr              error
+	scene                    SceneDocument
+	loadSceneErr             error
+	sceneBytes               []byte
+	marshalSceneErr          error
+	loadSceneCalls           int
+	reloadedScene            *SceneDocument
+	codexEntries             []codex.Entry
+	loadCodexEntriesErr      error
+	codexEntry               codex.Entry
+	loadCodexEntryCalls      int
+	loadCodexEntryErr        error
+	codexProgressions        codex.ProgressionDocument
+	loadProgressionsCalls    int
+	loadCodexProgressionsErr error
+	codexEntryBytes          []byte
+	codexEntryMarshalCalls   int
+	codexEntryBytesSequence  [][]byte
+	marshalCodexEntryErr     error
+	progressionBytes         []byte
+	marshalProgressionsErr   error
 }
 
 func (s *fakeFileStore) Load(context.Context, string) (Outline, error) {
@@ -125,6 +144,29 @@ func (s *fakeFileStore) LoadScene(context.Context, string, string) (SceneDocumen
 		return *s.reloadedScene, nil
 	}
 	return s.scene, nil
+}
+
+func (s *fakeFileStore) LoadCodexEntries(context.Context, string) ([]codex.Entry, error) {
+	if s.loadCodexEntriesErr != nil {
+		return nil, s.loadCodexEntriesErr
+	}
+	return append([]codex.Entry(nil), s.codexEntries...), nil
+}
+
+func (s *fakeFileStore) LoadCodexEntry(context.Context, string, string) (codex.Entry, error) {
+	s.loadCodexEntryCalls++
+	if s.loadCodexEntryErr != nil {
+		return codex.Entry{}, s.loadCodexEntryErr
+	}
+	return s.codexEntry, nil
+}
+
+func (s *fakeFileStore) LoadProgressions(context.Context, string, string) (codex.ProgressionDocument, error) {
+	s.loadProgressionsCalls++
+	if s.loadCodexProgressionsErr != nil {
+		return codex.ProgressionDocument{}, s.loadCodexProgressionsErr
+	}
+	return s.codexProgressions, nil
 }
 
 func (s *fakeFileStore) MarshalOutline(outline Outline) ([]byte, error) {
@@ -164,6 +206,58 @@ func (s *fakeFileStore) MarshalSceneDocument(scene SceneDocument) ([]byte, error
 		return s.sceneBytes, nil
 	}
 	return []byte("scene-document"), nil
+}
+
+func (s *fakeFileStore) MarshalCodexEntry(entry codex.Entry) ([]byte, error) {
+	if s.marshalCodexEntryErr != nil {
+		return nil, s.marshalCodexEntryErr
+	}
+	s.codexEntryMarshalCalls++
+	if len(s.codexEntryBytesSequence) >= s.codexEntryMarshalCalls {
+		return s.codexEntryBytesSequence[s.codexEntryMarshalCalls-1], nil
+	}
+	if s.codexEntryBytes != nil {
+		return s.codexEntryBytes, nil
+	}
+	return []byte("codex-entry"), nil
+}
+
+func (s *fakeFileStore) MarshalProgressions(document codex.ProgressionDocument) ([]byte, error) {
+	if s.marshalProgressionsErr != nil {
+		return nil, s.marshalProgressionsErr
+	}
+	if len(document.Progressions) == 0 {
+		return []byte("progressions-empty"), nil
+	}
+	if s.progressionBytes != nil {
+		return s.progressionBytes, nil
+	}
+	var builder strings.Builder
+	builder.WriteString(document.EntryID)
+	for _, progression := range document.Progressions {
+		builder.WriteString("|")
+		builder.WriteString(progression.ID)
+		builder.WriteString("|")
+		builder.WriteString(progression.Anchor.ID)
+		builder.WriteString("|")
+		builder.WriteString(progression.Anchor.Timing)
+		builder.WriteString("|")
+		if progression.Changes.Description != nil {
+			builder.WriteString(*progression.Changes.Description)
+		}
+		keys := make([]string, 0, len(progression.Changes.Metadata))
+		for key := range progression.Changes.Metadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			builder.WriteString("|")
+			builder.WriteString(key)
+			builder.WriteString("=")
+			builder.WriteString(progression.Changes.Metadata[key])
+		}
+	}
+	return []byte(builder.String()), nil
 }
 
 func (s *fakeFileStore) WriteFiles(_ context.Context, _ string, files map[string][]byte) (func() error, error) {

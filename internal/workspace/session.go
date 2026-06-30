@@ -1,5 +1,6 @@
-// Package workspace stores the active project for this local backend process.
 package workspace
+
+// session.go keeps the active project in memory for the current backend process.
 
 import (
 	"sync"

@@ -1,5 +1,7 @@
 package api_test
 
+// outline_handler_test.go provides shared API fakes and verifies outline routes.
+
 import (
 	"context"
 	"encoding/json"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"storywork/internal/api"
+	"storywork/internal/codex"
 	"storywork/internal/project"
 	"storywork/internal/story"
 )
@@ -26,6 +29,10 @@ type storyServiceStub struct {
 	outlineResult        story.Outline
 	mutationResult       story.MutationResult
 	sceneResult          story.SceneDocument
+	codexEntries         []codex.Entry
+	codexEntry           codex.Entry
+	progressionDocument  codex.ProgressionDocument
+	activeState          codex.ActiveState
 	outlineErr           error
 	createArcErr         error
 	createChapterErr     error
@@ -33,6 +40,12 @@ type storyServiceStub struct {
 	reorderErr           error
 	loadSceneErr         error
 	saveSceneErr         error
+	loadCodexErr         error
+	createCodexErr       error
+	updateCodexErr       error
+	loadProgressionsErr  error
+	saveProgressionsErr  error
+	activeCodexErr       error
 	createArcTitle       string
 	createChapterArcID   string
 	createChapterTitle   string
@@ -42,6 +55,12 @@ type storyServiceStub struct {
 	loadSceneID          string
 	saveSceneID          string
 	saveSceneRequest     story.SaveSceneRequest
+	codexEntryID         string
+	saveCodexRequest     codex.SaveEntryRequest
+	progressionEntryID   string
+	saveProgressionsReq  codex.SaveProgressionsRequest
+	activeEntryID        string
+	activeSceneID        string
 }
 
 func (s *storyServiceStub) Outline(context.Context) (story.Outline, error) {
@@ -79,6 +98,43 @@ func (s *storyServiceStub) SaveScene(_ context.Context, sceneID string, request 
 	s.saveSceneID = sceneID
 	s.saveSceneRequest = request
 	return s.sceneResult, s.saveSceneErr
+}
+
+func (s *storyServiceStub) CodexEntries(context.Context) ([]codex.Entry, error) {
+	return s.codexEntries, s.loadCodexErr
+}
+
+func (s *storyServiceStub) LoadCodexEntry(_ context.Context, entryID string) (codex.Entry, error) {
+	s.codexEntryID = entryID
+	return s.codexEntry, s.loadCodexErr
+}
+
+func (s *storyServiceStub) CreateCodexEntry(_ context.Context, request codex.SaveEntryRequest) (codex.Entry, error) {
+	s.saveCodexRequest = request
+	return s.codexEntry, s.createCodexErr
+}
+
+func (s *storyServiceStub) UpdateCodexEntry(_ context.Context, entryID string, request codex.SaveEntryRequest) (codex.Entry, error) {
+	s.codexEntryID = entryID
+	s.saveCodexRequest = request
+	return s.codexEntry, s.updateCodexErr
+}
+
+func (s *storyServiceStub) LoadProgressions(_ context.Context, entryID string) (codex.ProgressionDocument, error) {
+	s.progressionEntryID = entryID
+	return s.progressionDocument, s.loadProgressionsErr
+}
+
+func (s *storyServiceStub) SaveProgressions(_ context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error) {
+	s.progressionEntryID = entryID
+	s.saveProgressionsReq = request
+	return s.progressionDocument, s.saveProgressionsErr
+}
+
+func (s *storyServiceStub) ResolveActiveCodexState(_ context.Context, entryID, sceneID string) (codex.ActiveState, error) {
+	s.activeEntryID = entryID
+	s.activeSceneID = sceneID
+	return s.activeState, s.activeCodexErr
 }
 
 // BDD trace:
