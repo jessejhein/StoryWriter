@@ -202,6 +202,10 @@ Selection -> applicable agents -> mock patch -> diff preview -> accept/reject wo
 
 Connect real model providers without leaking credentials into projects.
 
+The durable implementation contract, exact provider/profile schemas, API
+behavior, security constraints, BDD cases, and ordered TDD work are defined in
+`docs/14_milestone_5_task_prompt.md`.
+
 ### Stories
 
 - As an author, I can configure a local OpenAI-compatible endpoint or Ollama-style endpoint.
