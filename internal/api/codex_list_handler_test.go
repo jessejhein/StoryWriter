@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.1 - List an empty Codex
 // Requirements: M3-R01, M3-R09, M3-R10, M3-R11
-// Test purpose: Plain-English description of the Codex list route for empty and populated JSON responses plus documented status mapping.
+// Test purpose: The Codex list route returns exact empty and populated shapes in canonical sort order.
 package api_test
 
 import (

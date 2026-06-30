@@ -1,6 +1,6 @@
 // BDD Scenario: 3.5.2 - Confirm destructive navigation
 // Requirements: M3-R11, M3-R12
-// Test purpose: Plain-English description of the project-level navigation guard when leaving the Codex workbench with unsaved changes.
+// Test purpose: Project navigation confirms before discarding a dirty Codex form and preserves it when cancelled.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import App from './App'

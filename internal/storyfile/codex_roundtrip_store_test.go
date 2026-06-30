@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.2 - Create an entry
 // Requirements: M3-R04, M3-R05, M3-R18
-// Test purpose: Plain-English description of exact canonical Codex and progression YAML serialization plus strict reload of the same bytes.
+// Test purpose: Canonical Codex and progression YAML round-trips without changing exact bytes or revisions.
 package storyfile
 
 import (

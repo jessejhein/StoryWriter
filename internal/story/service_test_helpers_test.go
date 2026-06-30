@@ -1,5 +1,7 @@
 package story
 
+// service_test_helpers_test.go provides deterministic service boundary fakes.
+
 import (
 	"context"
 	"errors"

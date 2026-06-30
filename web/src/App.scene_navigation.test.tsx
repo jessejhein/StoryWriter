@@ -1,3 +1,8 @@
+/**
+ * App.scene_navigation.test.tsx
+ *
+ * Verifies project-level navigation between the outline and scene editor.
+ */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import App from './App'

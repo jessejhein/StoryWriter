@@ -1,6 +1,6 @@
 // BDD Scenario: 3.3.1 - Resolve before and after an anchor
 // Requirements: M3-R07, M3-R09, M3-R10
-// Test purpose: Plain-English description of the active-state route for required query parameters and stable entry-scene read requests.
+// Test purpose: The active-state route requires stable entry and scene targets and maps domain failures to documented statuses.
 package api_test
 
 import (

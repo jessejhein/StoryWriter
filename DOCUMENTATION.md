@@ -1,7 +1,7 @@
 # Storywork Documentation Standards
 
 **Last Updated:** June 2026
-**Version:** Milestone 0
+**Version:** Milestone 3
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
 
@@ -18,7 +18,7 @@ Storywork helps writers organize long-form stories through:
 
 **Architecture:**
 - **Backend**: Go (HTTP JSON API)
-- **Frontend**: Vite + React + TypeScript + TailwindCSS (or similar)
+- **Frontend**: Vite + React + TypeScript + project CSS
 
 ---
 
@@ -52,7 +52,7 @@ package api
 Add a short comment at the top of each `.go` file (after the package comment):
 
 ```go
-// handler.go implements all HTTP handlers and routing for the Milestone 0 API.
+// handler.go implements the Storywork HTTP handlers and routing policy.
 ```
 
 ### 3.3 Exported Identifiers
@@ -108,10 +108,9 @@ Every major file should start with a comment block:
  * SceneEditor.tsx
  *
  * Primary editor for individual story scenes. Handles markdown editing,
- * frontmatter management, autosave, and real-time codex integration.
+ * frontmatter management, explicit saves, and revision conflicts.
  *
- * Uses React Hook Form + Zod for validation and Tiptap for the rich
- * markdown experience.
+ * Uses the shared CodeMirror surface for Vim-friendly Markdown editing.
  */
 ```
 
@@ -162,11 +161,10 @@ export interface SceneDocument {
 Use `//` for inline explanations of complex logic:
 
 ```tsx
-// We use a debounced save to avoid hammering the API during rapid typing
-const debouncedSave = useCallback(
-  debounce(async (data: SaveSceneRequest) => { ... }),
-  []
-);
+// Ignore an older response after the author navigates to a different entry.
+if (selectionVersion.current !== selectionAtStart) {
+  return;
+}
 ```
 
 ---
@@ -210,6 +208,22 @@ All HTTP endpoints are self-documenting via the handler code. When adding a new 
 2. Document request/response types
 3. Update this `DOCUMENTATION.md` under the API section (if major)
 
+Milestone 3 Codex routes:
+
+```text
+GET  /api/codex
+POST /api/codex
+GET  /api/codex/{entry_id}
+PUT  /api/codex/{entry_id}
+GET  /api/codex/{entry_id}/progressions
+PUT  /api/codex/{entry_id}/progressions
+GET  /api/codex/{entry_id}/active?scene_id={scene_id}
+```
+
+Mutation requests use strict JSON: unknown, missing, null, trailing, and
+wrongly typed fields are rejected unless a field is explicitly documented as
+nullable. Entry and progression updates use exact-byte revision tokens.
+
 Example:
 
 ```ts
@@ -229,7 +243,7 @@ interface CreateSceneRequest {
 2. Run `go fmt ./...` and linting
 3. Ensure all exported symbols are documented
 4. Update this file when introducing major patterns
-5. Commit with clear message (see `CONVENTIONAL_COMMITS.md`)
+5. Commit with a concise message that describes the completed behavior
 
 ---
 
@@ -241,5 +255,4 @@ Our goal is that **any developer** (including future contributors or yourself in
 
 ---
 
-**Approved by:** [Your Name]
 **Status:** Living Document — update as standards evolve

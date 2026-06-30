@@ -1,6 +1,6 @@
 // BDD Scenario: 3.2.1 - Save ordered progressions
 // Requirements: M3-R05, M3-R06, M3-R09
-// Test purpose: Plain-English description of the progression load/save routes for strict JSON decoding, nullable expected revisions, and HTTP status mapping.
+// Test purpose: Progression routes enforce strict JSON, revision nullability, route authority, and documented status mapping.
 package api_test
 
 import (
@@ -54,6 +54,7 @@ func TestCodexProgressionRoutesValidateJSONAndMapStatuses(t *testing.T) {
 		{name: "missing progressions", body: `{"expected_revision":null}`, status: http.StatusBadRequest},
 		{name: "missing expected revision", body: `{"progressions":[]}`, status: http.StatusBadRequest},
 		{name: "invalid payload", body: body, err: codex.ErrInvalidProgression, status: http.StatusBadRequest},
+		{name: "invalid revision state", body: body, err: codex.ErrInvalidRevision, status: http.StatusBadRequest},
 		{name: "stale revision", body: body, err: story.ErrStaleRevision, status: http.StatusConflict},
 	}
 	for _, testCase := range cases {

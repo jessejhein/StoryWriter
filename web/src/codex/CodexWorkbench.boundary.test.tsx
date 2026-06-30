@@ -1,6 +1,6 @@
 // BDD Scenario: 3.5.3 - Inspect active state
 // Requirements: M3-R07, M3-R10, M3-R11, M3-R21
-// Test purpose: Plain-English description of the Codex workbench flow through a fetch boundary, proving progression metadata save requests and resolved active-state metadata rendering without mocking the workbench API module.
+// Test purpose: The workbench saves progression metadata and renders resolved active state through the real fetch boundary.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import type { Project } from '../api'

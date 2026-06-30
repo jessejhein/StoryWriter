@@ -1,5 +1,7 @@
 package api_test
 
+// outline_handler_test.go provides shared API fakes and verifies outline routes.
+
 import (
 	"context"
 	"encoding/json"

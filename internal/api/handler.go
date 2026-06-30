@@ -393,10 +393,20 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			Progressions     []codex.Progression `json:"progressions"`
 			ExpectedRevision *string             `json:"expected_revision"`
 		}
-		if err := decodeJSONWithRequiredFields(writer, request, &updateRequest, 1<<20,
-			requiredJSONField{name: "progressions"},
-			requiredJSONField{name: "expected_revision", allowNull: true},
-		); err != nil {
+		body, err := readJSONBodyWithLimit(writer, request, 1<<20)
+		if err == nil {
+			err = requireJSONFields(body,
+				requiredJSONField{name: "progressions"},
+				requiredJSONField{name: "expected_revision", allowNull: true},
+			)
+		}
+		if err == nil {
+			err = validateProgressionUpdateJSON(body)
+		}
+		if err == nil {
+			err = decodeJSONBytes(body, &updateRequest)
+		}
+		if err != nil {
 			writeBodyLimitError(writer, err)
 			return
 		}
@@ -497,6 +507,131 @@ func requireJSONFields(body []byte, requiredFields ...requiredJSONField) error {
 		if !field.allowNull && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return fmt.Errorf("invalid JSON request: %s must not be null", field.name)
 		}
+	}
+	return nil
+}
+
+// validateProgressionUpdateJSON enforces nested request presence and nullability
+// before JSON is converted into domain structs, where null and omission would
+// otherwise collapse to the same Go zero value.
+func validateProgressionUpdateJSON(body []byte) error {
+	var root struct {
+		Progressions []json.RawMessage `json:"progressions"`
+	}
+	if err := json.Unmarshal(body, &root); err != nil {
+		return fmt.Errorf("invalid JSON request: %w", err)
+	}
+	for index, rawProgression := range root.Progressions {
+		context := fmt.Sprintf("progressions[%d]", index)
+		fields, err := decodeRawJSONObject(rawProgression, context)
+		if err != nil {
+			return err
+		}
+		if rawID, ok := fields["id"]; ok {
+			if err := requireNonEmptyJSONString(rawID, context+".id"); err != nil {
+				return err
+			}
+		}
+		rawAnchor, err := requireRawJSONField(fields, "anchor", context)
+		if err != nil {
+			return err
+		}
+		anchor, err := decodeRawJSONObject(rawAnchor, context+".anchor")
+		if err != nil {
+			return err
+		}
+		for _, field := range []string{"type", "id", "timing"} {
+			rawValue, err := requireRawJSONField(anchor, field, context+".anchor")
+			if err != nil {
+				return err
+			}
+			if err := requireJSONString(rawValue, context+".anchor."+field); err != nil {
+				return err
+			}
+		}
+		rawChanges, err := requireRawJSONField(fields, "changes", context)
+		if err != nil {
+			return err
+		}
+		changes, err := decodeRawJSONObject(rawChanges, context+".changes")
+		if err != nil {
+			return err
+		}
+		description, hasDescription := changes["description"]
+		metadata, hasMetadata := changes["metadata"]
+		if !hasDescription && !hasMetadata {
+			return fmt.Errorf("invalid JSON request: %s.changes must include description or metadata", context)
+		}
+		if hasDescription {
+			if err := requireJSONString(description, context+".changes.description"); err != nil {
+				return err
+			}
+		}
+		if hasMetadata {
+			metadataFields, err := decodeRawJSONObject(metadata, context+".changes.metadata")
+			if err != nil {
+				return err
+			}
+			for key, rawValue := range metadataFields {
+				if err := requireJSONString(rawValue, context+".changes.metadata."+key); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// decodeRawJSONObject preserves field presence while validating a nested JSON object.
+func decodeRawJSONObject(raw json.RawMessage, context string) (map[string]json.RawMessage, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, fmt.Errorf("invalid JSON request: %s must not be null", context)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return nil, fmt.Errorf("invalid JSON request: %s must be an object", context)
+	}
+	return fields, nil
+}
+
+// requireRawJSONField distinguishes a missing field from an explicitly null field.
+func requireRawJSONField(fields map[string]json.RawMessage, field, context string) (json.RawMessage, error) {
+	raw, ok := fields[field]
+	if !ok {
+		return nil, fmt.Errorf("invalid JSON request: %s.%s is required", context, field)
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, fmt.Errorf("invalid JSON request: %s.%s must not be null", context, field)
+	}
+	return raw, nil
+}
+
+// requireJSONString rejects null and non-string JSON scalars at transport boundaries.
+func requireJSONString(raw json.RawMessage, context string) error {
+	_, err := decodeJSONString(raw, context)
+	return err
+}
+
+// decodeJSONString returns a validated string while retaining field context in errors.
+func decodeJSONString(raw json.RawMessage, context string) (string, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", fmt.Errorf("invalid JSON request: %s must not be null", context)
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return "", fmt.Errorf("invalid JSON request: %s must be a string", context)
+	}
+	return value, nil
+}
+
+// requireNonEmptyJSONString validates fields whose omission has meaning but whose supplied value must be usable.
+func requireNonEmptyJSONString(raw json.RawMessage, context string) error {
+	value, err := decodeJSONString(raw, context)
+	if err != nil {
+		return err
+	}
+	if value == "" {
+		return fmt.Errorf("invalid JSON request: %s must not be empty", context)
 	}
 	return nil
 }

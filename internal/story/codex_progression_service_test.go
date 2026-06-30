@@ -1,6 +1,6 @@
 // BDD Scenario: 3.2.1 - Save ordered progressions
 // Requirements: M3-R05, M3-R06, M3-R13, M3-R14, M3-R15, M3-R17
-// Test purpose: Plain-English description of the progression replacement mutation rules for stable IDs, ordered saves, dirty-worktree protection, and one checkpoint.
+// Test purpose: Progression replacement preserves IDs and order while enforcing revisions, clean worktrees, no-ops, and one checkpoint.
 package story
 
 import (
@@ -217,6 +217,49 @@ func TestSaveProgressionsRejectsByteIdenticalCanonicalContent(t *testing.T) {
 	})
 	if !errors.Is(err, codex.ErrNoChanges) {
 		t.Fatalf("SaveProgressions() error = %v, want %v", err, codex.ErrNoChanges)
+	}
+	if files.writeCalls != 0 || index.rebuildCalls != 0 || git.commitCalls != 0 {
+		t.Fatalf("write/rebuild/commit calls = %d/%d/%d, want 0/0/0", files.writeCalls, index.rebuildCalls, git.commitCalls)
+	}
+}
+
+// Test: first progression creation rejects a fabricated revision without persistence side effects.
+// Requirements: M3-R05, M3-R17
+func TestSaveProgressionsRejectsRevisionForFirstDocument(t *testing.T) {
+	t.Parallel()
+
+	revision := "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	description := "Gone."
+	files := &fakeFileStore{
+		loadOutline: mustSceneOutline(t),
+		codexEntry: codex.Entry{
+			ID: "char_0123456789abcdef0123", Type: codex.TypeCharacter, Name: "Ben",
+			Aliases: []string{}, Tags: []string{}, Description: "Guide.", Metadata: map[string]string{},
+		},
+		codexProgressions: codex.ProgressionDocument{
+			Version: codex.Version, EntryID: "char_0123456789abcdef0123",
+			Progressions: []codex.Progression{}, Revision: nil,
+		},
+	}
+	git := &fakeGitStore{clean: true}
+	index := &fakeIndexStore{}
+	service := NewService(
+		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
+		files,
+		git,
+		index,
+		&fakeIDGenerator{ids: []string{"prog_0123456789abcdef0123"}},
+	)
+
+	_, err := service.SaveProgressions(context.Background(), "char_0123456789abcdef0123", codex.SaveProgressionsRequest{
+		Progressions: []codex.Progression{{
+			Anchor:  codex.ProgressionAnchor{Type: "scene", ID: "scn_00000000000000000001", Timing: "after"},
+			Changes: codex.ProgressionChange{Description: &description},
+		}},
+		ExpectedRevision: &revision,
+	})
+	if !errors.Is(err, codex.ErrInvalidRevision) {
+		t.Fatalf("SaveProgressions() error = %v, want %v", err, codex.ErrInvalidRevision)
 	}
 	if files.writeCalls != 0 || index.rebuildCalls != 0 || git.commitCalls != 0 {
 		t.Fatalf("write/rebuild/commit calls = %d/%d/%d, want 0/0/0", files.writeCalls, index.rebuildCalls, git.commitCalls)

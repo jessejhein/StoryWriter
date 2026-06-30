@@ -1,6 +1,6 @@
 // BDD Scenario: 3.2.3 - Report malformed canonical progressions
 // Requirements: M3-R05, M3-R18
-// Test purpose: Plain-English description of strict progression-document validation for route and filename consistency during canonical reads.
+// Test purpose: Strict progression reads reject malformed, unsupported, typed, and path-inconsistent canonical documents.
 package storyfile
 
 import (
@@ -10,6 +10,8 @@ import (
 	"testing"
 )
 
+// Test: malformed, unsupported, typed, or inconsistent progression documents are rejected rather than repaired.
+// Requirements: M3-R05, M3-R18
 func TestLoadProgressionsRejectsMalformedCanonicalDocuments(t *testing.T) {
 	t.Parallel()
 
@@ -26,6 +28,8 @@ func TestLoadProgressionsRejectsMalformedCanonicalDocuments(t *testing.T) {
 		{name: "invalid timing", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: during\n    changes:\n      description: Changed.\n"},
 		{name: "ineffective changes", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes: {}\n"},
 		{name: "empty metadata", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes:\n      description: Changed.\n      metadata: {}\n"},
+		{name: "numeric description", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes:\n      description: 42\n"},
+		{name: "boolean metadata value", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - id: prog_0123456789abcdef0123\n    anchor:\n      type: scene\n      id: scn_0123456789abcdef0123\n      timing: after\n    changes:\n      metadata:\n        active: true\n"},
 	}
 
 	for _, testCase := range cases {
@@ -40,8 +44,6 @@ func TestLoadProgressionsRejectsMalformedCanonicalDocuments(t *testing.T) {
 				t.Fatalf("WriteFile() error = %v", err)
 			}
 
-			// Test: malformed, unsupported, or inconsistent canonical progression documents are rejected rather than repaired.
-			// Requirements: M3-R05, M3-R18
 			if _, err := New().LoadProgressions(context.Background(), root, "char_0123456789abcdef0123"); err == nil {
 				t.Fatal("LoadProgressions() error = nil")
 			}

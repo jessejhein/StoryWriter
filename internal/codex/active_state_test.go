@@ -1,6 +1,6 @@
 // BDD Scenario: 3.3.3 - Apply multiple progressions deterministically
 // Requirements: M3-R06, M3-R07, M3-R08
-// Test purpose: Plain-English description of the pure active-state resolution rules for chronology, before-after timing, document-order tie breaks, and stable scene anchors after reorder.
+// Test purpose: Pure active-state resolution applies before/after changes deterministically against current scene chronology.
 package codex
 
 import (

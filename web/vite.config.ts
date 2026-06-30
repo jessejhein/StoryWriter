@@ -1,3 +1,4 @@
+/** vite.config.ts configures the frontend build, tests, and local API proxy. */
 /// <reference types="vitest/config" />
 
 import react from '@vitejs/plugin-react'

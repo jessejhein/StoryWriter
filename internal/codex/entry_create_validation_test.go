@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.2 - Create an entry
 // Requirements: M3-R02, M3-R04
-// Test purpose: Plain-English description of the normalization and stable-type rules that canonical Codex entry creation must enforce.
+// Test purpose: Entry creation normalizes mutable fields while preserving the required canonical type rules.
 package codex
 
 import (

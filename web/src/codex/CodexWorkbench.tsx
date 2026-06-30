@@ -6,7 +6,7 @@
  * selected scene.
  */
 
-import { ChangeEvent, useEffect, useState } from 'react'
+import { ChangeEvent, MouseEvent, useEffect, useRef, useState } from 'react'
 import {
   APIError,
   createCodexEntry,
@@ -21,9 +21,10 @@ import {
   type CodexEntry,
   type CodexEntryType,
   type CodexProgression,
+  type CreateCodexEntryRequest,
   type Outline,
   type Project,
-  type SaveCodexEntryRequest,
+  type UpdateCodexEntryRequest,
 } from '../api'
 
 type Props = {
@@ -92,9 +93,22 @@ function entryToDraft(entry: CodexEntry): EntryDraft {
   }
 }
 
-function draftToRequest(draft: EntryDraft): SaveCodexEntryRequest {
+function draftToCreateRequest(draft: EntryDraft): CreateCodexEntryRequest {
   return {
     type: draft.type,
+    name: draft.name,
+    aliases: draft.aliases,
+    tags: draft.tags,
+    description: draft.description,
+    metadata: Object.fromEntries(draft.metadata.filter((row) => row.key.trim() !== '').map((row) => [row.key, row.value])),
+  }
+}
+
+function draftToUpdateRequest(draft: EntryDraft): UpdateCodexEntryRequest {
+  if (!draft.revision) {
+    throw new Error('Cannot update a Codex entry without its canonical revision.')
+  }
+  return {
     name: draft.name,
     aliases: draft.aliases,
     tags: draft.tags,
@@ -177,6 +191,10 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   const [error, setError] = useState('')
   const [savingEntry, setSavingEntry] = useState(false)
   const [savingProgressions, setSavingProgressions] = useState(false)
+  const selectionVersion = useRef(0)
+  const entryEditVersion = useRef(0)
+  const progressionEditVersion = useRef(0)
+  const skipSelectedEntryLoad = useRef<string | null>(null)
 
   const scenes = outline?.arcs.flatMap((arc) => arc.chapters.flatMap((chapter) => chapter.scenes)) ?? []
   const entryDirty = normalizeDraft(entryDraft) !== savedEntrySnapshot
@@ -235,6 +253,10 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
       return
     }
     const entryID = selectedEntryID
+    if (skipSelectedEntryLoad.current === entryID) {
+      skipSelectedEntryLoad.current = null
+      return
+    }
     let cancelled = false
     async function loadSelectedEntry() {
       try {
@@ -280,15 +302,18 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   }, [selectedEntryID, activeSceneID, activeStateRefresh])
 
   function updateProgressionRows(next: ProgressionRow[]) {
+    progressionEditVersion.current += 1
     setProgressions(next)
     setProgressionStatus(normalizeProgressionRows(next) === savedProgressionsSnapshot ? 'Saved' : 'Unsaved changes')
   }
 
-  function selectEntry(entryID: string) {
+  function handleSelectEntry(event: MouseEvent<HTMLButtonElement>) {
+    const entryID = event.currentTarget.value
     if (dirty && selectedEntryID !== entryID && !window.confirm('Discard the current Codex draft?')) {
       return
     }
     setError('')
+    selectionVersion.current += 1
     setActiveState(null)
     setSelectedEntryID(entryID)
   }
@@ -298,6 +323,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
       return
     }
     const draft = emptyDraft()
+    selectionVersion.current += 1
     setSelectedEntryID(null)
     setEntryDraft(draft)
     setSavedEntrySnapshot(normalizeDraft(draft))
@@ -310,33 +336,52 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
   }
 
   function updateDraft(nextDraft: EntryDraft) {
+    entryEditVersion.current += 1
     setEntryDraft(nextDraft)
     setEntryStatus(normalizeDraft(nextDraft) === savedEntrySnapshot ? 'Saved' : 'Unsaved changes')
   }
 
   async function saveEntry() {
+    const selectionAtStart = selectionVersion.current
+    const editAtStart = entryEditVersion.current
+    const entryIDAtStart = entryDraft.id
     setSavingEntry(true)
     setError('')
     setEntryStatus('Saving')
     try {
-      const request = draftToRequest(entryDraft)
-      if (entryDraft.id) {
-        delete request.type
-      }
-      const saved = entryDraft.id
-        ? await updateCodexEntry(entryDraft.id, request)
-        : await createCodexEntry(request)
-      const draft = entryToDraft(saved)
-      setEntryDraft(draft)
-      setSavedEntrySnapshot(normalizeDraft(draft))
-      setEntryStatus('Saved')
-      setSelectedEntryID(saved.id)
-      setActiveStateRefresh((current) => current + 1)
+      const saved = entryIDAtStart
+        ? await updateCodexEntry(entryIDAtStart, draftToUpdateRequest(entryDraft))
+        : await createCodexEntry(draftToCreateRequest(entryDraft))
       setEntries((current) => {
         const others = current.filter((entry) => entry.id !== saved.id)
         return [...others, saved].sort(compareCodexEntries)
       })
+      if (selectionVersion.current !== selectionAtStart) {
+        return
+      }
+      const draft = entryToDraft(saved)
+      if (entryEditVersion.current !== editAtStart) {
+        setEntryDraft((current) => ({ ...current, id: saved.id, type: saved.type, revision: saved.revision }))
+        setSavedEntrySnapshot(normalizeDraft(draft))
+        setEntryStatus('Unsaved changes')
+        if (!entryIDAtStart) {
+          skipSelectedEntryLoad.current = saved.id
+          setSelectedEntryID(saved.id)
+        }
+        return
+      }
+      setEntryDraft(draft)
+      setSavedEntrySnapshot(normalizeDraft(draft))
+      setEntryStatus('Saved')
+      if (!entryIDAtStart) {
+        skipSelectedEntryLoad.current = saved.id
+      }
+      setSelectedEntryID(saved.id)
+      setActiveStateRefresh((current) => current + 1)
     } catch (requestError) {
+      if (selectionVersion.current !== selectionAtStart) {
+        return
+      }
       const message = requestError instanceof Error ? requestError.message : 'Request failed'
       setError(message)
       setEntryStatus(requestError instanceof APIError && requestError.status === 409 ? 'Conflict' : 'Error')
@@ -349,21 +394,36 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
     if (!selectedEntryID) {
       return
     }
+    const entryIDAtStart = selectedEntryID
+    const selectionAtStart = selectionVersion.current
+    const editAtStart = progressionEditVersion.current
     setSavingProgressions(true)
     setError('')
     setProgressionStatus('Saving')
     try {
-      const saved = await saveCodexProgressions(selectedEntryID, {
+      const saved = await saveCodexProgressions(entryIDAtStart, {
         progressions: progressionRowsToRequest(progressions),
         expected_revision: progressionRevision,
       })
+      if (selectionVersion.current !== selectionAtStart) {
+        return
+      }
       const rows = progressionDocumentToRows(saved.progressions)
+      if (progressionEditVersion.current !== editAtStart) {
+        setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
+        setProgressionRevision(saved.revision)
+        setProgressionStatus('Unsaved changes')
+        return
+      }
       setProgressions(rows)
       setSavedProgressionsSnapshot(normalizeProgressionRows(rows))
       setProgressionRevision(saved.revision)
       setProgressionStatus('Saved')
       setActiveStateRefresh((current) => current + 1)
     } catch (requestError) {
+      if (selectionVersion.current !== selectionAtStart) {
+        return
+      }
       const message = requestError instanceof Error ? requestError.message : 'Request failed'
       setError(message)
       setProgressionStatus(requestError instanceof APIError && requestError.status === 409 ? 'Conflict' : 'Error')
@@ -489,7 +549,7 @@ export default function CodexWorkbench({ project, onDirtyChange }: Props) {
                 <ul>
                   {grouped.map((entry) => (
                     <li key={entry.id}>
-                      <button type="button" onClick={() => void selectEntry(entry.id)}>{entry.name}</button>
+                      <button type="button" value={entry.id} onClick={handleSelectEntry}>{entry.name}</button>
                     </li>
                   ))}
                 </ul>

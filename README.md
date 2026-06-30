@@ -21,19 +21,20 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 ## Required reading order for coding agents
 
 1. `AGENTS.md`
-2. `docs/00_project_brief.md`
-3. `docs/01_development_flow.md`
-4. `docs/02_architecture.md`
-5. `docs/03_storage_model.md`
-6. `docs/04_agent_style_system.md`
-7. `docs/05_milestones.md`
-8. `docs/06_api_contract.md`
-9. `docs/07_frontend_editor.md`
-10. `docs/08_testing_acceptance.md`
-11. `docs/09_milestone_0_task_prompt.md`
-12. `docs/10_milestone_1_task_prompt.md`
-13. `docs/11_milestone_2_task_prompt.md`
-14. `docs/12_milestone_3_task_prompt.md`
+2. `DOCUMENTATION.md`
+3. `docs/00_project_brief.md`
+4. `docs/01_development_flow.md`
+5. `docs/02_architecture.md`
+6. `docs/03_storage_model.md`
+7. `docs/04_agent_style_system.md`
+8. `docs/05_milestones.md`
+9. `docs/06_api_contract.md`
+10. `docs/07_frontend_editor.md`
+11. `docs/08_testing_acceptance.md`
+12. `docs/09_milestone_0_task_prompt.md`
+13. `docs/10_milestone_1_task_prompt.md`
+14. `docs/11_milestone_2_task_prompt.md`
+15. `docs/12_milestone_3_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.

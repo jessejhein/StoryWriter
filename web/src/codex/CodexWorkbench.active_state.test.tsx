@@ -1,6 +1,6 @@
 // BDD Scenario: 3.5.3 - Inspect active state
 // Requirements: M3-R07, M3-R10, M3-R11, M3-R12
-// Test purpose: Plain-English description of the workbench edit, progression, active-state, and dirty-navigation guard behavior.
+// Test purpose: Entry and progression controls preserve canonical state across edits, resolution refreshes, navigation, and request races.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type { CodexActiveState, CodexEntry, CodexProgressionDocument, Outline, Project } from '../api'

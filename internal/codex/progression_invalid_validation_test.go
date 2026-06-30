@@ -1,6 +1,6 @@
 // BDD Scenario: 3.2.2 - Reject invalid progressions
 // Requirements: M3-R05, M3-R06
-// Test purpose: Plain-English description of the invalid progression cases for malformed IDs, duplicate anchors, invalid timing, unknown scenes, and ineffective changes.
+// Test purpose: Progression validation rejects malformed IDs, duplicate anchors, invalid timing, unknown scenes, and ineffective changes.
 package codex
 
 import (

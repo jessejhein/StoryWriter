@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.2 - Create an entry
 // Requirements: M3-R09
-// Test purpose: Plain-English description of the frontend Codex API client request shapes and error mapping.
+// Test purpose: Codex API helpers use exact routes and distinct create, update, progression, and active-state payloads.
 import { expect, test, vi } from 'vitest'
 import { APIError, createCodexEntry, getCodexActiveState, getCodexEntries, getCodexProgressions, saveCodexProgressions, updateCodexEntry } from './api'
 
@@ -29,6 +29,8 @@ test('codex api functions use the documented routes and JSON bodies', async () =
   expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/codex/char_1/progressions', undefined)
   expect(fetchMock).toHaveBeenNthCalledWith(5, '/api/codex/char_1/progressions', expect.objectContaining({ method: 'PUT' }))
   expect(fetchMock).toHaveBeenNthCalledWith(6, '/api/codex/char_1/active?scene_id=scn_1', undefined)
+  expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({ type: 'character', name: 'Ben', aliases: [], tags: [], description: '', metadata: {} }))
+  expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(JSON.stringify({ name: 'Ben', aliases: [], tags: [], description: '', metadata: {}, expected_revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }))
 
   vi.unstubAllGlobals()
 })

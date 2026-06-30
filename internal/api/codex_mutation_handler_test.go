@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.2 - Create an entry
 // Requirements: M3-R02, M3-R04, M3-R09
-// Test purpose: Plain-English description of the create and update Codex routes for strict JSON decoding, route-ID authority, and status mapping.
+// Test purpose: Codex create and update routes enforce strict JSON, route-ID authority, and documented status mapping.
 package api_test
 
 import (

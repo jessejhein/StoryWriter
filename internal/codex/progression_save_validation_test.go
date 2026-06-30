@@ -1,6 +1,6 @@
 // BDD Scenario: 3.2.1 - Save ordered progressions
 // Requirements: M3-R05, M3-R06
-// Test purpose: Plain-English description of the progression validation rules for stable scene anchors, before-after timing, and effective changes.
+// Test purpose: Valid progressions preserve stable scene anchors, before/after timing, and effective changes.
 package codex
 
 import "testing"

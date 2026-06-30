@@ -1,6 +1,6 @@
 // BDD Scenario: 3.2.3 - Report malformed canonical progressions
 // Requirements: M3-R05, M3-R18
-// Test purpose: Plain-English description of service-level rejection for canonical progression documents that reference scenes absent from the current outline.
+// Test purpose: Service reads reject stored progression anchors absent from the current canonical outline.
 package story
 
 import (

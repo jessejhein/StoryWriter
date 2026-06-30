@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.4 - Reject invalid entry data
 // Requirements: M3-R02, M3-R03, M3-R04
-// Test purpose: Plain-English description of the invalid create and edit payload rules for names, aliases, tags, descriptions, metadata, and type-specific IDs.
+// Test purpose: Entry validation rejects invalid names, aliases, tags, descriptions, metadata, and type-specific IDs.
 package codex
 
 import (

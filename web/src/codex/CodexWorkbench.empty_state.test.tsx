@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.1 - List an empty Codex
 // Requirements: M3-R10, M3-R11
-// Test purpose: Plain-English description of the Codex workbench empty state and explicit create workflow.
+// Test purpose: The empty Codex workbench exposes an explicit create workflow and accurate dirty state.
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type { CodexActiveState, CodexEntry, Outline, Project } from '../api'

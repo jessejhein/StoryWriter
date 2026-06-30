@@ -49,3 +49,43 @@ func TestLoadCodexEntryMasksHostFilesystemPath(t *testing.T) {
 		t.Fatalf("LoadCodexEntry() error lacks canonical context: %v", err)
 	}
 }
+
+// Test: YAML numbers, booleans, and timestamps are rejected where the entry schema requires strings.
+// Requirements: M3-R01, M3-R18
+func TestLoadCodexEntryRejectsNonStringScalars(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		contents string
+	}{
+		{
+			name:     "numeric name",
+			contents: "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: 123\naliases: []\ntags: []\ndescription: Guide.\nmetadata: {}\n",
+		},
+		{
+			name:     "boolean alias",
+			contents: "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: Ben\naliases: [true]\ntags: []\ndescription: Guide.\nmetadata: {}\n",
+		},
+		{
+			name:     "numeric metadata value",
+			contents: "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: Ben\naliases: []\ntags: []\ndescription: Guide.\nmetadata:\n  rank: 3\n",
+		},
+	}
+
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			mustMkdirAll(t, root, "codex/characters")
+			path := filepath.Join(root, "codex", "characters", "char_0123456789abcdef0123.yaml")
+			if err := os.WriteFile(path, []byte(testCase.contents), 0o644); err != nil {
+				t.Fatalf("WriteFile() error = %v", err)
+			}
+			if _, err := New().LoadCodexEntry(context.Background(), root, "char_0123456789abcdef0123"); err == nil {
+				t.Fatal("LoadCodexEntry() error = nil, want non-string scalar rejection")
+			}
+		})
+	}
+}

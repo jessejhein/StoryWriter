@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.2 - Create an entry
 // Requirements: M3-R02, M3-R04, M3-R13, M3-R14, M3-R15
-// Test purpose: Plain-English description of the Codex create mutation orchestration for normalized canonical bytes, one checkpoint, and one index rebuild.
+// Test purpose: Codex creation writes normalized canonical bytes with one index rebuild and one checkpoint.
 package story
 
 import (

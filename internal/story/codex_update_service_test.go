@@ -1,6 +1,6 @@
 // BDD Scenario: 3.1.3 - Edit an entry
 // Requirements: M3-R03, M3-R04, M3-R15, M3-R17
-// Test purpose: Plain-English description of the Codex edit mutation rules for stale revisions, no-op detection, and checkpointed canonical replacement.
+// Test purpose: Codex edits enforce revision shape and freshness, exact-byte no-ops, and checkpointed replacement.
 package story
 
 import (

@@ -601,6 +601,9 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if request.ExpectedRevision == nil && currentDocument.Revision != nil {
 		return codex.ProgressionDocument{}, codex.ErrInvalidRevision
 	}
+	if request.ExpectedRevision != nil && currentDocument.Revision == nil {
+		return codex.ProgressionDocument{}, codex.ErrInvalidRevision
+	}
 	if request.ExpectedRevision != nil && currentDocument.Revision != nil && *request.ExpectedRevision != *currentDocument.Revision {
 		return codex.ProgressionDocument{}, fmt.Errorf("progressions %q revision changed: %w", entryID, ErrStaleRevision)
 	}
@@ -711,6 +714,7 @@ func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message,
 	return nil
 }
 
+// reconcileProgressionIDs preserves existing row IDs and assigns IDs only to genuinely new anchors.
 func (s *Service) reconcileProgressionIDs(current, requested []codex.Progression) ([]codex.Progression, error) {
 	currentByID := make(map[string]codex.Progression, len(current))
 	currentByAnchor := make(map[string]codex.Progression, len(current))
@@ -745,6 +749,7 @@ func (s *Service) reconcileProgressionIDs(current, requested []codex.Progression
 	return next, nil
 }
 
+// progressionAnchorKey identifies one stable scene-and-timing progression slot.
 func progressionAnchorKey(progression codex.Progression) string {
 	return progression.Anchor.ID + ":" + progression.Anchor.Timing
 }
@@ -862,6 +867,7 @@ func validateProgressionExpectedRevision(expected *string) error {
 	return codex.ValidateRevision(*expected)
 }
 
+// outlineSceneIDs builds the membership set used to validate stable anchors.
 func outlineSceneIDs(outline Outline) map[string]struct{} {
 	sceneIDs := make(map[string]struct{})
 	for _, scene := range flattenOutlineScenes(outline) {
@@ -870,6 +876,7 @@ func outlineSceneIDs(outline Outline) map[string]struct{} {
 	return sceneIDs
 }
 
+// flattenOutlineScenes converts canonical hierarchy order into active-state chronology.
 func flattenOutlineScenes(outline Outline) []codex.SceneRef {
 	scenes := make([]codex.SceneRef, 0)
 	for _, arc := range outline.Arcs {
@@ -882,6 +889,7 @@ func flattenOutlineScenes(outline Outline) []codex.SceneRef {
 	return scenes
 }
 
+// validateProgressionAnchors rejects stored anchors absent from the current outline.
 func validateProgressionAnchors(sceneIDs map[string]struct{}, progressions []codex.Progression) error {
 	for _, progression := range progressions {
 		if _, ok := sceneIDs[progression.Anchor.ID]; !ok {

@@ -230,15 +230,15 @@ func parseCodexEntry(path string, contents []byte) (codex.Entry, error) {
 	}
 	var entry codex.Entry
 	entry.Version = version
-	if err := fields["id"].Decode(&entry.ID); err != nil {
+	if entry.ID, err = decodeStringScalar(path, "id", fields["id"]); err != nil {
 		return codex.Entry{}, fmt.Errorf("decode %s id: %w", path, err)
 	}
-	var entryType string
-	if err := fields["type"].Decode(&entryType); err != nil {
+	entryType, err := decodeStringScalar(path, "type", fields["type"])
+	if err != nil {
 		return codex.Entry{}, fmt.Errorf("decode %s type: %w", path, err)
 	}
 	entry.Type = codex.EntryType(entryType)
-	if err := fields["name"].Decode(&entry.Name); err != nil {
+	if entry.Name, err = decodeStringScalar(path, "name", fields["name"]); err != nil {
 		return codex.Entry{}, fmt.Errorf("decode %s name: %w", path, err)
 	}
 	aliases, err := decodeStringSequence(path, "aliases", fields["aliases"])
@@ -296,8 +296,8 @@ func parseProgressionDocument(path string, contents []byte) (codex.ProgressionDo
 	if version != codex.Version {
 		return codex.ProgressionDocument{}, fmt.Errorf("%s has unsupported version %d", path, version)
 	}
-	var entryID string
-	if err := fields["entry_id"].Decode(&entryID); err != nil {
+	entryID, err := decodeStringScalar(path, "entry_id", fields["entry_id"])
+	if err != nil {
 		return codex.ProgressionDocument{}, fmt.Errorf("decode %s entry_id: %w", path, err)
 	}
 	progressions, err := decodeProgressions(path, fields["progressions"])
@@ -322,6 +322,7 @@ func parseProgressionDocument(path string, contents []byte) (codex.ProgressionDo
 	}, nil
 }
 
+// mappingFields validates a required-key YAML mapping and rejects unknown or duplicate fields.
 func mappingFields(path string, node *yaml.Node, keys ...string) (map[string]*yaml.Node, error) {
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("decode %s: expected mapping node", path)
@@ -350,6 +351,7 @@ func mappingFields(path string, node *yaml.Node, keys ...string) (map[string]*ya
 	return fields, nil
 }
 
+// decodeStringSequence decodes a YAML sequence whose members must carry string tags.
 func decodeStringSequence(path, field string, node *yaml.Node) ([]string, error) {
 	if node.Kind == yaml.SequenceNode && len(node.Content) == 0 {
 		return []string{}, nil
@@ -359,8 +361,8 @@ func decodeStringSequence(path, field string, node *yaml.Node) ([]string, error)
 	}
 	result := make([]string, 0, len(node.Content))
 	for _, child := range node.Content {
-		var value string
-		if err := child.Decode(&value); err != nil {
+		value, err := decodeStringScalar(path, field, child)
+		if err != nil {
 			return nil, fmt.Errorf("decode %s %s: %w", path, field, err)
 		}
 		result = append(result, value)
@@ -368,34 +370,40 @@ func decodeStringSequence(path, field string, node *yaml.Node) ([]string, error)
 	return result, nil
 }
 
+// decodeStringScalar rejects YAML implicit types instead of coercing them into strings.
 func decodeStringScalar(path, field string, node *yaml.Node) (string, error) {
-	var value string
-	if err := node.Decode(&value); err != nil {
-		return "", fmt.Errorf("decode %s %s: %w", path, field, err)
+	if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+		return "", fmt.Errorf("decode %s %s: expected string scalar", path, field)
 	}
-	return value, nil
+	return node.Value, nil
 }
 
+// decodeStringMap decodes a flat mapping with strictly string-tagged keys and values.
 func decodeStringMap(path, field string, node *yaml.Node) (map[string]string, error) {
 	if node.Kind == yaml.MappingNode {
 		values := make(map[string]string, len(node.Content)/2)
 		for index := 0; index < len(node.Content); index += 2 {
 			keyNode := node.Content[index]
 			valueNode := node.Content[index+1]
-			if _, exists := values[keyNode.Value]; exists {
-				return nil, fmt.Errorf("decode %s %s: duplicate key %q", path, field, keyNode.Value)
+			key, err := decodeStringScalar(path, field+" key", keyNode)
+			if err != nil {
+				return nil, err
 			}
-			var value string
-			if err := valueNode.Decode(&value); err != nil {
-				return nil, fmt.Errorf("decode %s %s value %q: %w", path, field, keyNode.Value, err)
+			if _, exists := values[key]; exists {
+				return nil, fmt.Errorf("decode %s %s: duplicate key %q", path, field, key)
 			}
-			values[keyNode.Value] = value
+			value, err := decodeStringScalar(path, field+" value "+key, valueNode)
+			if err != nil {
+				return nil, err
+			}
+			values[key] = value
 		}
 		return values, nil
 	}
 	return nil, fmt.Errorf("decode %s %s: expected mapping", path, field)
 }
 
+// decodeProgressions strictly decodes the nested canonical progression schema.
 func decodeProgressions(path string, node *yaml.Node) ([]codex.Progression, error) {
 	if node.Kind == yaml.SequenceNode {
 		progressions := make([]codex.Progression, 0, len(node.Content))
@@ -412,7 +420,8 @@ func decodeProgressions(path string, node *yaml.Node) ([]codex.Progression, erro
 			}
 			progressions = append(progressions, codex.Progression{})
 			if idNode, ok := fields["id"]; ok {
-				if err := idNode.Decode(&progressions[index].ID); err != nil {
+				progressions[index].ID, err = decodeStringScalar(path, fmt.Sprintf("progressions[%d].id", index), idNode)
+				if err != nil {
 					return nil, fmt.Errorf("decode %s progressions[%d] id: %w", path, index, err)
 				}
 			}
@@ -420,13 +429,16 @@ func decodeProgressions(path string, node *yaml.Node) ([]codex.Progression, erro
 			if err != nil {
 				return nil, err
 			}
-			if err := anchorFields["type"].Decode(&progressions[index].Anchor.Type); err != nil {
+			progressions[index].Anchor.Type, err = decodeStringScalar(path, fmt.Sprintf("progressions[%d].anchor.type", index), anchorFields["type"])
+			if err != nil {
 				return nil, fmt.Errorf("decode %s progressions[%d] anchor type: %w", path, index, err)
 			}
-			if err := anchorFields["id"].Decode(&progressions[index].Anchor.ID); err != nil {
+			progressions[index].Anchor.ID, err = decodeStringScalar(path, fmt.Sprintf("progressions[%d].anchor.id", index), anchorFields["id"])
+			if err != nil {
 				return nil, fmt.Errorf("decode %s progressions[%d] anchor id: %w", path, index, err)
 			}
-			if err := anchorFields["timing"].Decode(&progressions[index].Anchor.Timing); err != nil {
+			progressions[index].Anchor.Timing, err = decodeStringScalar(path, fmt.Sprintf("progressions[%d].anchor.timing", index), anchorFields["timing"])
+			if err != nil {
 				return nil, fmt.Errorf("decode %s progressions[%d] anchor timing: %w", path, index, err)
 			}
 			changeFields, err := optionalMappingFields(fmt.Sprintf("%s progressions[%d].changes", path, index), fields["changes"], "description", "metadata")
@@ -453,6 +465,7 @@ func decodeProgressions(path string, node *yaml.Node) ([]codex.Progression, erro
 	return nil, fmt.Errorf("decode %s progressions: expected sequence", path)
 }
 
+// optionalMappingFields validates an optional-key YAML mapping and rejects unknown or duplicate fields.
 func optionalMappingFields(path string, node *yaml.Node, keys ...string) (map[string]*yaml.Node, error) {
 	if node.Kind != yaml.MappingNode {
 		return nil, fmt.Errorf("decode %s: expected mapping", path)
@@ -488,6 +501,7 @@ func codexEntryPath(entryID string) (string, error) {
 	return filepath.ToSlash(filepath.Join("codex", directory, entryID+".yaml")), nil
 }
 
+// sortedMetadataKeys returns stable byte-order keys for canonical serialization.
 func sortedMetadataKeys(metadata map[string]string) []string {
 	keys := make([]string, 0, len(metadata))
 	for key := range metadata {
@@ -571,5 +585,10 @@ func needsYAMLQuoting(value string) bool {
 		"on", "On", "ON", "off", "Off", "OFF":
 		return true
 	}
-	return false
+	var document yaml.Node
+	if err := yaml.Unmarshal([]byte(value+"\n"), &document); err != nil || len(document.Content) != 1 {
+		return true
+	}
+	root := document.Content[0]
+	return root.Kind != yaml.ScalarNode || root.Tag != "!!str"
 }

@@ -1,6 +1,6 @@
 // BDD Scenario: 3.4.4 - Roll back failures
 // Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for new Codex files and progression-file replacement when index or checkpoint work fails.
+// Test purpose: Injected write, index, and checkpoint failures restore Codex and progression state without reporting success.
 package story
 
 import (
@@ -111,9 +111,6 @@ func TestCreateCodexEntryRollsBackWhenIndexRebuildFails(t *testing.T) {
 	}
 }
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for progression replacement after a downstream failure.
 func TestSaveProgressionsRollsBackWhenIndexRebuildFails(t *testing.T) {
 	t.Parallel()
 
@@ -162,9 +159,6 @@ func TestSaveProgressionsRollsBackWhenIndexRebuildFails(t *testing.T) {
 	}
 }
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of progression-save failure handling for pre-write errors and replacement rollback after a failed checkpoint.
 func TestSaveProgressionsWriteFailureHasNoRollbackSideEffects(t *testing.T) {
 	t.Parallel()
 
@@ -215,9 +209,6 @@ func TestSaveProgressionsWriteFailureHasNoRollbackSideEffects(t *testing.T) {
 	}
 }
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for replacing an existing progression document after a failed commit.
 func TestSaveProgressionsRollsBackNewDocumentWhenCommitFails(t *testing.T) {
 	t.Parallel()
 
@@ -268,9 +259,6 @@ func TestSaveProgressionsRollsBackNewDocumentWhenCommitFails(t *testing.T) {
 	}
 }
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for replacing an existing progression document after write and index failures.
 func TestSaveProgressionsExistingDocumentWriteFailureHasNoRollbackSideEffects(t *testing.T) {
 	t.Parallel()
 
@@ -322,9 +310,6 @@ func TestSaveProgressionsExistingDocumentWriteFailureHasNoRollbackSideEffects(t 
 	}
 }
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for replacing an existing progression document after a failed index rebuild.
 func TestSaveProgressionsRollsBackExistingDocumentWhenIndexRebuildFails(t *testing.T) {
 	t.Parallel()
 
@@ -376,9 +361,6 @@ func TestSaveProgressionsRollsBackExistingDocumentWhenIndexRebuildFails(t *testi
 	}
 }
 
-// BDD Scenario: 3.4.4 - Roll back failures
-// Requirements: M3-R15, M3-R16
-// Test purpose: Plain-English description of rollback behavior for replacing an existing progression document after a failed commit.
 func TestSaveProgressionsRollsBackExistingDocumentWhenCommitFails(t *testing.T) {
 	t.Parallel()
 

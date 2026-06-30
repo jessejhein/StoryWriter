@@ -100,16 +100,20 @@ export type CodexEntry = {
   revision: string
 }
 
-/** SaveCodexEntryRequest is the create or update payload for one Codex entry. */
-export type SaveCodexEntryRequest = {
-  type?: CodexEntryType
+/** CodexEntryFields contains the mutable fields shared by create and update requests. */
+export type CodexEntryFields = {
   name: string
   aliases: string[]
   tags: string[]
   description: string
   metadata: Record<string, string>
-  expected_revision?: string
 }
+
+/** CreateCodexEntryRequest creates an entry of one required canonical type. */
+export type CreateCodexEntryRequest = CodexEntryFields & { type: CodexEntryType }
+
+/** UpdateCodexEntryRequest updates mutable fields at one required revision. */
+export type UpdateCodexEntryRequest = CodexEntryFields & { expected_revision: string }
 
 /** CodexProgression is one timeline change applied to a stable scene anchor. */
 export type CodexProgression = {
@@ -233,7 +237,7 @@ export function getCodexEntries(): Promise<{ entries: CodexEntry[] }> {
 }
 
 /** createCodexEntry creates one new canonical Codex entry. */
-export function createCodexEntry(requestBody: SaveCodexEntryRequest): Promise<CodexEntry> {
+export function createCodexEntry(requestBody: CreateCodexEntryRequest): Promise<CodexEntry> {
   return postJSON('/api/codex', requestBody)
 }
 
@@ -243,7 +247,7 @@ export function getCodexEntry(entryID: string): Promise<CodexEntry> {
 }
 
 /** updateCodexEntry updates one existing canonical Codex entry. */
-export function updateCodexEntry(entryID: string, requestBody: SaveCodexEntryRequest): Promise<CodexEntry> {
+export function updateCodexEntry(entryID: string, requestBody: UpdateCodexEntryRequest): Promise<CodexEntry> {
   return request(`/api/codex/${entryID}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

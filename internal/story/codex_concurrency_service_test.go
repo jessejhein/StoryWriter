@@ -1,6 +1,6 @@
 // BDD Scenario: 3.4.3 - Serialize overlapping mutations
 // Requirements: M3-R13, M3-R14, M3-R17
-// Test purpose: Plain-English description of the shared Milestone 3 mutation lock across Codex and scene mutations.
+// Test purpose: Codex, progression, and scene mutations serialize through the shared story mutation lock.
 package story
 
 import (

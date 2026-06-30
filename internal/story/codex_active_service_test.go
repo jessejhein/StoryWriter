@@ -1,6 +1,6 @@
 // BDD Scenario: 3.3.1 - Resolve before and after an anchor
 // Requirements: M3-R07, M3-R08
-// Test purpose: Plain-English description of the service-level active-state read path that uses current outline chronology while leaving canon unchanged.
+// Test purpose: Service-level active-state reads use current outline chronology without mutating canon.
 package story
 
 import (
