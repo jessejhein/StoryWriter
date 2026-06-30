@@ -96,6 +96,18 @@ Manual:
 - Reject leaves scene unchanged.
 - Accept updates scene file.
 
+Named automated evidence:
+
+- `internal/agent/model_test.go`
+- `internal/agent/registry_test.go`
+- `internal/agent/provider_test.go`
+- `internal/action/service_test.go`
+- `internal/action/integration_test.go`
+- `internal/story/scene_selection_test.go`
+- `internal/api/action_handler_test.go`
+- `web/src/editor/selection.test.ts`
+- `web/src/editor/SceneEditor.actions.boundary.test.tsx`
+
 ### Milestone 5
 
 - Provider interface can run fake provider.

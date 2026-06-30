@@ -46,6 +46,8 @@ var (
 	ErrStaleRevision = errors.New("stale scene revision")
 	// ErrNoSceneChanges reports a scene save with no effective canonical change.
 	ErrNoSceneChanges = errors.New("scene save has no changes")
+	// ErrInvalidSelection reports an invalid UTF-8 byte selection into scene Markdown.
+	ErrInvalidSelection = errors.New("invalid scene selection")
 )
 
 var revisionPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
@@ -111,6 +113,18 @@ type SaveSceneRequest struct {
 	FrontMatter      SceneFrontMatter
 	Markdown         string
 	ExpectedRevision string
+}
+
+// AcceptScenePatchRequest applies one reviewed action replacement to a canonical scene.
+type AcceptScenePatchRequest struct {
+	RunID            string
+	SceneID          string
+	RunSceneRevision string
+	ExpectedRevision string
+	StartByte        int
+	EndByte          int
+	OriginalText     string
+	ReplacementText  string
 }
 
 // ReorderRequest reorders direct children using stable IDs.
@@ -181,6 +195,40 @@ func NormalizeMarkdown(value string) (string, error) {
 		return "", fmt.Errorf("markdown exceeds 5 MiB limit: %w", ErrInvalidMarkdown)
 	}
 	return value, nil
+}
+
+// ValidateMarkdownSelection verifies a half-open UTF-8 byte range inside scene Markdown.
+func ValidateMarkdownSelection(markdown string, startByte, endByte int, expected string) (string, error) {
+	if startByte < 0 || endByte < 0 || startByte >= endByte || endByte > len([]byte(markdown)) {
+		return "", fmt.Errorf("selection byte range [%d:%d) is out of bounds: %w", startByte, endByte, ErrInvalidSelection)
+	}
+	raw := []byte(markdown)
+	if !utf8.Valid(raw[:startByte]) || !utf8.Valid(raw[:endByte]) {
+		return "", fmt.Errorf("selection does not align to UTF-8 boundaries: %w", ErrInvalidSelection)
+	}
+	selected := string(raw[startByte:endByte])
+	if expected != "" && selected != expected {
+		return "", fmt.Errorf("selection text does not match canonical markdown: %w", ErrInvalidSelection)
+	}
+	return selected, nil
+}
+
+// ReplaceMarkdownSelection replaces one validated Markdown byte range.
+func ReplaceMarkdownSelection(markdown string, startByte, endByte int, original, replacement string) (string, error) {
+	selected, err := ValidateMarkdownSelection(markdown, startByte, endByte, original)
+	if err != nil {
+		return "", err
+	}
+	if selected == replacement {
+		return "", ErrNoSceneChanges
+	}
+	raw := []byte(markdown)
+	var builder strings.Builder
+	builder.Grow(startByte + len(replacement) + len(raw[endByte:]))
+	builder.Write(raw[:startByte])
+	builder.WriteString(replacement)
+	builder.Write(raw[endByte:])
+	return builder.String(), nil
 }
 
 // ValidateSceneSaveRequest validates a scene save request after JSON decoding.

@@ -5,7 +5,16 @@ import SceneEditor from './SceneEditor'
 
 vi.mock('../api', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api')>()
-  return { ...actual, getScene: vi.fn(), saveScene: vi.fn() }
+  return {
+    ...actual,
+    getScene: vi.fn(),
+    saveScene: vi.fn(),
+    getStyles: vi.fn(),
+    getAvailableActions: vi.fn(),
+    runAction: vi.fn(),
+    acceptAction: vi.fn(),
+    rejectAction: vi.fn(),
+  }
 })
 
 vi.mock('./CodeMirrorSurface', () => ({

@@ -1,22 +1,22 @@
 version: 1
-id: line_polish
-name: Line Polish
-description: Rewrite selected prose for clarity, cadence, and flow while preserving meaning.
+id: chapter_refiner
+name: Chapter Refiner
+description: Refine a full chapter for flow, clarity, continuity, and scene-level cohesion.
 applies_when:
   surfaces:
-    - editor
+    - chapter_view
   input_scopes:
-    - selection
-  min_words: 20
-  max_words: 1500
+    - chapter
+  min_words: 1000
+  max_words: 12000
 context_policy:
   required:
-    - selected_text
+    - current_chapter
+    - chapter_summary
     - style_sheet
   optional:
-    - surrounding_paragraphs
+    - arc_summary
   forbidden:
-    - global_codex_rag
     - raw_import_notes
 rag_policy:
   mode: none
@@ -25,5 +25,5 @@ control:
   requires_acceptance: true
   can_modify_canon: false
 output:
-  type: replacement_text
+  type: revised_text
   requires_diff_preview: true

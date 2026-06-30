@@ -14,6 +14,7 @@ import { codeMirrorExtensions } from './editor_extensions'
 type Props = {
   value: string
   onChange: (value: string) => void
+  onSelectionChange?: (selection: { start: number; end: number; text: string }) => void
 }
 
 /**
@@ -21,11 +22,12 @@ type Props = {
  *
  * Renders the imperative CodeMirror host used for canonical scene markdown.
  */
-export default function CodeMirrorSurface({ value, onChange }: Props) {
+export default function CodeMirrorSurface({ value, onChange, onSelectionChange }: Props) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewRef = useRef<EditorView | null>(null)
   const initialValueRef = useRef(value)
   const handleChange = useEffectEvent(onChange)
+  const handleSelectionChange = useEffectEvent(onSelectionChange ?? (() => {}))
 
   useEffect(() => {
     if (!hostRef.current) {
@@ -40,10 +42,17 @@ export default function CodeMirrorSurface({ value, onChange }: Props) {
           if (update.docChanged) {
             handleChange(update.state.doc.toString())
           }
+          if (update.docChanged || update.selectionSet) {
+            const selection = update.state.selection.main
+            const text = update.state.doc.sliceString(selection.from, selection.to)
+            handleSelectionChange({ start: selection.from, end: selection.to, text })
+          }
         }),
       ],
       parent: hostRef.current,
     })
+    const selection = view.state.selection.main
+    handleSelectionChange({ start: selection.from, end: selection.to, text: view.state.doc.sliceString(selection.from, selection.to) })
     viewRef.current = view
     return () => {
       view.destroy()

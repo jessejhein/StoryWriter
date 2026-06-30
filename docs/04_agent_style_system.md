@@ -47,6 +47,21 @@ Styles define:
 
 An agent can be run with a style if they are compatible.
 
+## Milestone 4 implementation boundary
+
+Milestone 4 implements a strict offline subset of this system:
+
+- registries are read-only project-local `agents/*.yaml` and `styles/*.yaml`,
+- only direct regular `*.yaml` children are loaded,
+- YAML decoding is strict, single-document, and rejects unknown fields,
+- built-in executable flow is `line_polish` plus the mock `precise_editor` style,
+- `chapter_refiner` is loaded and listed for applicability only,
+- provider profiles, credentials, capability discovery, and real model calls wait for Milestone 5.
+
+Opening an older project with the pre-version Milestone 3 starter files still
+works, but registry and availability routes now fail with an unsupported-schema
+error until the author updates the registry files.
+
 ## Context packs
 
 Agents should request context packs, not raw global dumps.
@@ -143,6 +158,51 @@ model_context_limit
 
 Example: if the user highlights 200 words in the editor, offer Line Polish and Local Voice Texture. Do not offer Outline Architect.
 
+## Milestone 4 agent schema
+
+```yaml
+version: 1
+id: line_polish
+name: Line Polish
+description: Rewrite selected prose for clarity, cadence, and flow while preserving meaning.
+applies_when:
+  surfaces: [editor]
+  input_scopes: [selection]
+  min_words: 20
+  max_words: 1500
+context_policy:
+  required: [selected_text, style_sheet]
+  optional: [surrounding_paragraphs]
+  forbidden: [global_codex_rag, raw_import_notes]
+rag_policy:
+  mode: none
+control:
+  output_mode: patch
+  requires_acceptance: true
+  can_modify_canon: false
+output:
+  type: replacement_text
+  requires_diff_preview: true
+```
+
+Milestone 4 style schema:
+
+```yaml
+version: 1
+id: precise_editor
+name: Precise Editor
+provider_profile_id: mock_default
+model: mock
+parameters:
+  temperature: 0.2
+system_prompt: >
+  You are a careful prose editor. Preserve facts, continuity, POV, and intent.
+```
+
+The production mock adapter returns `Mock polished: ` followed by the trimmed
+selection. The app rejects a byte-identical no-op before any run is stored or
+accepted.
+
 ## Example: local voice texture agent
 
 ```yaml
@@ -153,7 +213,7 @@ description: Use a small local model for paragraph/page-level wording and cadenc
 applies_when:
   surfaces:
     - editor
-  input_scope:
+  input_scopes:
     - selection
   min_words: 50
   max_words: 2500
@@ -199,9 +259,8 @@ description: Refine a full chapter for flow, clarity, continuity, and scene-leve
 
 applies_when:
   surfaces:
-    - editor
     - chapter_view
-  input_scope:
+  input_scopes:
     - chapter
   min_words: 1000
   max_words: 12000
@@ -225,10 +284,7 @@ context_policy:
     - raw_import_notes
 
 rag_policy:
-  mode: timeline_aware
-  scope: chapter_plus_neighbors
-  max_entries: 20
-  include_progressions: true
+  mode: none
 
 control:
   output_mode: patch
@@ -237,7 +293,6 @@ control:
 
 output:
   type: revised_text
-  mode: whole_document_or_patch
   requires_diff_preview: true
 ```
 
@@ -274,4 +329,3 @@ capabilities:
 ```
 
 Do not offer incompatible agents for a selected provider/model.
-

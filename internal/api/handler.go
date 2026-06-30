@@ -10,8 +10,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"storywork/internal/action"
+	"storywork/internal/agent"
 	"storywork/internal/codex"
 	"storywork/internal/project"
 	"storywork/internal/story"
@@ -138,6 +141,18 @@ type StoryStore interface {
 	SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error)
 	// ResolveActiveCodexState resolves one entry as of a target scene.
 	ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error)
+	// Agents returns the strictly loaded project-local agent registry.
+	Agents(ctx context.Context) ([]agent.Agent, error)
+	// Styles returns the strictly loaded project-local style registry.
+	Styles(ctx context.Context) ([]agent.Style, error)
+	// AvailableActions returns the applicable actions for the current state.
+	AvailableActions(ctx context.Context, input agent.AvailabilityInput) ([]action.AvailableAction, error)
+	// Run executes one transient mock action against canonical scene bytes.
+	Run(ctx context.Context, request action.RunRequest) (action.Run, error)
+	// Accept applies one pending run to canonical scene markdown.
+	Accept(ctx context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error)
+	// Reject discards one pending run without mutating canon.
+	Reject(ctx context.Context, runID string) (action.Run, error)
 }
 
 type requiredJSONField struct {
@@ -438,6 +453,193 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		})
 	})
 	mux.HandleFunc("/api/codex/{entry_id}/active", methodNotAllowed("GET"))
+	mux.HandleFunc("GET /api/agents", func(writer http.ResponseWriter, request *http.Request) {
+		agents, err := stories.Agents(request.Context())
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		type agentResponse struct {
+			ID                 string              `json:"id"`
+			Name               string              `json:"name"`
+			Description        string              `json:"description"`
+			Surfaces           []agent.Surface     `json:"surfaces"`
+			InputScopes        []agent.InputScope  `json:"input_scopes"`
+			MinWords           int                 `json:"min_words"`
+			MaxWords           int                 `json:"max_words"`
+			RequiredContext    []agent.ContextPack `json:"required_context"`
+			OptionalContext    []agent.ContextPack `json:"optional_context"`
+			ForbiddenContext   []agent.ContextPack `json:"forbidden_context"`
+			RAGMode            agent.RAGMode       `json:"rag_mode"`
+			OutputMode         agent.OutputMode    `json:"output_mode"`
+			RequiresAcceptance bool                `json:"requires_acceptance"`
+		}
+		response := make([]agentResponse, 0, len(agents))
+		for _, item := range agents {
+			response = append(response, agentResponse{
+				ID:                 item.ID,
+				Name:               item.Name,
+				Description:        item.Description,
+				Surfaces:           append([]agent.Surface(nil), item.AppliesWhen.Surfaces...),
+				InputScopes:        append([]agent.InputScope(nil), item.AppliesWhen.InputScopes...),
+				MinWords:           item.AppliesWhen.MinWords,
+				MaxWords:           item.AppliesWhen.MaxWords,
+				RequiredContext:    append([]agent.ContextPack(nil), item.ContextPolicy.Required...),
+				OptionalContext:    append([]agent.ContextPack(nil), item.ContextPolicy.Optional...),
+				ForbiddenContext:   append([]agent.ContextPack(nil), item.ContextPolicy.Forbidden...),
+				RAGMode:            item.RAGPolicy.Mode,
+				OutputMode:         item.Control.OutputMode,
+				RequiresAcceptance: item.Control.RequiresAcceptance,
+			})
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"agents": response})
+	})
+	mux.HandleFunc("GET /api/styles", func(writer http.ResponseWriter, request *http.Request) {
+		styles, err := stories.Styles(request.Context())
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		type styleResponse struct {
+			ID                string  `json:"id"`
+			Name              string  `json:"name"`
+			ProviderProfileID string  `json:"provider_profile_id"`
+			Model             string  `json:"model"`
+			Temperature       float64 `json:"temperature"`
+			SystemPrompt      string  `json:"system_prompt"`
+		}
+		response := make([]styleResponse, 0, len(styles))
+		for _, item := range styles {
+			response = append(response, styleResponse{
+				ID:                item.ID,
+				Name:              item.Name,
+				ProviderProfileID: item.ProviderProfileID,
+				Model:             item.Model,
+				Temperature:       item.Temperature,
+				SystemPrompt:      item.SystemPrompt,
+			})
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"styles": response})
+	})
+	mux.HandleFunc("GET /api/actions/available", func(writer http.ResponseWriter, request *http.Request) {
+		selectionWords := 0
+		if raw := request.URL.Query().Get("selection_words"); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil {
+				writeError(writer, http.StatusBadRequest, fmt.Errorf("selection_words must be an integer"))
+				return
+			}
+			selectionWords = value
+		}
+		input := agent.AvailabilityInput{
+			Surface:        agent.Surface(request.URL.Query().Get("surface")),
+			InputScope:     agent.InputScope(request.URL.Query().Get("input_scope")),
+			SceneID:        request.URL.Query().Get("scene_id"),
+			SelectionWords: selectionWords,
+		}
+		actions, err := stories.AvailableActions(request.Context(), input)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"actions": actions})
+	})
+	mux.HandleFunc("POST /api/actions/run", func(writer http.ResponseWriter, request *http.Request) {
+		var runRequest struct {
+			AgentID       string `json:"agent_id"`
+			StyleID       string `json:"style_id"`
+			Surface       string `json:"surface"`
+			InputScope    string `json:"input_scope"`
+			SceneID       string `json:"scene_id"`
+			SceneRevision string `json:"scene_revision"`
+			Selection     struct {
+				StartByte int    `json:"start_byte"`
+				EndByte   int    `json:"end_byte"`
+				Text      string `json:"text"`
+			} `json:"selection"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &runRequest, 1<<20,
+			requiredJSONField{name: "agent_id"},
+			requiredJSONField{name: "style_id"},
+			requiredJSONField{name: "surface"},
+			requiredJSONField{name: "input_scope"},
+			requiredJSONField{name: "scene_id"},
+			requiredJSONField{name: "scene_revision"},
+			requiredJSONField{name: "selection"},
+		); err != nil {
+			writeBodyLimitError(writer, err)
+			return
+		}
+		run, err := stories.Run(request.Context(), action.RunRequest{
+			AgentID:       runRequest.AgentID,
+			StyleID:       runRequest.StyleID,
+			Surface:       agent.Surface(runRequest.Surface),
+			InputScope:    agent.InputScope(runRequest.InputScope),
+			SceneID:       runRequest.SceneID,
+			SceneRevision: runRequest.SceneRevision,
+			Selection: action.Selection{
+				StartByte: runRequest.Selection.StartByte,
+				EndByte:   runRequest.Selection.EndByte,
+				Text:      runRequest.Selection.Text,
+			},
+		})
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, map[string]any{
+			"run_id":         run.RunID,
+			"status":         run.Status,
+			"agent_id":       run.AgentID,
+			"style_id":       run.StyleID,
+			"scene_id":       run.SceneID,
+			"scene_revision": run.SceneRevision,
+			"selection": map[string]int{
+				"start_byte": run.Selection.StartByte,
+				"end_byte":   run.Selection.EndByte,
+			},
+			"output_mode": "patch",
+			"patch": map[string]string{
+				"original":    run.OriginalText,
+				"replacement": run.Replacement,
+			},
+			"context_summary": run.ContextSummary,
+		})
+	})
+	mux.HandleFunc("POST /api/actions/{run_id}/accept", func(writer http.ResponseWriter, request *http.Request) {
+		var acceptRequest struct {
+			ExpectedRevision string `json:"expected_revision"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &acceptRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
+			writeBodyLimitError(writer, err)
+			return
+		}
+		run, sceneDocument, err := stories.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"run_id": run.RunID,
+			"status": run.Status,
+			"scene":  sceneDocument,
+		})
+	})
+	mux.HandleFunc("POST /api/actions/{run_id}/reject", func(writer http.ResponseWriter, request *http.Request) {
+		run, err := stories.Reject(request.Context(), request.PathValue("run_id"))
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"run_id": run.RunID,
+			"status": run.Status,
+		})
+	})
+	mux.HandleFunc("/api/actions/available", methodNotAllowed("GET"))
+	mux.HandleFunc("/api/actions/run", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/actions/{run_id}/accept", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/actions/{run_id}/reject", methodNotAllowed("POST"))
 	return mux
 }
 
@@ -646,10 +848,18 @@ func statusForStoryError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder), errors.Is(err, story.ErrInvalidPOV), errors.Is(err, story.ErrInvalidStatus), errors.Is(err, story.ErrInvalidMarkdown), errors.Is(err, story.ErrInvalidRevision), errors.Is(err, story.ErrNoSceneChanges):
 		return http.StatusBadRequest
+	case errors.Is(err, story.ErrInvalidSelection), errors.Is(err, agent.ErrInvalidAgent), errors.Is(err, agent.ErrInvalidStyle), errors.Is(err, agent.ErrInapplicable), errors.Is(err, action.ErrInvalidRunRequest):
+		return http.StatusBadRequest
 	case errors.Is(err, codex.ErrInvalidType), errors.Is(err, codex.ErrInvalidID), errors.Is(err, codex.ErrInvalidName), errors.Is(err, codex.ErrInvalidAlias), errors.Is(err, codex.ErrInvalidTag), errors.Is(err, codex.ErrInvalidDescription), errors.Is(err, codex.ErrInvalidMetadata), errors.Is(err, codex.ErrInvalidRevision), errors.Is(err, codex.ErrInvalidProgression), errors.Is(err, codex.ErrNoChanges):
 		return http.StatusBadRequest
+	case errors.Is(err, action.ErrRunConflict):
+		return http.StatusConflict
 	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound), errors.Is(err, codex.ErrEntryNotFound), errors.Is(err, codex.ErrSceneNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, action.ErrAgentNotFound), errors.Is(err, action.ErrStyleNotFound), errors.Is(err, action.ErrRunNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, action.ErrRunCapacity), errors.Is(err, action.ErrProviderUnavailable):
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}

@@ -85,6 +85,91 @@ export type SaveSceneRequest = {
   expected_revision: string
 }
 
+export type AgentDefinition = {
+  id: string
+  name: string
+  description: string
+  surfaces: Array<'editor' | 'chapter_view'>
+  input_scopes: Array<'selection' | 'chapter'>
+  min_words: number
+  max_words: number
+  required_context: string[]
+  optional_context: string[]
+  forbidden_context: string[]
+  rag_mode: 'none'
+  output_mode: 'patch'
+  requires_acceptance: boolean
+}
+
+export type StyleDefinition = {
+  id: string
+  name: string
+  provider_profile_id: string
+  model: string
+  temperature: number
+  system_prompt: string
+}
+
+export type AvailableAction = {
+  agent_id: string
+  name: string
+  description: string
+  output_mode: 'patch'
+  requires_acceptance: boolean
+  style_ids: string[]
+}
+
+export type AvailableActionsResponse = {
+  actions: AvailableAction[]
+}
+
+export type ActionSelection = {
+  start_byte: number
+  end_byte: number
+  text: string
+}
+
+export type RunActionRequest = {
+  agent_id: string
+  style_id: string
+  surface: 'editor' | 'chapter_view'
+  input_scope: 'selection' | 'chapter'
+  scene_id: string
+  scene_revision: string
+  selection: ActionSelection
+}
+
+export type RunActionResponse = {
+  run_id: string
+  status: 'pending' | 'accepting' | 'accepted' | 'rejected'
+  agent_id: string
+  style_id: string
+  scene_id: string
+  scene_revision: string
+  selection: {
+    start_byte: number
+    end_byte: number
+  }
+  output_mode: 'patch'
+  patch: {
+    original: string
+    replacement: string
+  }
+  context_summary: {
+    packs_used: string[]
+    rag_mode: 'none'
+  }
+}
+
+export type ActionDecisionResponse = {
+  run_id: string
+  status: 'accepted' | 'rejected'
+}
+
+export type AcceptActionResponse = ActionDecisionResponse & {
+  scene: SceneDocument
+}
+
 /** CodexEntryType enumerates the supported Codex entry categories. */
 export type CodexEntryType = 'character' | 'location' | 'lore' | 'custom'
 
@@ -229,6 +314,41 @@ export function saveScene(sceneID: string, requestBody: SaveSceneRequest): Promi
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(requestBody),
   })
+}
+
+export function getAgents(): Promise<{ agents: AgentDefinition[] }> {
+  return request('/api/agents')
+}
+
+export function getStyles(): Promise<{ styles: StyleDefinition[] }> {
+  return request('/api/styles')
+}
+
+export function getAvailableActions(params: {
+  surface: 'editor' | 'chapter_view'
+  input_scope: 'selection' | 'chapter'
+  scene_id: string
+  selection_words: number
+}): Promise<AvailableActionsResponse> {
+  const query = new URLSearchParams({
+    surface: params.surface,
+    input_scope: params.input_scope,
+    scene_id: params.scene_id,
+    selection_words: String(params.selection_words),
+  })
+  return request(`/api/actions/available?${query.toString()}`)
+}
+
+export function runAction(requestBody: RunActionRequest): Promise<RunActionResponse> {
+  return postJSON('/api/actions/run', requestBody)
+}
+
+export function acceptAction(runID: string, expectedRevision: string): Promise<AcceptActionResponse> {
+  return postJSON(`/api/actions/${runID}/accept`, { expected_revision: expectedRevision })
+}
+
+export function rejectAction(runID: string): Promise<ActionDecisionResponse> {
+  return postJSON(`/api/actions/${runID}/reject`, {})
 }
 
 /** getCodexEntries loads the active project's full Codex list. */

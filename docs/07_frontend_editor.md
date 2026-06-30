@@ -34,6 +34,8 @@ Reasons:
 - Save/reload scene.
 - Selection-based AI action menu.
 - Diff preview for patch outputs.
+- Dirty drafts disable action lookup and run controls.
+- Accepting a patch updates the editor baseline from the returned canonical scene without a second scene save.
 
 ### Codex screen
 
@@ -78,6 +80,11 @@ Reasons:
 7. UI shows patch/diff/proposal.
 8. User accepts/rejects.
 
+The implemented Milestone 4 editor flow keeps selection state in the scene
+editor, converts CodeMirror character offsets to UTF-8 byte offsets for the run
+request, lists only applicable actions, exposes the matching styles, and shows
+context packs plus RAG mode in the preview.
+
 ## Diff/accept behavior
 
 For MVP, a simple side-by-side or inline preview is enough.
@@ -88,6 +95,10 @@ Must support:
 - reject replacement,
 - copy replacement manually,
 - show context packs used.
+
+The current implementation uses an inline preview region with side-by-side
+original and replacement text, whitespace-preserving `<pre>` blocks, and
+keyboard-operable buttons for Copy, Accept, and Reject.
 
 ## Do not build yet
 

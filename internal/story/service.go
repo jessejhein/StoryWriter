@@ -387,6 +387,85 @@ func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSce
 	return nextScene, nil
 }
 
+// AcceptScenePatch validates and persists one reviewed AI replacement into canonical Markdown.
+func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatchRequest) (SceneDocument, error) {
+	current, err := s.currentProject()
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateSceneID(request.SceneID); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateRevision(request.RunSceneRevision); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateRevision(request.ExpectedRevision); err != nil {
+		return SceneDocument{}, err
+	}
+	if request.RunID == "" {
+		return SceneDocument{}, fmt.Errorf("run_id is required: %w", ErrInvalidSelection)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if !clean {
+		return SceneDocument{}, ErrDirtyWorktree
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	sceneRef, err := findScene(outline, request.SceneID)
+	if err != nil {
+		if errors.Is(err, ErrParentNotFound) {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", request.SceneID, ErrSceneNotFound)
+		}
+		return SceneDocument{}, err
+	}
+	currentScene, err := s.files.LoadScene(ctx, current.Path, request.SceneID)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if currentScene.ChapterID != sceneRef.ChapterID {
+		return SceneDocument{}, fmt.Errorf("scene %q chapter mismatch: %w", request.SceneID, ErrSceneNotFound)
+	}
+	if currentScene.Revision != request.RunSceneRevision || currentScene.Revision != request.ExpectedRevision {
+		return SceneDocument{}, fmt.Errorf("scene %q revision changed: %w", request.SceneID, ErrStaleRevision)
+	}
+
+	nextMarkdown, err := ReplaceMarkdownSelection(
+		currentScene.Markdown,
+		request.StartByte,
+		request.EndByte,
+		request.OriginalText,
+		request.ReplacementText,
+	)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	nextScene := currentScene
+	nextScene.Markdown = nextMarkdown
+	sceneBytes, err := s.files.MarshalSceneDocument(nextScene)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if bytes.Equal(sceneBytes, currentScene.Canonical) {
+		return SceneDocument{}, ErrNoSceneChanges
+	}
+	if err := s.persistFiles(ctx, current.Path, "Accept AI patch "+request.RunID, map[string][]byte{
+		filepath.ToSlash(filepath.Join("scenes", request.SceneID+".md")): sceneBytes,
+	}, nil); err != nil {
+		return SceneDocument{}, err
+	}
+	nextScene.Revision = ComputeRevision(sceneBytes)
+	nextScene.Canonical = append([]byte(nil), sceneBytes...)
+	return nextScene, nil
+}
+
 // CodexEntries returns the current active project's validated Codex list.
 func (s *Service) CodexEntries(ctx context.Context) ([]codex.Entry, error) {
 	s.mu.RLock()
