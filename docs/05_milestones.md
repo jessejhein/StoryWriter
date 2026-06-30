@@ -6,6 +6,14 @@ Build a local-first AI writing workshop that turns messy Markdown notes into a s
 
 Each milestone is a sprint. Each sprint must leave the app working.
 
+## Current status
+
+- Milestones 0 through 3: implemented; regression baseline green on June 29, 2026.
+- Milestone 4: documented and ready for TDD implementation.
+- Milestones 5 through 9: roadmap only; do not implement them during Milestone 4.
+
+The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
+
 ---
 
 ## Milestone 0 — Foundation and local project skeleton

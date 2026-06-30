@@ -1,7 +1,7 @@
 # Storywork Documentation Standards
 
 **Last Updated:** June 2026
-**Version:** Milestone 3
+**Version:** Milestone 4 planning
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
 
@@ -208,7 +208,7 @@ All HTTP endpoints are self-documenting via the handler code. When adding a new 
 2. Document request/response types
 3. Update this `DOCUMENTATION.md` under the API section (if major)
 
-Milestone 3 Codex routes:
+Implemented through Milestone 3:
 
 ```text
 GET  /api/codex
@@ -223,6 +223,21 @@ GET  /api/codex/{entry_id}/active?scene_id={scene_id}
 Mutation requests use strict JSON: unknown, missing, null, trailing, and
 wrongly typed fields are rejected unless a field is explicitly documented as
 nullable. Entry and progression updates use exact-byte revision tokens.
+
+Planned for Milestone 4:
+
+```text
+GET  /api/agents
+GET  /api/styles
+GET  /api/actions/available
+POST /api/actions/run
+POST /api/actions/{run_id}/accept
+POST /api/actions/{run_id}/reject
+```
+
+The exact Milestone 4 schemas, applicability rules, transient run lifecycle,
+and explicit-acceptance transaction are defined in
+`docs/13_milestone_4_task_prompt.md`. These routes are not implemented yet.
 
 Example:
 

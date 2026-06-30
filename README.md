@@ -35,6 +35,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 13. `docs/10_milestone_1_task_prompt.md`
 14. `docs/11_milestone_2_task_prompt.md`
 15. `docs/12_milestone_3_task_prompt.md`
+16. `docs/13_milestone_4_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -74,11 +75,18 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 3 are implemented. The app includes the local project
-foundation, canonical outline editing, the Vim-friendly scene editor with
-revision conflict protection and one Git checkpoint per explicit save, plus the
-Codex workbench with strict progression validation, stable IDs, reorder/remove
-controls, and active-state resolution.
+Milestones 0 through 3 are implemented and the full check suite is green as of
+June 29, 2026. The app includes the local project foundation, canonical outline
+editing, the Vim-friendly scene editor with revision conflict protection and
+one Git checkpoint per explicit save, plus the Codex workbench with strict
+progression validation, stable IDs, reorder/remove controls, and active-state
+resolution.
+
+Milestone 4 is the current documented phase and is ready for TDD implementation.
+Its contract is `docs/13_milestone_4_task_prompt.md`; its working sequence and
+status checklist are in `.plans/milestone_4_implementation.md` and
+`.plans/milestone_4_status.md`. No Milestone 4 production behavior has been
+implemented yet.
 
 ## Development
 
@@ -104,7 +112,7 @@ make dev-frontend
 
 The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 
-## Milestone 0 package map
+## Current package map
 
 - `cmd/storywork`: process startup and graceful shutdown only.
 - `internal/app`: production dependency composition.
@@ -112,6 +120,9 @@ The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 - `internal/project`: project creation/opening orchestration.
 - `internal/gitstore`: Git command adapter.
 - `internal/index`: rebuildable SQLite index adapter.
+- `internal/story`: canonical outline, scene, and Codex mutation orchestration.
+- `internal/codex`: pure Codex validation and active-state decisions.
+- `internal/storyfile`: strict canonical story-file adapters.
 - `templates`: embedded canonical starter files.
 - `web`: React/Vite local UI.
 
