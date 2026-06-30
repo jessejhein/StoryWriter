@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"storywork/internal/agent"
 	"storywork/internal/project"
@@ -93,20 +92,17 @@ type Run struct {
 	OriginalText   string               `json:"-"`
 	Replacement    string               `json:"-"`
 	ContextSummary agent.ContextSummary `json:"context_summary"`
-	createdAt      time.Time
 }
 
 type RunStore struct {
 	mu    sync.Mutex
 	runs  map[string]Run
 	order []string
-	now   func() time.Time
 }
 
-func NewRunStore(now func() time.Time) *RunStore {
+func NewRunStore() *RunStore {
 	return &RunStore{
 		runs: make(map[string]Run),
-		now:  now,
 	}
 }
 
@@ -132,7 +128,6 @@ func (s *RunStore) Insert(run Run) error {
 			return ErrRunCapacity
 		}
 	}
-	run.createdAt = s.now()
 	s.runs[run.RunID] = run
 	s.order = append(s.order, run.RunID)
 	return nil

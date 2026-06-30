@@ -76,7 +76,7 @@ Milestone 0 creates a runnable local skeleton:
 ## Current implementation status
 
 Milestones 0 through 4 are implemented and the full check suite is green as of
-June 29, 2026. The app includes the local project foundation, canonical outline
+June 30, 2026. The app includes the local project foundation, canonical outline
 editing, the Vim-friendly scene editor with revision conflict protection and
 one Git checkpoint per explicit save, the Codex workbench with strict
 progression validation and active-state resolution, plus the Milestone 4

@@ -123,7 +123,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 		storyService,
 		storyService,
 		agent.NewMockProvider(),
-		action.NewRunStore(func() time.Time { return time.Date(2026, time.June, 29, 12, 5, 0, 0, time.UTC) }),
+		action.NewRunStore(),
 		&staticRunIDGenerator{ids: []string{
 			"run_00000000000000000001",
 			"run_00000000000000000002",
@@ -268,7 +268,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
 		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
 		agent.NewMockProvider(),
-		action.NewRunStore(time.Now),
+		action.NewRunStore(),
 		&staticRunIDGenerator{ids: []string{"run_00000000000000000005"}},
 	)
 	reloadedScene, err := storyfile.New().LoadScene(ctx, projectPath, savedScene.ID)

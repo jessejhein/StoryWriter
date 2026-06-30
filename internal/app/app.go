@@ -99,7 +99,7 @@ func NewHandler(version string) http.Handler {
 		stories,
 		stories,
 		agent.NewMockProvider(),
-		action.NewRunStore(time.Now),
+		action.NewRunStore(),
 		action.NewRandomIDGenerator(),
 	)
 	return api.NewHandler(projects, session, &compositeStore{stories: stories, actions: actions}, version)

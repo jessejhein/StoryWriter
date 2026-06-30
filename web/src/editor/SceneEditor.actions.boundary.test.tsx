@@ -156,6 +156,8 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
   await waitFor(() => expect(screen.getByRole('button', { name: 'Run action' })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Run action' }))
   await waitFor(() => expect(screen.getByText('Mock polished: Alpha beta')).toBeInTheDocument())
+  const previewRegion = screen.getByRole('region', { name: 'AI patch preview' })
+  expect(document.activeElement).toBe(previewRegion)
   expect(screen.getByText('Context packs: selected_text, style_sheet. RAG mode: none.')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Copy replacement' }))
   await waitFor(() => expect(clipboardWrite).toHaveBeenCalledWith('Mock polished: Alpha beta'))

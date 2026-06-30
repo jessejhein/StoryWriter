@@ -83,7 +83,10 @@ Reasons:
 The implemented Milestone 4 editor flow keeps selection state in the scene
 editor, converts CodeMirror character offsets to UTF-8 byte offsets for the run
 request, lists only applicable actions, exposes the matching styles, and shows
-context packs plus RAG mode in the preview.
+context packs plus RAG mode in the preview. When a preview opens, the named
+inline preview region receives one-time programmatic focus so keyboard and
+screen-reader users land on the review state immediately without turning the
+workflow into a modal dialog.
 
 ## Diff/accept behavior
 
@@ -98,7 +101,9 @@ Must support:
 
 The current implementation uses an inline preview region with side-by-side
 original and replacement text, whitespace-preserving `<pre>` blocks, and
-keyboard-operable buttons for Copy, Accept, and Reject.
+keyboard-operable buttons for Copy, Accept, and Reject. Navigation confirmation
+remains tied to dirty authored drafts that would lose unsaved user work, not to
+a discardable clean mock preview.
 
 ## Do not build yet
 

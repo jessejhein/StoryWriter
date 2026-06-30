@@ -156,7 +156,10 @@ provider_capabilities
 model_context_limit
 ```
 
-Example: if the user highlights 200 words in the editor, offer Line Polish and Local Voice Texture. Do not offer Outline Architect.
+Future example: if the user highlights 200 words in the editor, a later
+milestone could offer Line Polish and Local Voice Texture. In Milestone 4, the
+strict built-in registries expose Line Polish for editor selections and Chapter
+Refiner for chapter scope only.
 
 ## Milestone 4 agent schema
 
@@ -203,7 +206,17 @@ The production mock adapter returns `Mock polished: ` followed by the trimmed
 selection. The app rejects a byte-identical no-op before any run is stored or
 accepted.
 
-## Example: local voice texture agent
+Only the exact version-1 schemas shown above and the exact loadable
+`chapter_refiner` example below are accepted by the Milestone 4 registry
+loader. Older unversioned examples, top-level style temperature fields, and
+future-only keys are intentionally rejected by registry routes even though
+project opening itself still works.
+
+## Future example: local voice texture agent
+
+This is a conceptual Milestone 5+ example. It is not loadable in Milestone 4
+because the current strict registry loader rejects `model_requirements`,
+unsupported context-pack names, and any behavior beyond the Milestone 4 subset.
 
 ```yaml
 id: local_voice_texture
@@ -250,9 +263,10 @@ output:
   requires_diff_preview: true
 ```
 
-## Example: chapter refiner agent
+## Milestone 4 loadable chapter refiner agent
 
 ```yaml
+version: 1
 id: chapter_refiner
 name: Chapter Refiner
 description: Refine a full chapter for flow, clarity, continuity, and scene-level cohesion.
@@ -265,21 +279,13 @@ applies_when:
   min_words: 1000
   max_words: 12000
 
-model_requirements:
-  min_context_tokens: 32000
-  supports_streaming: true
-
 context_policy:
   required:
     - current_chapter
     - chapter_summary
-    - active_codex_at_position
-    - outline_neighborhood
-    - voice_sheet
+    - style_sheet
   optional:
-    - global_codex_rag
     - arc_summary
-    - continuity_events
   forbidden:
     - raw_import_notes
 
@@ -296,21 +302,31 @@ output:
   requires_diff_preview: true
 ```
 
-## Example: style
+## Future example: style
+
+This is a conceptual Milestone 5+ style. It keeps the current
+`parameters.temperature` nesting to avoid implying the old top-level shape is
+still valid, but Milestone 4 does not load configurable models or extra
+sampling parameters.
 
 ```yaml
+version: 1
 id: brainstorming_hot
 name: Brainstorming Hot
 provider_profile_id: local_or_api_default
 model: configurable
-temperature: 1.1
-top_p: 0.95
+parameters:
+  temperature: 1.1
+  top_p: 0.95
 system_prompt: >
   You are a brainstorming partner. Offer several options, call out consequences,
   and do not assume any suggestion is canon until the author accepts it.
 ```
 
-## Provider capability matrix
+## Future provider capability matrix
+
+This is Milestone 5+ conceptual configuration. Milestone 4 has no provider
+profile loading or capability discovery and would reject these documents.
 
 Each provider/model profile must declare capabilities:
 

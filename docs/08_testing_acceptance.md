@@ -95,23 +95,46 @@ Manual:
 - Mock provider patch requires acceptance.
 - Reject leaves scene unchanged.
 - Accept updates scene file.
+- Concurrent accept/accept and accept/reject attempts allow exactly one
+  terminal decision.
+- A byte-identical provider replacement is rejected before any transient run is
+  stored.
+- Opening the preview moves focus to the named review region once.
 
 Named automated evidence:
 
-- `internal/agent/model_test.go`
-- `internal/agent/registry_test.go`
-- `internal/agent/provider_test.go`
-- `internal/action/service_test.go`
-- `internal/action/integration_test.go`
-- `internal/story/scene_selection_test.go`
-- `internal/story/scene_patch_rollback_service_test.go`
-- `internal/api/action_handler_test.go`
-- `web/src/editor/selection.test.ts`
-- `web/src/editor/SceneEditor.actions.boundary.test.tsx`
+- `internal/agent/registry_test.go`: `TestLoaderStrictlyLoadsAndRejectsRegistryFiles`,
+  `TestLoaderRejectsStyleWithoutRequiredTemperature`
+- `internal/agent/model_test.go`: `TestRegistryValidationApplicabilityAndContext`
+- `internal/agent/provider_test.go`:
+  `TestMockProviderProducesDeterministicReplacementAndHonorsCancellation`
+- `internal/action/service_test.go`: `TestServiceRunRejectAndAcceptFlow`,
+  `TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims`,
+  `TestRunStoreEvictsTerminalRunsAndRejectsLiveCapacity`,
+  `TestRunStoreRejectsDuplicateRunIDs`,
+  `TestConcurrentAcceptsAllowExactlyOneRunClaim`,
+  `TestConcurrentAcceptAndRejectAllowExactlyOneTerminalDecision`,
+  `TestRunRejectsByteIdenticalProviderOutputWithoutStoringRun`
+- `internal/action/integration_test.go`:
+  `TestMilestone4ActionFlowWithRealAdapters`
+- `internal/story/scene_selection_test.go`:
+  `TestValidateAndReplaceMarkdownSelection`
+- `internal/story/scene_patch_rollback_service_test.go`:
+  `TestAcceptScenePatchHandlesEveryPersistenceFailureBoundary`
+- `internal/api/action_handler_test.go`: `TestActionRoutesReturnExactJSONShapes`,
+  `TestActionRouteStatusMapping`,
+  `TestActionRoutesRejectMalformedContractInputs`,
+  `TestActionRegistryLoadFailuresReturnInternalServerError`
+- `web/src/editor/selection.test.ts`:
+  `counts words and converts UTF-8 byte ranges for multibyte selections`
+- `web/src/editor/SceneEditor.actions.boundary.test.tsx`:
+  `runs, rejects, and accepts scene actions through the fetch boundary`,
+  `disables actions for dirty drafts`
 
-This evidence includes strict required YAML parameters, malformed and duplicate
-HTTP input rejection, canonical-registry `500` mapping, duplicate transient-run
-ID protection, and acceptance rollback at write, index, and Git boundaries.
+This evidence covers strict registry schema rejection, exact HTTP contracts,
+service-level terminal-decision races, run-level no-op rejection, UTF-8 byte
+selection handling, rollback at write/index/Git boundaries, inline preview
+focus placement, and the no-second-save editor acceptance flow.
 
 ### Milestone 5
 

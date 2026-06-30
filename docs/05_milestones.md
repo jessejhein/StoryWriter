@@ -8,7 +8,7 @@ Each milestone is a sprint. Each sprint must leave the app working.
 
 ## Current status
 
-- Milestones 0 through 4: implemented; full check and race suites green on June 29, 2026.
+- Milestones 0 through 4: implemented; full check and race suites green on June 30, 2026.
 - Milestone 5: next incomplete phase.
 - Milestones 6 through 9: roadmap only.
 

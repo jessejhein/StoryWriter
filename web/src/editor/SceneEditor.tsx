@@ -99,6 +99,8 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
   const [rejectingAction, setRejectingAction] = useState(false)
   const [actionFeedback, setActionFeedback] = useState<ActionFeedback>(null)
   const sceneVersionRef = useRef(0)
+  const previewRegionRef = useRef<HTMLDivElement | null>(null)
+  const previewRunID = previewRun?.run_id ?? null
 
   const dirty = isDraftDirty(baseline, draft)
   const validationError = validateDraft(draft)
@@ -175,6 +177,13 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [dirty])
+
+  useEffect(() => {
+    if (previewRunID === null) {
+      return
+    }
+    previewRegionRef.current?.focus()
+  }, [previewRunID])
 
   function patchDraft(patch: Partial<Draft>) {
     setDraft((current) => {
@@ -570,7 +579,7 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
                     </>
                   )}
                   {previewRun && (
-                    <div className="ai-preview" role="region" aria-label="AI patch preview">
+                    <div ref={previewRegionRef} className="ai-preview" role="region" aria-label="AI patch preview" tabIndex={-1}>
                       <div className="ai-preview-grid">
                         <div>
                           <span className="section-label">Original</span>
