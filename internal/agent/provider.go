@@ -94,12 +94,16 @@ type Dispatcher struct {
 
 func NewDispatcher(resolver profileResolver, client *http.Client) *Dispatcher {
 	if client == nil {
-		client = &http.Client{
-			Timeout: 60 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
-		}
+		client = &http.Client{}
+	} else {
+		clientCopy := *client
+		client = &clientCopy
+	}
+	if client.Timeout == 0 {
+		client.Timeout = 60 * time.Second
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
 	}
 	return &Dispatcher{
 		resolver: resolver,
@@ -315,7 +319,6 @@ func joinProviderURL(baseURL, suffix string) (string, error) {
 
 func decodeStrictJSON(body []byte, target any) error {
 	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return err
 	}

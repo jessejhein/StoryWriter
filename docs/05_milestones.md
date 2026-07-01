@@ -198,6 +198,8 @@ Selection -> applicable agents -> mock patch -> diff preview -> accept/reject wo
 
 ## Milestone 5 — Real provider adapters and credential broker v1
 
+Status: complete June 30, 2026. Milestone 6 is the next incomplete phase.
+
 ### Goal
 
 Connect real model providers without leaking credentials into projects.

@@ -1,7 +1,7 @@
 # Storywork Documentation Standards
 
 **Last Updated:** June 2026
-**Version:** Milestone 4
+**Version:** Milestone 5
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
 
@@ -224,6 +224,8 @@ GET  /api/actions/available?surface={surface}&input_scope={scope}&scene_id={scen
 POST /api/actions/run
 POST /api/actions/{run_id}/accept
 POST /api/actions/{run_id}/reject
+GET  /api/provider-profiles
+PUT  /api/provider-profiles
 ```
 
 Mutation requests use strict JSON: unknown, missing, null, trailing, and
@@ -234,6 +236,11 @@ Milestone 4 action routes use strict UTF-8 byte selections into canonical scene
 Markdown, transient in-memory run records, explicit accept/reject decisions,
 and the existing scene mutation rollback/checkpoint guarantees. The durable
 contract remains `docs/13_milestone_4_task_prompt.md`.
+
+Milestone 5 adds strict application-level provider profile replacement,
+credential-readiness reporting, provider-aware style availability, and
+provider identity on transient action previews. Its durable contract is
+`docs/14_milestone_5_task_prompt.md`; no route accepts or returns credentials.
 
 Example:
 

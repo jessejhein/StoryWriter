@@ -371,3 +371,102 @@ func TestDispatcherClassifiesUnsafeProviderFailures(t *testing.T) {
 		})
 	}
 }
+
+// Test: successful provider envelopes may contain provider-specific metadata,
+// but trailing JSON must still be rejected.
+// Requirements: M5-R05, M5-R06, M5-R07.
+func TestDispatcherIgnoresProviderMetadataButRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
+
+	agentDefinition := Agent{
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 100},
+		ModelRequirements: ModelRequirements{MinContextTokens: 1},
+		ContextPolicy:     ContextPolicy{Required: []ContextPack{ContextSelectedText, ContextStyleSheet}},
+		RAGPolicy:         RAGPolicy{Mode: RAGModeNone},
+		Control:           Control{OutputMode: OutputModePatch, RequiresAcceptance: true},
+		Output:            Output{Type: OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	style := Style{Version: 2, ID: "real_style", Name: "Real Style", ProviderProfileID: "real_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"}
+	resolved := resolvedProfileStub{profile: provider.ResolvedProfile{Profile: provider.Profile{
+		ID: "real_profile", Type: provider.TypeOpenAICompatible, BaseURL: "https://api.example.test",
+		Auth:         provider.AuthConfig{Type: provider.AuthTypeNone},
+		Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192},
+		Readiness:    provider.ReadinessReady,
+	}}, found: true}
+
+	for _, testCase := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "metadata is ignored", body: `{"id":"chatcmpl-1","choices":[{"index":0,"message":{"role":"assistant","content":"Rewritten"},"finish_reason":"stop"}],"usage":{"total_tokens":12}}`},
+		{name: "trailing document is rejected", body: `{"choices":[{"message":{"content":"Rewritten"}}]} {}`, wantErr: true},
+	} {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(testCase.body))}, nil
+			})}
+			_, err := NewDispatcher(resolved, client).Generate(context.Background(), GenerateRequest{
+				Agent: agentDefinition, Style: style,
+				Packet:  ContextPacket{SelectedText: "Original", Style: style},
+				Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+			})
+			if testCase.wantErr && !errors.Is(err, ErrProviderRejected) {
+				t.Fatalf("Generate() error = %v, want provider rejection", err)
+			}
+			if !testCase.wantErr && err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+		})
+	}
+}
+
+// Test: dependency injection cannot disable the redirect-refusal policy or
+// forward a bearer credential to a redirected host.
+// Requirements: M5-R04, M5-R07.
+func TestDispatcherRefusesRedirectsWithInjectedClient(t *testing.T) {
+	t.Parallel()
+
+	requestCount := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestCount++
+		if requestCount > 1 {
+			if request.Header.Get("Authorization") != "" {
+				t.Fatal("authorization header was forwarded to redirect target")
+			}
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"choices":[{"message":{"content":"unsafe"}}]}`))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusFound, Header: http.Header{"Location": []string{"https://redirected.example/chat/completions"}}, Body: io.NopCloser(strings.NewReader("redirect body"))}, nil
+	})}
+	definition := Agent{
+		Version: 2, ID: "line_polish", Name: "Line Polish", Description: "Rewrite.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 10},
+		ModelRequirements: ModelRequirements{MinContextTokens: 1},
+		ContextPolicy:     ContextPolicy{Required: []ContextPack{ContextSelectedText, ContextStyleSheet}},
+		RAGPolicy:         RAGPolicy{Mode: RAGModeNone}, Control: Control{OutputMode: OutputModePatch, RequiresAcceptance: true},
+		Output: Output{Type: OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	style := Style{Version: 2, ID: "style", Name: "Style", ProviderProfileID: "hosted", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"}
+	resolver := resolvedProfileStub{profile: provider.ResolvedProfile{Profile: provider.Profile{
+		ID: "hosted", Type: provider.TypeOpenAICompatible, BaseURL: "https://origin.example/v1",
+		Auth:         provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "STORYWORK_KEY"},
+		Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192}, Readiness: provider.ReadinessReady,
+	}, Credential: provider.Credential{Value: "redirect-secret"}}, found: true}
+
+	_, err := NewDispatcher(resolver, client).Generate(context.Background(), GenerateRequest{
+		Agent: definition, Style: style, Packet: ContextPacket{SelectedText: "Original", Style: style},
+		Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+	})
+	if !errors.Is(err, ErrProviderRejected) {
+		t.Fatalf("Generate() error = %v, want provider rejection", err)
+	}
+	if requestCount != 1 {
+		t.Fatalf("outbound request count = %d, want 1", requestCount)
+	}
+}

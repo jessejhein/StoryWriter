@@ -299,3 +299,34 @@ func TestEnvironmentBrokerReadiness(t *testing.T) {
 		t.Fatalf("Resolve(missing) = (%q, %q)", credential.Value, readiness)
 	}
 }
+
+// Test: canonical YAML safely round-trips every punctuation form accepted in a
+// profile name rather than emitting an invalid plain YAML scalar.
+// Requirements: M5-R01, M5-R02.
+func TestStoreCanonicalNamesRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"A: B", "Name # variant", `Quoted "name"`, `Backslash \\ name`, "[Draft]"} {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "providers.yaml")
+			store := NewStore(path)
+			profiles := []Profile{{
+				ID: "local", Name: name, Type: TypeOllama, BaseURL: "http://127.0.0.1:11434",
+				Auth:         AuthConfig{Type: AuthTypeNone},
+				Capabilities: Capabilities{Chat: true, MaxContextTokens: 8192},
+			}}
+			if _, _, err := store.Save(context.Background(), profiles, nil); err != nil {
+				t.Fatalf("Save() error = %v", err)
+			}
+			loaded, _, err := store.Load(context.Background())
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if len(loaded) != 1 || loaded[0].Name != name {
+				t.Fatalf("Load() name = %q, want %q", loaded[0].Name, name)
+			}
+		})
+	}
+}

@@ -165,6 +165,27 @@ type requiredJSONField struct {
 	allowNull bool
 }
 
+type providerProfileRequest struct {
+	ID           *string                      `json:"id"`
+	Name         *string                      `json:"name"`
+	Type         *provider.Type               `json:"type"`
+	BaseURL      *string                      `json:"base_url"`
+	Auth         *providerAuthRequest         `json:"auth"`
+	Capabilities *providerCapabilitiesRequest `json:"capabilities"`
+}
+
+type providerAuthRequest struct {
+	Type          *provider.AuthType `json:"type"`
+	CredentialEnv *string            `json:"credential_env"`
+}
+
+type providerCapabilitiesRequest struct {
+	Chat             *bool `json:"chat"`
+	Streaming        *bool `json:"streaming"`
+	StructuredOutput *bool `json:"structured_output"`
+	MaxContextTokens *int  `json:"max_context_tokens"`
+}
+
 // NewHandler creates the full local Storywork HTTP router for the current milestone set.
 func NewHandler(projects ProjectStore, session ActiveProjectSession, stories StoryStore, version string) http.Handler {
 	mux := http.NewServeMux()
@@ -217,8 +238,8 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 	})
 	mux.HandleFunc("PUT /api/provider-profiles", func(writer http.ResponseWriter, request *http.Request) {
 		var putRequest struct {
-			Profiles         *[]provider.Profile `json:"profiles"`
-			ExpectedRevision *string             `json:"expected_revision"`
+			Profiles         *[]providerProfileRequest `json:"profiles"`
+			ExpectedRevision *string                   `json:"expected_revision"`
 		}
 		if err := decodeJSONWithRequiredFields(writer, request, &putRequest, 1<<20,
 			requiredJSONField{name: "profiles"},
@@ -242,7 +263,12 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 				return
 			}
 		}
-		profiles, revision, err := stories.SaveProviderProfiles(request.Context(), *putRequest.Profiles, putRequest.ExpectedRevision)
+		domainProfiles, err := decodeProviderProfiles(*putRequest.Profiles)
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		profiles, revision, err := stories.SaveProviderProfiles(request.Context(), domainProfiles, putRequest.ExpectedRevision)
 		if err != nil {
 			writeProviderError(writer, err)
 			return
@@ -774,6 +800,39 @@ func validateExactQuery(request *http.Request, allowed ...string) error {
 		}
 	}
 	return nil
+}
+
+func decodeProviderProfiles(requests []providerProfileRequest) ([]provider.Profile, error) {
+	profiles := make([]provider.Profile, 0, len(requests))
+	for index, item := range requests {
+		if item.ID == nil || item.Name == nil || item.Type == nil || item.BaseURL == nil || item.Auth == nil || item.Capabilities == nil {
+			return nil, fmt.Errorf("profile %d requires id, name, type, base_url, auth, and capabilities", index+1)
+		}
+		if item.Auth.Type == nil || item.Auth.CredentialEnv == nil {
+			return nil, fmt.Errorf("profile %d auth requires type and credential_env", index+1)
+		}
+		capabilities := item.Capabilities
+		if capabilities.Chat == nil || capabilities.Streaming == nil || capabilities.StructuredOutput == nil || capabilities.MaxContextTokens == nil {
+			return nil, fmt.Errorf("profile %d capabilities requires chat, streaming, structured_output, and max_context_tokens", index+1)
+		}
+		profiles = append(profiles, provider.Profile{
+			ID:      *item.ID,
+			Name:    *item.Name,
+			Type:    *item.Type,
+			BaseURL: *item.BaseURL,
+			Auth: provider.AuthConfig{
+				Type:          *item.Auth.Type,
+				CredentialEnv: *item.Auth.CredentialEnv,
+			},
+			Capabilities: provider.Capabilities{
+				Chat:             *capabilities.Chat,
+				Streaming:        *capabilities.Streaming,
+				StructuredOutput: *capabilities.StructuredOutput,
+				MaxContextTokens: *capabilities.MaxContextTokens,
+			},
+		})
+	}
+	return profiles, nil
 }
 
 func requireEmptyBody(request *http.Request) error {

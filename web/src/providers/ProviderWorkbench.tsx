@@ -47,9 +47,12 @@ function normalizeProfiles(profiles: ProviderProfile[]) {
 }
 
 function validateProfiles(profiles: ProviderProfile[]): string | null {
+  const profileIDs = new Set<string>()
   for (const profile of profiles) {
     if (!profile.id.trim()) return 'Profile ID is required.'
     if (!/^[a-z][a-z0-9_]{0,63}$/.test(profile.id.trim())) return 'Profile IDs must match the documented format.'
+    if (profileIDs.has(profile.id.trim())) return 'Profile IDs must be unique.'
+    profileIDs.add(profile.id.trim())
     if (!profile.name.trim()) return 'Profile name is required.'
     if (!profile.base_url.trim()) return 'Base URL is required.'
     if (profile.auth.type === 'bearer_env' && !/^STORYWORK_[A-Z][A-Z0-9_]{0,127}$/.test(profile.auth.credential_env)) {
@@ -61,8 +64,8 @@ function validateProfiles(profiles: ProviderProfile[]): string | null {
     if (profile.type === 'ollama' && profile.auth.type !== 'none') {
       return 'Ollama profiles use no auth in Milestone 5.'
     }
-    if (profile.capabilities.max_context_tokens < 1) {
-      return 'Context token limit must be at least 1.'
+    if (profile.capabilities.max_context_tokens < 1 || profile.capabilities.max_context_tokens > 10_000_000) {
+      return 'Context token limit must be between 1 and 10,000,000.'
     }
   }
   return null
@@ -116,7 +119,7 @@ export default function ProviderWorkbench({ onDirtyChange }: Props) {
       if (profileIndex !== index) return profile
       return { ...profile, ...patch }
     }))
-    if (feedback?.kind !== 'saved') setFeedback(null)
+    setFeedback(null)
   }
 
   function patchAuth(index: number, patch: Partial<ProviderProfile['auth']>) {
@@ -124,7 +127,7 @@ export default function ProviderWorkbench({ onDirtyChange }: Props) {
       if (profileIndex !== index) return profile
       return { ...profile, auth: { ...profile.auth, ...patch } }
     }))
-    if (feedback?.kind !== 'saved') setFeedback(null)
+    setFeedback(null)
   }
 
   function patchCapabilities(index: number, patch: Partial<ProviderProfile['capabilities']>) {
@@ -132,7 +135,7 @@ export default function ProviderWorkbench({ onDirtyChange }: Props) {
       if (profileIndex !== index) return profile
       return { ...profile, capabilities: { ...profile.capabilities, ...patch } }
     }))
-    if (feedback?.kind !== 'saved') setFeedback(null)
+    setFeedback(null)
   }
 
   function addProfile() {

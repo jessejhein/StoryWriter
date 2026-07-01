@@ -100,6 +100,8 @@ func TestProviderProfileRouteValidationAndStatusMapping(t *testing.T) {
 		{name: "bad json", method: http.MethodPut, path: "/api/provider-profiles", body: `{`, status: http.StatusBadRequest},
 		{name: "missing profiles", method: http.MethodPut, path: "/api/provider-profiles", body: `{"expected_revision":null}`, status: http.StatusBadRequest},
 		{name: "unknown field", method: http.MethodPut, path: "/api/provider-profiles", body: `{"profiles":[],"expected_revision":null,"extra":true}`, status: http.StatusBadRequest},
+		{name: "missing nested credential env", method: http.MethodPut, path: "/api/provider-profiles", body: `{"profiles":[{"id":"local","name":"Local","type":"ollama","base_url":"http://127.0.0.1:11434","auth":{"type":"none"},"capabilities":{"chat":true,"streaming":false,"structured_output":false,"max_context_tokens":8192}}],"expected_revision":null}`, status: http.StatusBadRequest},
+		{name: "missing nested capability", method: http.MethodPut, path: "/api/provider-profiles", body: `{"profiles":[{"id":"local","name":"Local","type":"ollama","base_url":"http://127.0.0.1:11434","auth":{"type":"none","credential_env":""},"capabilities":{"chat":true,"structured_output":false,"max_context_tokens":8192}}],"expected_revision":null}`, status: http.StatusBadRequest},
 		{name: "bad expected revision shape", method: http.MethodPut, path: "/api/provider-profiles", body: `{"profiles":[],"expected_revision":"bad"}`, status: http.StatusBadRequest},
 		{name: "method not allowed", method: http.MethodPost, path: "/api/provider-profiles", body: ``, status: http.StatusMethodNotAllowed},
 	}

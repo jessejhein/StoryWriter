@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -329,8 +330,11 @@ func yamlScalar(value string) string {
 	if value == "" {
 		return `""`
 	}
-	if strings.HasPrefix(value, " ") || strings.HasSuffix(value, " ") {
-		return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	if strings.HasPrefix(value, " ") || strings.HasSuffix(value, " ") ||
+		strings.Contains(value, ": ") || strings.Contains(value, " #") ||
+		strings.ContainsAny(value, `[]{}#,>&*!|>'"%@\x60\\`) ||
+		strings.EqualFold(value, "null") || strings.EqualFold(value, "true") || strings.EqualFold(value, "false") {
+		return strconv.Quote(value)
 	}
 	return value
 }

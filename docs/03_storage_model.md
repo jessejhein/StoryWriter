@@ -217,6 +217,19 @@ SQLite stores derived/query state:
 
 SQLite must not be the only copy of canonical prose, Codex, outline, agents, or styles.
 
+## Application provider configuration
+
+Provider profiles are application configuration, not story-project state. The
+single canonical document is `<config-dir>/providers.yaml`, where the config
+directory is `STORYWORK_CONFIG_DIR` or the platform user-config directory plus
+`storywork`. It is atomically replaced with optimistic SHA-256 revisions and
+conservative directory/file permissions.
+
+The document contains endpoint URLs, capability declarations, and environment
+variable names only. Credential values never enter this file, a story folder,
+Git, SQLite, browser storage, or transient action runs. Deleting a story index
+or switching projects does not alter provider configuration.
+
 ## Minimal initial tables
 
 Milestone 0 can start with:
