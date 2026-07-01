@@ -208,6 +208,124 @@ func TestLoaderRejectsStyleWithoutRequiredTemperature(t *testing.T) {
 	}
 }
 
+// BDD trace:
+//   - Requirements: M5-R08.
+//   - Scenario: 5.2.1.
+//   - Test purpose: verify the loader keeps version-1 mock styles valid while
+//     dispatching version-2 agent/style schemas strictly without silently
+//     accepting version-mismatched fields.
+func TestLoaderDispatchesVersionSpecificAgentAndStyleSchemas(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(projectPath, "agents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(agents) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(projectPath, "styles"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(styles) error = %v", err)
+	}
+
+	mustWriteFile(t, filepath.Join(projectPath, "agents", "line_polish.yaml"), strings.Join([]string{
+		"version: 2",
+		"id: line_polish",
+		"name: Line Polish",
+		"description: Rewrite selected prose.",
+		"applies_when:",
+		"  surfaces: [editor]",
+		"  input_scopes: [selection]",
+		"  min_words: 20",
+		"  max_words: 1500",
+		"model_requirements:",
+		"  min_context_tokens: 2048",
+		"  supports_streaming: false",
+		"  supports_structured_output: false",
+		"context_policy:",
+		"  required: [selected_text, style_sheet]",
+		"  optional: [surrounding_paragraphs]",
+		"  forbidden: [global_codex_rag, raw_import_notes]",
+		"rag_policy:",
+		"  mode: none",
+		"control:",
+		"  output_mode: patch",
+		"  requires_acceptance: true",
+		"  can_modify_canon: false",
+		"output:",
+		"  type: replacement_text",
+		"  requires_diff_preview: true",
+		"",
+	}, "\n"))
+	mustWriteFile(t, filepath.Join(projectPath, "styles", "mock.yaml"), strings.Join([]string{
+		"version: 1",
+		"id: precise_editor",
+		"name: Precise Editor",
+		"provider_profile_id: mock_default",
+		"model: mock",
+		"parameters:",
+		"  temperature: 0.2",
+		"system_prompt: Prompt",
+		"",
+	}, "\n"))
+	mustWriteFile(t, filepath.Join(projectPath, "styles", "local.yaml"), strings.Join([]string{
+		"version: 2",
+		"id: local_precise_editor",
+		"name: Local Precise Editor",
+		"provider_profile_id: local_openai",
+		"model: local-model-name",
+		"parameters:",
+		"  temperature: 0.2",
+		"system_prompt: Prompt",
+		"",
+	}, "\n"))
+
+	registry, err := NewLoader().Load(projectPath)
+	if err != nil {
+		t.Fatalf("Load(v2) error = %v", err)
+	}
+	if len(registry.Agents) != 1 || registry.Agents[0].Version != 2 || registry.Agents[0].ModelRequirements.MinContextTokens != 2048 {
+		t.Fatalf("agents = %#v", registry.Agents)
+	}
+	if len(registry.Styles) != 2 || registry.Styles[0].Version != 2 || registry.Styles[1].Version != 1 {
+		t.Fatalf("styles = %#v", registry.Styles)
+	}
+
+	badProject := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(badProject, "agents"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(bad agents) error = %v", err)
+	}
+	mustWriteFile(t, filepath.Join(badProject, "agents", "bad.yaml"), strings.Join([]string{
+		"version: 1",
+		"id: line_polish",
+		"name: Line Polish",
+		"description: Rewrite selected prose.",
+		"applies_when:",
+		"  surfaces: [editor]",
+		"  input_scopes: [selection]",
+		"  min_words: 20",
+		"  max_words: 1500",
+		"model_requirements:",
+		"  min_context_tokens: 2048",
+		"  supports_streaming: false",
+		"  supports_structured_output: false",
+		"context_policy:",
+		"  required: [selected_text, style_sheet]",
+		"  optional: [surrounding_paragraphs]",
+		"  forbidden: [global_codex_rag, raw_import_notes]",
+		"rag_policy:",
+		"  mode: none",
+		"control:",
+		"  output_mode: patch",
+		"  requires_acceptance: true",
+		"  can_modify_canon: false",
+		"output:",
+		"  type: replacement_text",
+		"  requires_diff_preview: true",
+		"",
+	}, "\n"))
+	if _, err := NewLoader().LoadAgents(badProject); err == nil || !strings.Contains(err.Error(), "field model_requirements not found") {
+		t.Fatalf("LoadAgents(version 1 with v2 fields) error = %v", err)
+	}
+}
+
 func mustWriteFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {

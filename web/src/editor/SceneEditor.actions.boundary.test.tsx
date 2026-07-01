@@ -63,11 +63,13 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
         json: async () => ({
           styles: [{
             id: 'precise_editor',
+            version: 1,
             name: 'Precise Editor',
             provider_profile_id: 'mock_default',
             model: 'mock',
             temperature: 0.2,
             system_prompt: 'You are a careful prose editor.',
+            provider_readiness: 'ready',
           }],
         }),
       }
@@ -106,6 +108,7 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
             output_mode: 'patch',
             patch: { original: 'Luz ágil', replacement: 'Mock polished: Luz ágil' },
             context_summary: { packs_used: ['selected_text', 'style_sheet'], rag_mode: 'none' },
+            provider: { profile_id: 'mock_default', type: 'openai_compatible', model: 'mock' },
           }),
         }
       }
@@ -122,6 +125,7 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
           output_mode: 'patch',
           patch: { original: 'Alpha beta', replacement: 'Mock polished: Alpha beta' },
           context_summary: { packs_used: ['selected_text', 'style_sheet'], rag_mode: 'none' },
+          provider: { profile_id: 'mock_default', type: 'openai_compatible', model: 'mock' },
         }),
       }
     }
@@ -158,7 +162,7 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
   await waitFor(() => expect(screen.getByText('Mock polished: Alpha beta')).toBeInTheDocument())
   const previewRegion = screen.getByRole('region', { name: 'AI patch preview' })
   expect(document.activeElement).toBe(previewRegion)
-  expect(screen.getByText('Context packs: selected_text, style_sheet. RAG mode: none.')).toBeInTheDocument()
+  expect(screen.getByText('Context packs: selected_text, style_sheet. RAG mode: none. Provider: mock_default (openai_compatible, model mock).')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Copy replacement' }))
   await waitFor(() => expect(clipboardWrite).toHaveBeenCalledWith('Mock polished: Alpha beta'))
   fireEvent.click(screen.getByRole('button', { name: 'Reject replacement' }))

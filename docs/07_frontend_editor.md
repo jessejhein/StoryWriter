@@ -52,6 +52,14 @@ Reasons:
 - Show model/provider profile and capabilities.
 - Show which agents apply to current state.
 
+### Provider settings screen
+
+- Reachable before or after opening a project.
+- Load application-level provider profiles and public readiness.
+- Add, edit, and remove non-secret profiles.
+- Explain that bearer keys must come from named backend environment variables.
+- Keep dirty-draft navigation protection and conflict reload handling.
+
 ### Import review screen
 
 - Show imported files.
@@ -103,7 +111,9 @@ The current implementation uses an inline preview region with side-by-side
 original and replacement text, whitespace-preserving `<pre>` blocks, and
 keyboard-operable buttons for Copy, Accept, and Reject. Navigation confirmation
 remains tied to dirty authored drafts that would lose unsaved user work, not to
-a discardable clean mock preview.
+a discardable clean preview. Milestone 5 adds non-secret provider identity
+(profile ID, provider type, model) to that preview while continuing to hide
+endpoint URLs and credential references.
 
 ## Do not build yet
 

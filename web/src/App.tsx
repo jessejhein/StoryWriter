@@ -12,12 +12,17 @@ import ConfirmDialog from './components/ConfirmDialog'
 import CodexWorkbench from './codex/CodexWorkbench'
 import SceneEditor from './editor/SceneEditor'
 import OutlineWorkbench from './outline/OutlineWorkbench'
+import ProviderWorkbench from './providers/ProviderWorkbench'
 import './styles.css'
 
 type ProjectView =
   | { mode: 'outline' }
   | { mode: 'codex' }
   | { mode: 'scene'; sceneID: string }
+
+type ShellView =
+  | { area: 'project'; view: ProjectView }
+  | { area: 'providers' }
 
 /**
  * App
@@ -29,10 +34,10 @@ export default function App() {
   const [name, setName] = useState('')
   const [path, setPath] = useState('')
   const [project, setProject] = useState<Project | null>(null)
-  const [view, setView] = useState<ProjectView>({ mode: 'outline' })
+  const [shellView, setShellView] = useState<ShellView>({ area: 'project', view: { mode: 'outline' } })
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
-  const [pendingView, setPendingView] = useState<ProjectView | null>(null)
+  const [pendingView, setPendingView] = useState<ShellView | null>(null)
 
   useEffect(() => {
     getHealth()
@@ -58,22 +63,22 @@ export default function App() {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
     const mode = submitter?.value === 'open' ? 'open' : 'create'
-    setError('')
+      setError('')
     try {
       setProject(mode === 'create' ? await createProject(name, path) : await openProject(path))
-      setView({ mode: 'outline' })
+      setShellView({ area: 'project', view: { mode: 'outline' } })
       setDirty(false)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Request failed')
     }
   }
 
-  function navigate(nextView: ProjectView) {
-    if (dirty && !sameProjectView(view, nextView)) {
+  function navigate(nextView: ShellView) {
+    if (dirty && !sameShellView(shellView, nextView)) {
       setPendingView(nextView)
       return
     }
-    setView(nextView)
+    setShellView(nextView)
     setDirty(false)
   }
 
@@ -81,7 +86,7 @@ export default function App() {
     if (!pendingView) {
       return
     }
-    setView(pendingView)
+    setShellView(pendingView)
     setPendingView(null)
     setDirty(false)
   }
@@ -92,9 +97,28 @@ export default function App() {
         <p className="eyebrow">Local-first writing environment</p>
         <h1>AI Story Workshop</h1>
         <span className="status">{health}</span>
+        <div className="actions app-header-actions">
+          <button type="button" className={shellView.area === 'providers' ? '' : 'secondary'} onClick={() => navigate({ area: 'providers' })}>
+            Provider settings
+          </button>
+          {!project && (
+            <button type="button" className={shellView.area === 'project' ? '' : 'secondary'} onClick={() => navigate({ area: 'project', view: { mode: 'outline' } })}>
+              Project setup
+            </button>
+          )}
+          {project && (
+            <button type="button" className={shellView.area === 'project' ? '' : 'secondary'} onClick={() => navigate({ area: 'project', view: { mode: 'outline' } })}>
+              Story project
+            </button>
+          )}
+        </div>
       </header>
 
-      {!project && (
+      {shellView.area === 'providers' && (
+        <ProviderWorkbench onDirtyChange={setDirty} />
+      )}
+
+      {!project && shellView.area === 'project' && (
         <section className="workbench">
           <div className="intro">
             <p className="folio">Milestone 1 / Outline</p>
@@ -120,20 +144,20 @@ export default function App() {
         </section>
       )}
 
-      {project && (
+      {project && shellView.area === 'project' && (
         <>
           <nav className="project-nav">
-            <button type="button" onClick={() => navigate({ mode: 'outline' })}>Outline</button>
-            <button type="button" onClick={() => navigate({ mode: 'codex' })}>Codex</button>
+            <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'outline' } })}>Outline</button>
+            <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'codex' } })}>Codex</button>
           </nav>
-          {view.mode === 'outline' ? (
-            <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigate({ mode: 'scene', sceneID })} />
-          ) : view.mode === 'scene' ? (
+          {shellView.view.mode === 'outline' ? (
+            <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigate({ area: 'project', view: { mode: 'scene', sceneID } })} />
+          ) : shellView.view.mode === 'scene' ? (
             <SceneEditor
-              key={view.sceneID}
+              key={shellView.view.sceneID}
               project={project}
-              sceneID={view.sceneID}
-              onBack={() => navigate({ mode: 'outline' })}
+              sceneID={shellView.view.sceneID}
+              onBack={() => navigate({ area: 'project', view: { mode: 'outline' } })}
               onDirtyChange={setDirty}
             />
           ) : (
@@ -153,6 +177,12 @@ export default function App() {
   )
 }
 
-function sameProjectView(left: ProjectView, right: ProjectView) {
-  return left.mode === right.mode && (left.mode !== 'scene' || right.mode !== 'scene' || left.sceneID === right.sceneID)
+function sameShellView(left: ShellView, right: ShellView) {
+  if (left.area !== right.area) {
+    return false
+  }
+  if (left.area === 'providers' || right.area === 'providers') {
+    return true
+  }
+  return left.view.mode === right.view.mode && (left.view.mode !== 'scene' || right.view.mode !== 'scene' || left.view.sceneID === right.view.sceneID)
 }

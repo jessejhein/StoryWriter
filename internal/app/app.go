@@ -5,6 +5,8 @@ package app
 import (
 	"context"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"storywork/internal/action"
@@ -14,14 +16,17 @@ import (
 	"storywork/internal/gitstore"
 	"storywork/internal/index"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 	"storywork/internal/storyfile"
 	"storywork/internal/workspace"
 )
 
 type compositeStore struct {
-	stories *story.Service
-	actions *action.Service
+	stories     *story.Service
+	actions     *action.Service
+	providers   *provider.Service
+	providerErr error
 }
 
 func (s *compositeStore) Outline(ctx context.Context) (story.Outline, error) {
@@ -84,6 +89,18 @@ func (s *compositeStore) Accept(ctx context.Context, runID, expectedRevision str
 func (s *compositeStore) Reject(ctx context.Context, runID string) (action.Run, error) {
 	return s.actions.Reject(ctx, runID)
 }
+func (s *compositeStore) ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error) {
+	if s.providerErr != nil {
+		return nil, nil, s.providerErr
+	}
+	return s.providers.List(ctx)
+}
+func (s *compositeStore) SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
+	if s.providerErr != nil {
+		return nil, nil, s.providerErr
+	}
+	return s.providers.Save(ctx, profiles, expectedRevision)
+}
 
 // NewHandler creates the production HTTP application for the supplied version string.
 func NewHandler(version string) http.Handler {
@@ -98,9 +115,29 @@ func NewHandler(version string) http.Handler {
 		agent.NewLoader(),
 		stories,
 		stories,
-		agent.NewMockProvider(),
+		nil,
 		action.NewRunStore(),
 		action.NewRandomIDGenerator(),
 	)
-	return api.NewHandler(projects, session, &compositeStore{stories: stories, actions: actions}, version)
+	configDir, configErr := provider.ResolveConfigDir(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
+	providerService := provider.NewService(
+		provider.NewStore(filepath.Join(configDir, "providers.yaml")),
+		provider.EnvironmentBroker{LookupEnv: os.LookupEnv},
+	)
+	actions = action.NewService(
+		session,
+		agent.NewLoader(),
+		stories,
+		stories,
+		agent.NewDispatcher(providerService, nil),
+		action.NewRunStore(),
+		action.NewRandomIDGenerator(),
+	)
+	actions.SetProfileResolver(providerService)
+	return api.NewHandler(projects, session, &compositeStore{
+		stories:     stories,
+		actions:     actions,
+		providers:   providerService,
+		providerErr: configErr,
+	}, version)
 }

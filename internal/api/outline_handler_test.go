@@ -16,6 +16,7 @@ import (
 	"storywork/internal/api"
 	"storywork/internal/codex"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 )
 
@@ -71,6 +72,10 @@ type storyServiceStub struct {
 	agentsErr            error
 	stylesErr            error
 	availableActionsErr  error
+	providerProfiles     []provider.Profile
+	providerRevision     *string
+	providerProfilesErr  error
+	saveProviderErr      error
 	actionAcceptErr      error
 	actionRejectErr      error
 	actionAcceptRun      action.Run
@@ -81,6 +86,8 @@ type storyServiceStub struct {
 	actionAcceptRevision string
 	actionRejectRunID    string
 	availableInput       agent.AvailabilityInput
+	saveProviderInput    []provider.Profile
+	saveProviderExpected *string
 }
 
 func (s *storyServiceStub) Outline(context.Context) (story.Outline, error) {
@@ -184,6 +191,16 @@ func (s *storyServiceStub) Accept(_ context.Context, runID, expectedRevision str
 func (s *storyServiceStub) Reject(_ context.Context, runID string) (action.Run, error) {
 	s.actionRejectRunID = runID
 	return s.actionRejectRun, s.actionRejectErr
+}
+
+func (s *storyServiceStub) ProviderProfiles(context.Context) ([]provider.Profile, *string, error) {
+	return s.providerProfiles, s.providerRevision, s.providerProfilesErr
+}
+
+func (s *storyServiceStub) SaveProviderProfiles(_ context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
+	s.saveProviderInput = profiles
+	s.saveProviderExpected = expectedRevision
+	return s.providerProfiles, s.providerRevision, s.saveProviderErr
 }
 
 // BDD trace:

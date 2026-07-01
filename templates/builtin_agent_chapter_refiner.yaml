@@ -1,4 +1,4 @@
-version: 1
+version: 2
 id: chapter_refiner
 name: Chapter Refiner
 description: Refine a full chapter for flow, clarity, continuity, and scene-level cohesion.
@@ -9,6 +9,10 @@ applies_when:
     - chapter
   min_words: 1000
   max_words: 12000
+model_requirements:
+  min_context_tokens: 2048
+  supports_streaming: false
+  supports_structured_output: false
 context_policy:
   required:
     - current_chapter

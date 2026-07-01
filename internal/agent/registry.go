@@ -47,39 +47,66 @@ func (l *Loader) LoadAgents(projectPath string) ([]Agent, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", slashPath(file, projectPath), err)
 		}
-		var document struct {
-			Version     int    `yaml:"version"`
-			ID          string `yaml:"id"`
-			Name        string `yaml:"name"`
-			Description string `yaml:"description"`
-			AppliesWhen struct {
-				Surfaces    []Surface    `yaml:"surfaces"`
-				InputScopes []InputScope `yaml:"input_scopes"`
-				MinWords    int          `yaml:"min_words"`
-				MaxWords    int          `yaml:"max_words"`
-			} `yaml:"applies_when"`
-			ContextPolicy struct {
-				Required  []ContextPack `yaml:"required"`
-				Optional  []ContextPack `yaml:"optional"`
-				Forbidden []ContextPack `yaml:"forbidden"`
-			} `yaml:"context_policy"`
-			RAGPolicy struct {
-				Mode RAGMode `yaml:"mode"`
-			} `yaml:"rag_policy"`
-			Control struct {
-				OutputMode         OutputMode `yaml:"output_mode"`
-				RequiresAcceptance bool       `yaml:"requires_acceptance"`
-				CanModifyCanon     bool       `yaml:"can_modify_canon"`
-			} `yaml:"control"`
-			Output struct {
-				Type                OutputType `yaml:"type"`
-				RequiresDiffPreview bool       `yaml:"requires_diff_preview"`
-			} `yaml:"output"`
-		}
-		if err := decodeSingleYAML(contents, &document); err != nil {
+		item, err := decodeAgentDocument(contents)
+		if err != nil {
 			return nil, fmt.Errorf("%s: %v: %w", slashPath(file, projectPath), err, ErrRegistryLoad)
 		}
-		item, err := ValidateAgent(Agent{
+		if prior, ok := seen[item.ID]; ok {
+			return nil, fmt.Errorf("duplicate agent id %q in %s and %s: %w", item.ID, prior, slashPath(file, projectPath), ErrRegistryLoad)
+		}
+		seen[item.ID] = slashPath(file, projectPath)
+		items = append(items, item)
+	}
+	SortAgents(items)
+	return items, nil
+}
+
+func decodeAgentDocument(contents []byte) (Agent, error) {
+	var header struct {
+		Version int `yaml:"version"`
+	}
+	if err := yaml.Unmarshal(contents, &header); err != nil {
+		return Agent{}, err
+	}
+	type appliesWhenDoc struct {
+		Surfaces    []Surface    `yaml:"surfaces"`
+		InputScopes []InputScope `yaml:"input_scopes"`
+		MinWords    int          `yaml:"min_words"`
+		MaxWords    int          `yaml:"max_words"`
+	}
+	type contextPolicyDoc struct {
+		Required  []ContextPack `yaml:"required"`
+		Optional  []ContextPack `yaml:"optional"`
+		Forbidden []ContextPack `yaml:"forbidden"`
+	}
+	type controlDoc struct {
+		OutputMode         OutputMode `yaml:"output_mode"`
+		RequiresAcceptance bool       `yaml:"requires_acceptance"`
+		CanModifyCanon     bool       `yaml:"can_modify_canon"`
+	}
+	type outputDoc struct {
+		Type                OutputType `yaml:"type"`
+		RequiresDiffPreview bool       `yaml:"requires_diff_preview"`
+	}
+	switch header.Version {
+	case 1:
+		var document struct {
+			Version       int              `yaml:"version"`
+			ID            string           `yaml:"id"`
+			Name          string           `yaml:"name"`
+			Description   string           `yaml:"description"`
+			AppliesWhen   appliesWhenDoc   `yaml:"applies_when"`
+			ContextPolicy contextPolicyDoc `yaml:"context_policy"`
+			RAGPolicy     struct {
+				Mode RAGMode `yaml:"mode"`
+			} `yaml:"rag_policy"`
+			Control controlDoc `yaml:"control"`
+			Output  outputDoc  `yaml:"output"`
+		}
+		if err := decodeSingleYAML(contents, &document); err != nil {
+			return Agent{}, err
+		}
+		return ValidateAgent(Agent{
 			Version:     document.Version,
 			ID:          document.ID,
 			Name:        document.Name,
@@ -106,17 +133,63 @@ func (l *Loader) LoadAgents(projectPath string) ([]Agent, error) {
 				RequiresDiffPreview: document.Output.RequiresDiffPreview,
 			},
 		})
-		if err != nil {
-			return nil, fmt.Errorf("%s: %v: %w", slashPath(file, projectPath), err, ErrRegistryLoad)
+	case 2:
+		var document struct {
+			Version           int            `yaml:"version"`
+			ID                string         `yaml:"id"`
+			Name              string         `yaml:"name"`
+			Description       string         `yaml:"description"`
+			AppliesWhen       appliesWhenDoc `yaml:"applies_when"`
+			ModelRequirements struct {
+				MinContextTokens         int  `yaml:"min_context_tokens"`
+				SupportsStreaming        bool `yaml:"supports_streaming"`
+				SupportsStructuredOutput bool `yaml:"supports_structured_output"`
+			} `yaml:"model_requirements"`
+			ContextPolicy contextPolicyDoc `yaml:"context_policy"`
+			RAGPolicy     struct {
+				Mode RAGMode `yaml:"mode"`
+			} `yaml:"rag_policy"`
+			Control controlDoc `yaml:"control"`
+			Output  outputDoc  `yaml:"output"`
 		}
-		if prior, ok := seen[item.ID]; ok {
-			return nil, fmt.Errorf("duplicate agent id %q in %s and %s: %w", item.ID, prior, slashPath(file, projectPath), ErrRegistryLoad)
+		if err := decodeSingleYAML(contents, &document); err != nil {
+			return Agent{}, err
 		}
-		seen[item.ID] = slashPath(file, projectPath)
-		items = append(items, item)
+		return ValidateAgent(Agent{
+			Version:     document.Version,
+			ID:          document.ID,
+			Name:        document.Name,
+			Description: document.Description,
+			AppliesWhen: ApplicabilityRule{
+				Surfaces:    document.AppliesWhen.Surfaces,
+				InputScopes: document.AppliesWhen.InputScopes,
+				MinWords:    document.AppliesWhen.MinWords,
+				MaxWords:    document.AppliesWhen.MaxWords,
+			},
+			ModelRequirements: ModelRequirements{
+				MinContextTokens:         document.ModelRequirements.MinContextTokens,
+				SupportsStreaming:        document.ModelRequirements.SupportsStreaming,
+				SupportsStructuredOutput: document.ModelRequirements.SupportsStructuredOutput,
+			},
+			ContextPolicy: ContextPolicy{
+				Required:  document.ContextPolicy.Required,
+				Optional:  document.ContextPolicy.Optional,
+				Forbidden: document.ContextPolicy.Forbidden,
+			},
+			RAGPolicy: RAGPolicy{Mode: document.RAGPolicy.Mode},
+			Control: Control{
+				OutputMode:         document.Control.OutputMode,
+				RequiresAcceptance: document.Control.RequiresAcceptance,
+				CanModifyCanon:     document.Control.CanModifyCanon,
+			},
+			Output: Output{
+				Type:                document.Output.Type,
+				RequiresDiffPreview: document.Output.RequiresDiffPreview,
+			},
+		})
+	default:
+		return Agent{}, fmt.Errorf("agent version %d is unsupported", header.Version)
 	}
-	SortAgents(items)
-	return items, nil
 }
 
 func (l *Loader) LoadStyles(projectPath string) ([]Style, error) {
