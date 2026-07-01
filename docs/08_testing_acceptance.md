@@ -181,38 +181,56 @@ focus placement, and the no-second-save editor acceptance flow.
 - `internal/importer/source_store_test.go`:
   `TestSourceStorePrepareSnapshotCopiesEligibleMarkdownFiles`,
   `TestSourceStorePrepareSnapshotRejectsInvalidSourceDirectory`,
-  `TestSourceStorePrepareSnapshotRejectsSymlinkAndInvalidUTF8`
+  `TestSourceStorePrepareSnapshotRejectsSymlinkAndInvalidUTF8`,
+  `TestPreparedSnapshotPublishNeverOverwritesExistingImport`
 - `internal/importer/chunk_test.go`:
   `TestChunkMarkdownSplitsDeterministicallyAtHeadingAndBlankBoundaries`,
-  `TestChunkMarkdownHandlesOversizedLinesWithoutSplittingRunesOrLines`
+  `TestChunkMarkdownHandlesOversizedLinesWithoutSplittingRunesOrLines`,
+  `TestChunkStoreRebuildsStructurallyValidButCorruptCache`,
+  `TestChunkStoreRejectsCanonicalSnapshotDigestMismatch`
 - `internal/extract/model_test.go`:
   `TestValidateRequestRejectsUnknownModeAndOversizedPayload`,
+  `TestValidateRequestRejectsMalformedChunkMetadata`,
   `TestParseResponseRequiresStrictSingleObject`
 - `internal/importer/candidate_model_test.go`:
   `TestNormalizeCandidateValidatesKindsProvenanceAndDecisionState`,
-  `TestNormalizeCandidateRejectsUnsupportedProposalVersionAndMismatchedRevision`
+  `TestNormalizeCandidateRejectsUnsupportedProposalVersionAndMismatchedRevision`,
+  `TestCandidateStoreRejectsUnknownYAMLFields`,
+  `TestNormalizeCandidateRejectsMalformedAcceptedCanonicalReference`
 - `internal/importer/import_service_test.go`:
   `TestImportServiceRequiresActiveCleanProject`,
   `TestImportServicePublishesSnapshotRebuildsIndexAndCommits`,
   `TestExtractPublishesValidatedCandidatesWithoutCanonMutation`,
-  `TestReviewOperationsEditDiscardMergeAndAccept`
+  `TestReviewOperationsEditDiscardMergeAndAccept`,
+  `TestImportServiceRollsBackPublishedSnapshotWhenCheckpointFails`,
+  `TestExtractionCheckpointFailureLeavesNoPartialCandidateBatch`,
+  `TestAcceptCandidateCheckpointFailureRestoresCandidateAndCanonicalMutation`,
+  `TestConcurrentCandidateDecisionsHaveExactlyOneWinner`
+- `internal/app/milestone6_integration_test.go`:
+  `TestMilestone6EndToEndWithRealAdapters`
 - `internal/story/import_mutation_service_test.go`:
   `TestApplyImportMutationCreatesCanonicalFilesWithoutCheckpoint`
 - `internal/api/import_handler_test.go`:
   `TestImportRoutesReturnExactJSONShapes`,
-  `TestImportRouteStatusMapping`
+  `TestImportRouteStatusMapping`,
+  `TestImportMutationRoutesRejectMalformedBodiesAndOversizeWithContractStatuses`,
+  `TestImportErrorsDoNotDiscloseSensitiveAdapterDetails`
 - `web/src/api.imports.test.ts`:
   `uses the documented import-review routes and JSON bodies`
 - `web/src/imports/ImportReviewWorkbench.test.tsx`:
   `imports notes, extracts candidates, and accepts one candidate`,
-  `confirms candidate navigation when a draft is dirty`
+  `confirms candidate navigation when a draft is dirty`,
+  `preserves a dirty draft on conflict and offers an explicit reload`,
+  `ignores a stale chunk response after import selection changes`
 - `web/src/App.imports_navigation.test.tsx`:
   `opens import review after project creation`
 
-This evidence covers snapshot import validation, no external-path retention,
-deterministic chunking, strict extraction decoding, durable candidate queue
-rules, review transitions, story-owned acceptance, exact HTTP contracts, UI
-dirty-state protection, and the full import-to-accept flow.
+The real-adapter test covers project creation, normalized recursive import,
+derived chunks, local HTTP provider extraction, edit/merge/discard, dependency-
+ordered arc/chapter/scene acceptance, Codex acceptance, one commit per mutation,
+clean worktrees, index coverage, non-disclosure, and queue reload after complete
+service reconstruction. Focused tests cover rollback, concurrent decisions,
+strict negative API contracts, corrupt cache rebuild, and UI race/conflict states.
 
 ### Milestone 7
 

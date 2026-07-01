@@ -272,18 +272,25 @@ func (s *Service) Extract(ctx context.Context, request ExtractRequest) (ExtractR
 		}
 		createdIDs = append(createdIDs, candidate.ID)
 	}
-	rollback := func() error { return rollbackCandidates(current.Path, createdIDs) }
+	attemptRollback, err := s.chunks.RecordExtractionAttempt(current.Path, ExtractionAttempt{
+		Version: 1, ImportID: request.ImportID, Mode: string(request.Mode),
+		ChunkIDs: selectedIDs, CandidateIDs: slices.Clone(createdIDs),
+		Provider: result.Provider,
+	})
+	if err != nil {
+		_ = rollbackCandidates(current.Path, createdIDs)
+		return ExtractResponse{}, err
+	}
+	rollback := func() error {
+		return errors.Join(rollbackCandidates(current.Path, createdIDs), attemptRollback())
+	}
 	if err := s.index.Rebuild(ctx, current.Path); err != nil {
 		return ExtractResponse{}, s.rollbackMutation(ctx, current.Path, rollback, err)
 	}
 	if err := s.git.CommitAll(ctx, current.Path, "Extract import candidates "+request.ImportID); err != nil {
 		return ExtractResponse{}, s.rollbackMutation(ctx, current.Path, rollback, err)
 	}
-	listed, err := s.candidates.List(current.Path)
-	if err != nil {
-		return ExtractResponse{}, err
-	}
-	return ExtractResponse{Candidates: listed, Provider: result.Provider}, nil
+	return ExtractResponse{Candidates: candidates, Provider: result.Provider}, nil
 }
 
 func (s *Service) ListCandidates(ctx context.Context) ([]Candidate, error) {

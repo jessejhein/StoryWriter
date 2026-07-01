@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"storywork/internal/agent"
 	"storywork/internal/api"
+	"storywork/internal/extract"
 	"storywork/internal/importer"
 	"storywork/internal/story"
 )
@@ -268,9 +270,12 @@ func TestImportRouteStatusMapping(t *testing.T) {
 		{name: "invalid source directory", method: http.MethodPost, path: "/api/imports", body: `{"source_directory":"/tmp/notes"}`, stub: storyServiceStub{importErr: importer.ErrInvalidSourceDirectory}, status: http.StatusBadRequest},
 		{name: "dirty worktree", method: http.MethodPost, path: "/api/imports", body: `{"source_directory":"/tmp/notes"}`, stub: storyServiceStub{importErr: story.ErrDirtyWorktree}, status: http.StatusConflict},
 		{name: "provider rejected", method: http.MethodPost, path: "/api/imports/imp_0123456789abcdef0123/extractions", body: `{"chunk_ids":["chk_0123456789abcdef0123"],"mode":"structure","profile_id":"local","model":"m"}`, stub: storyServiceStub{extractErr: agent.ErrProviderRejected}, status: http.StatusBadGateway},
+		{name: "invalid provider response", method: http.MethodPost, path: "/api/imports/imp_0123456789abcdef0123/extractions", body: `{"chunk_ids":["chk_0123456789abcdef0123"],"mode":"structure","profile_id":"local","model":"m"}`, stub: storyServiceStub{extractErr: extract.ErrInvalidResponse}, status: http.StatusBadGateway},
 		{name: "provider offline", method: http.MethodPost, path: "/api/imports/imp_0123456789abcdef0123/extractions", body: `{"chunk_ids":["chk_0123456789abcdef0123"],"mode":"structure","profile_id":"local","model":"m"}`, stub: storyServiceStub{extractErr: agent.ErrProviderOffline}, status: http.StatusServiceUnavailable},
 		{name: "candidate not found", method: http.MethodGet, path: "/api/import-candidates/cand_0123456789abcdef0123", stub: storyServiceStub{candidateErr: os.ErrNotExist}, status: http.StatusNotFound},
 		{name: "stale candidate", method: http.MethodPost, path: "/api/import-candidates/cand_0123456789abcdef0123/discard", body: `{"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, stub: storyServiceStub{discardCandidateErr: importer.ErrCandidateConflict}, status: http.StatusConflict},
+		{name: "invalid import id", method: http.MethodGet, path: "/api/imports/not-an-id/chunks", status: http.StatusBadRequest},
+		{name: "invalid candidate id", method: http.MethodGet, path: "/api/import-candidates/not-an-id", status: http.StatusBadRequest},
 	}
 
 	for _, testCase := range tests {
@@ -280,6 +285,75 @@ func TestImportRouteStatusMapping(t *testing.T) {
 		handler.ServeHTTP(response, request)
 		if response.Code != testCase.status {
 			t.Fatalf("%s status = %d, want %d body=%s", testCase.name, response.Code, testCase.status, response.Body.String())
+		}
+	}
+}
+
+func TestImportMutationRoutesRejectMalformedBodiesAndOversizeWithContractStatuses(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		path   string
+		body   string
+		status int
+	}{
+		{name: "missing import field", path: "/api/imports", body: `{}`, status: http.StatusBadRequest},
+		{name: "null import field", path: "/api/imports", body: `{"source_directory":null}`, status: http.StatusBadRequest},
+		{name: "unknown import field", path: "/api/imports", body: `{"source_directory":"/tmp/notes","extra":true}`, status: http.StatusBadRequest},
+		{name: "trailing import value", path: "/api/imports", body: `{"source_directory":"/tmp/notes"}{}`, status: http.StatusBadRequest},
+		{name: "null extraction chunks", path: "/api/imports/imp_0123456789abcdef0123/extractions", body: `{"chunk_ids":null,"mode":"structure","profile_id":"local","model":"m"}`, status: http.StatusBadRequest},
+		{name: "malformed decision revision", path: "/api/import-candidates/cand_0123456789abcdef0123/discard", body: `{"expected_revision":"bad"}`, status: http.StatusBadRequest},
+		{name: "oversized import", path: "/api/imports", body: `{"source_directory":"/` + strings.Repeat("x", (1<<20)+1) + `"}`, status: http.StatusRequestEntityTooLarge},
+	}
+	for _, testCase := range tests {
+		handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+		request := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != testCase.status {
+			t.Errorf("%s status = %d, want %d body=%s", testCase.name, response.Code, testCase.status, response.Body.String())
+		}
+	}
+}
+
+func TestImportErrorsDoNotDiscloseSensitiveAdapterDetails(t *testing.T) {
+	t.Parallel()
+
+	sensitive := "/home/alice/private-notes token-secret provider-body"
+	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{
+		importErr: errors.New(sensitive),
+	}, "test")
+	request := httptest.NewRequest(http.MethodPost, "/api/imports", strings.NewReader(`{"source_directory":"/tmp/notes"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.Code)
+	}
+	if strings.Contains(response.Body.String(), sensitive) || strings.Contains(response.Body.String(), "private-notes") {
+		t.Fatalf("response disclosed adapter detail: %s", response.Body.String())
+	}
+}
+
+func TestImportRoutesRejectUnsupportedMethodsWithAllowHeader(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct{ method, path, allow string }{
+		{http.MethodPatch, "/api/imports", "GET, POST"},
+		{http.MethodPost, "/api/imports/imp_0123456789abcdef0123/chunks", "GET"},
+		{http.MethodGet, "/api/imports/imp_0123456789abcdef0123/extractions", "POST"},
+		{http.MethodDelete, "/api/import-candidates", "GET"},
+		{http.MethodPost, "/api/import-candidates/cand_0123456789abcdef0123", "GET, PUT"},
+		{http.MethodGet, "/api/import-candidates/cand_0123456789abcdef0123/merge", "POST"},
+		{http.MethodGet, "/api/import-candidates/cand_0123456789abcdef0123/discard", "POST"},
+		{http.MethodGet, "/api/import-candidates/cand_0123456789abcdef0123/accept", "POST"},
+	}
+	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	for _, testCase := range tests {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, nil))
+		if response.Code != http.StatusMethodNotAllowed || response.Header().Get("Allow") != testCase.allow {
+			t.Errorf("%s %s status=%d allow=%q, want 405 %q", testCase.method, testCase.path, response.Code, response.Header().Get("Allow"), testCase.allow)
 		}
 	}
 }

@@ -115,6 +115,37 @@ func TestSourceStorePrepareSnapshotRejectsSymlinkAndInvalidUTF8(t *testing.T) {
 	}
 }
 
+func TestPreparedSnapshotPublishNeverOverwritesExistingImport(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	sourcePath := t.TempDir()
+	writeTestFile(t, filepath.Join(sourcePath, "notes.md"), "Alpha")
+	prepared, err := NewSourceStore().PrepareSnapshot(context.Background(), PrepareSnapshotRequest{
+		ProjectPath: projectPath, SourceDirectory: sourcePath,
+		ImportID: "imp_0123456789abcdef0123", CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalPath := filepath.Join(projectPath, "imports", "raw", "imp_0123456789abcdef0123")
+	if err := os.MkdirAll(finalPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(finalPath, "sentinel")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := prepared.Publish(); err == nil {
+		t.Fatal("Publish() error = nil")
+	}
+	body, err := os.ReadFile(sentinel)
+	if err != nil || string(body) != "preserve" {
+		t.Fatalf("existing import was changed: body=%q err=%v", body, err)
+	}
+}
+
 func writeTestFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

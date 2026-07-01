@@ -175,6 +175,18 @@ func TestNormalizePortableRelativePathRejectsUnsafeComponents(t *testing.T) {
 	}
 }
 
+func TestNormalizePortableRelativePathUsesCompleteUnicodeNFC(t *testing.T) {
+	t.Parallel()
+
+	got, err := NormalizePortableRelativePath("notes/A\u030Aland.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "notes/Åland.md" {
+		t.Fatalf("normalized path = %q, want %q", got, "notes/Åland.md")
+	}
+}
+
 func TestDetectCaseFoldedCollisionRejectsPortableConflicts(t *testing.T) {
 	t.Parallel()
 

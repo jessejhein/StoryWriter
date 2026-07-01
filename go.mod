@@ -4,7 +4,10 @@ go 1.26.0
 
 require modernc.org/sqlite v1.53.0
 
-require gopkg.in/yaml.v3 v3.0.1
+require (
+	golang.org/x/text v0.31.0
+	gopkg.in/yaml.v3 v3.0.1
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

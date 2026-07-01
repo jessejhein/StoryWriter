@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"storywork/internal/agent"
 	"storywork/internal/provider"
@@ -24,6 +26,12 @@ const (
 var (
 	ErrInvalidRequest  = errors.New("invalid extraction request")
 	ErrInvalidResponse = errors.New("invalid extraction response")
+)
+
+var (
+	generatedLocalIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+	chunkIDPattern          = regexp.MustCompile(`^chk_[0-9a-f]{20}$`)
+	importIDPattern         = regexp.MustCompile(`^imp_[0-9a-f]{20}$`)
 )
 
 type Chunk struct {
@@ -89,6 +97,17 @@ type Extractor interface {
 	Extract(context.Context, Request) (Result, error)
 }
 
+type modeHandler interface {
+	BuildPrompts(Request) (string, string)
+	ParseResponse([]byte) ([]Proposal, error)
+}
+
+type structureModeHandler struct{}
+
+var modeHandlers = map[Mode]modeHandler{
+	ModeStructure: structureModeHandler{},
+}
+
 type profileResolver interface {
 	Resolve(ctx context.Context, profileID string) (provider.ResolvedProfile, bool, error)
 }
@@ -127,7 +146,8 @@ func (e *RemoteExtractor) Extract(ctx context.Context, request Request) (Result,
 	if !found || resolved.Readiness != provider.ReadinessReady || !resolved.Profile.Capabilities.Chat {
 		return Result{}, agent.ErrProviderInvalid
 	}
-	systemPrompt, userPrompt := BuildPrompts(request)
+	handler := modeHandlers[request.Mode]
+	systemPrompt, userPrompt := handler.BuildPrompts(request)
 	chatResponse, err := agent.CompleteChat(ctx, e.client, agent.ChatRequest{
 		Profile: resolved,
 		Model:   request.Model,
@@ -139,7 +159,7 @@ func (e *RemoteExtractor) Extract(ctx context.Context, request Request) (Result,
 	if err != nil {
 		return Result{}, err
 	}
-	proposals, err := ParseResponse([]byte(chatResponse.Content))
+	proposals, err := handler.ParseResponse([]byte(chatResponse.Content))
 	if err != nil {
 		return Result{}, err
 	}
@@ -147,7 +167,7 @@ func (e *RemoteExtractor) Extract(ctx context.Context, request Request) (Result,
 }
 
 func ValidateRequest(request Request) error {
-	if request.Mode != ModeStructure {
+	if _, supported := modeHandlers[request.Mode]; !supported {
 		return fmt.Errorf("mode %q is unsupported: %w", request.Mode, ErrInvalidRequest)
 	}
 	if strings.TrimSpace(request.ProfileID) == "" || strings.TrimSpace(request.Model) == "" {
@@ -157,7 +177,23 @@ func ValidateRequest(request Request) error {
 		return fmt.Errorf("chunk count %d is invalid: %w", len(request.Chunks), ErrInvalidRequest)
 	}
 	totalBytes := 0
+	importID := ""
+	seenChunkIDs := make(map[string]struct{}, len(request.Chunks))
 	for _, chunk := range request.Chunks {
+		if !chunkIDPattern.MatchString(chunk.ID) || !importIDPattern.MatchString(chunk.ImportID) ||
+			strings.TrimSpace(chunk.SourcePath) == "" || chunk.StartLine < 1 ||
+			chunk.EndLine < chunk.StartLine || chunk.Text == "" || !utf8.ValidString(chunk.Text) {
+			return fmt.Errorf("chunk metadata is invalid: %w", ErrInvalidRequest)
+		}
+		if _, exists := seenChunkIDs[chunk.ID]; exists {
+			return fmt.Errorf("chunk %q is repeated: %w", chunk.ID, ErrInvalidRequest)
+		}
+		seenChunkIDs[chunk.ID] = struct{}{}
+		if importID == "" {
+			importID = chunk.ImportID
+		} else if chunk.ImportID != importID {
+			return fmt.Errorf("chunks belong to multiple imports: %w", ErrInvalidRequest)
+		}
 		totalBytes += len([]byte(chunk.Text))
 	}
 	if totalBytes > 200<<10 {
@@ -167,12 +203,22 @@ func ValidateRequest(request Request) error {
 }
 
 func BuildPrompts(request Request) (string, string) {
+	return structureModeHandler{}.BuildPrompts(request)
+}
+
+func (structureModeHandler) BuildPrompts(request Request) (string, string) {
 	var builder strings.Builder
 	builder.WriteString("Return exactly one JSON object with shape {\"candidates\":[...]}. ")
 	builder.WriteString("Do not include markdown fences, commentary, or trailing text. ")
 	builder.WriteString("Each candidate must use one of these kinds: codex, arc, chapter, scene. ")
 	builder.WriteString("Chapter parent_local_id must refer to an arc candidate local_id. ")
 	builder.WriteString("Scene parent_local_id must refer to a chapter candidate local_id.\n\n")
+	builder.WriteString("Exact candidate schemas: ")
+	builder.WriteString(`{"kind":"codex","local_id":"...","type":"character|location|lore|custom","name":"...","aliases":[],"tags":[],"description":"..."}; `)
+	builder.WriteString(`{"kind":"arc","local_id":"...","title":"..."}; `)
+	builder.WriteString(`{"kind":"chapter","local_id":"...","title":"...","parent_local_id":"..."}; `)
+	builder.WriteString(`{"kind":"scene","local_id":"...","title":"...","parent_local_id":"..."}.`)
+	builder.WriteString(" Do not add fields.\n\n")
 	builder.WriteString("Chunk inputs:\n")
 	for _, chunk := range request.Chunks {
 		builder.WriteString("- ")
@@ -189,6 +235,10 @@ func BuildPrompts(request Request) (string, string) {
 }
 
 func ParseResponse(body []byte) ([]Proposal, error) {
+	return structureModeHandler{}.ParseResponse(body)
+}
+
+func (structureModeHandler) ParseResponse(body []byte) ([]Proposal, error) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 || len(trimmed) > 1<<20 {
 		return nil, ErrInvalidResponse
@@ -233,7 +283,53 @@ func ParseResponse(body []byte) ([]Proposal, error) {
 		seenLocalIDs[localID] = struct{}{}
 		proposals = append(proposals, proposal)
 	}
+	if err := validateProposals(proposals); err != nil {
+		return nil, err
+	}
 	return proposals, nil
+}
+
+func validateProposals(proposals []Proposal) error {
+	kinds := make(map[string]string, len(proposals))
+	for _, proposal := range proposals {
+		localID := proposalLocalID(proposal)
+		if !generatedLocalIDPattern.MatchString(localID) {
+			return ErrInvalidResponse
+		}
+		kinds[localID] = proposal.Kind
+		switch proposal.Kind {
+		case "codex":
+			value := proposal.Codex
+			if value.Kind != "codex" || strings.TrimSpace(value.Name) == "" || strings.TrimSpace(value.Type) == "" || strings.TrimSpace(value.Description) == "" {
+				return ErrInvalidResponse
+			}
+		case "arc":
+			if proposal.Arc.Kind != "arc" || strings.TrimSpace(proposal.Arc.Title) == "" {
+				return ErrInvalidResponse
+			}
+		case "chapter":
+			if proposal.Chapter.Kind != "chapter" || strings.TrimSpace(proposal.Chapter.Title) == "" || proposal.Chapter.ParentLocalID == localID {
+				return ErrInvalidResponse
+			}
+		case "scene":
+			if proposal.Scene.Kind != "scene" || strings.TrimSpace(proposal.Scene.Title) == "" || proposal.Scene.ParentLocalID == localID {
+				return ErrInvalidResponse
+			}
+		}
+	}
+	for _, proposal := range proposals {
+		switch proposal.Kind {
+		case "chapter":
+			if kinds[proposal.Chapter.ParentLocalID] != "arc" {
+				return ErrInvalidResponse
+			}
+		case "scene":
+			if kinds[proposal.Scene.ParentLocalID] != "chapter" {
+				return ErrInvalidResponse
+			}
+		}
+	}
+	return nil
 }
 
 func parseProposal(kind string, raw json.RawMessage) (Proposal, error) {

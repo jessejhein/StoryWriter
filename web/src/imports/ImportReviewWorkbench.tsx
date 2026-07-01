@@ -13,6 +13,7 @@ import {
   type ImportCandidate,
   type ImportCandidateProposal,
   type ImportChunk,
+  type ImportFile,
   type ImportSummary,
   type CodexEntryType,
   updateImportCandidate,
@@ -28,6 +29,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
   const [imports, setImports] = useState<ImportSummary[]>([])
   const [selectedImportID, setSelectedImportID] = useState('')
   const [chunks, setChunks] = useState<ImportChunk[]>([])
+  const [filesByImport, setFilesByImport] = useState<Record<string, ImportFile[]>>({})
   const [selectedChunkIDs, setSelectedChunkIDs] = useState<string[]>([])
   const [candidates, setCandidates] = useState<ImportCandidate[]>([])
   const [selectedCandidateID, setSelectedCandidateID] = useState('')
@@ -41,10 +43,23 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<'import' | 'extract' | 'save' | 'merge' | 'discard' | 'accept' | null>(null)
   const [mergeTargetID, setMergeTargetID] = useState('')
+  const [pendingDecision, setPendingDecision] = useState<'accept' | 'discard' | null>(null)
+  const [conflict, setConflict] = useState(false)
+  const [kindFilter, setKindFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
 
   useEffect(() => {
     onDirtyChange?.(dirty)
   }, [dirty, onDirtyChange])
+
+  useEffect(() => {
+    function warnBeforeUnload(event: BeforeUnloadEvent) {
+      if (!dirty) return
+      event.preventDefault()
+    }
+    window.addEventListener('beforeunload', warnBeforeUnload)
+    return () => window.removeEventListener('beforeunload', warnBeforeUnload)
+  }, [dirty])
 
   useEffect(() => {
     void Promise.all([getImports(), getImportCandidates(), getProviderProfiles()])
@@ -71,14 +86,18 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
     if (!selectedImportID) {
       return
     }
+    let current = true
     void getImportChunks(selectedImportID)
       .then((response) => {
+        if (!current) return
         setChunks(response.chunks)
         setSelectedChunkIDs([])
       })
       .catch((requestError) => {
+        if (!current) return
         setError(requestError instanceof Error ? requestError.message : 'Failed to load chunks.')
       })
+    return () => { current = false }
   }, [selectedImportID])
 
   const selectedCandidate = useMemo(
@@ -91,6 +110,11 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
     return candidates.filter((candidate) => candidate.id !== selectedCandidate.id && candidate.kind === selectedCandidate.kind && candidate.status === 'pending')
   }, [candidates, selectedCandidate])
 
+  const visibleCandidates = useMemo(() => candidates.filter((candidate) =>
+    (kindFilter === 'all' || candidate.kind === kindFilter) &&
+    (statusFilter === 'all' || candidate.status === statusFilter),
+  ), [candidates, kindFilter, statusFilter])
+
   async function refreshCandidates(nextSelectedCandidateID?: string) {
     const response = await getImportCandidates()
     setCandidates(response.candidates)
@@ -102,6 +126,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
     const nextCandidate = sourceCandidates.find((candidate) => candidate.id === candidateID) ?? null
     setDraft(nextCandidate ? cloneProposal(nextCandidate.proposal) : null)
     setDirty(false)
+    setConflict(false)
   }
 
   async function handleImport(event: FormEvent) {
@@ -112,6 +137,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
       const response = await createImport(sourceDirectory)
       const importsResponse = await getImports()
       setImports(importsResponse.imports)
+      setFilesByImport((current) => ({ ...current, [response.import.id]: response.files }))
       setSelectedImportID(response.import.id)
       setChunks([])
       setSelectedChunkIDs([])
@@ -155,7 +181,9 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
       setStatus(`Saved candidate ${updated.id}.`)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Save failed.')
-      if (!(requestError instanceof APIError && requestError.status === 409)) {
+	  if (requestError instanceof APIError && requestError.status === 409) {
+		setConflict(true)
+	  } else {
         setDirty(false)
       }
     } finally {
@@ -216,6 +244,20 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
     }
   }
 
+  function confirmDecision() {
+    const decision = pendingDecision
+    setPendingDecision(null)
+    if (decision === 'accept') void handleAccept()
+    if (decision === 'discard') void handleDiscard()
+  }
+
+  async function reloadConflictedCandidate() {
+    await refreshCandidates(selectedCandidateID)
+    setConflict(false)
+    setError('')
+    setStatus('Reloaded the current server version.')
+  }
+
   function chooseCandidate(candidateID: string) {
     if (dirty && candidateID !== selectedCandidateID) {
       setPendingCandidateID(candidateID)
@@ -268,6 +310,16 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
 
       {selectedImportID && (
         <section>
+          {filesByImport[selectedImportID] && (
+            <>
+              <h3>Imported files</h3>
+              <ul>
+                {filesByImport[selectedImportID].map((file) => (
+                  <li key={file.path}>{file.path} · {file.bytes} bytes</li>
+                ))}
+              </ul>
+            </>
+          )}
           <h3>Chunks</h3>
           {chunks.length === 0 ? (
             <p>No chunks available for this import.</p>
@@ -285,6 +337,10 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
                     />
                     {chunk.source_path} lines {chunk.start_line}-{chunk.end_line}
                   </label>
+                  <details>
+                    <summary>Inspect chunk</summary>
+                    <pre>{chunk.text}</pre>
+                  </details>
                 </li>
               ))}
             </ul>
@@ -311,11 +367,32 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
 
       <section>
         <h3>Candidates</h3>
+        <p>{visibleCandidates.length} of {candidates.length} candidates</p>
+        <label>
+          Candidate kind
+          <select aria-label="Candidate kind" value={kindFilter} onChange={(event) => setKindFilter(event.target.value)}>
+            <option value="all">All kinds</option>
+            <option value="codex">Codex</option>
+            <option value="arc">Arc</option>
+            <option value="chapter">Chapter</option>
+            <option value="scene">Scene</option>
+          </select>
+        </label>
+        <label>
+          Candidate status
+          <select aria-label="Candidate status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="merged">Merged</option>
+            <option value="discarded">Discarded</option>
+            <option value="accepted">Accepted</option>
+          </select>
+        </label>
         {candidates.length === 0 ? (
           <p>No candidates yet.</p>
         ) : (
           <div className="project-nav">
-            {candidates.map((candidate) => (
+            {visibleCandidates.map((candidate) => (
               <button key={candidate.id} type="button" className={candidate.id === selectedCandidateID ? '' : 'secondary'} onClick={() => chooseCandidate(candidate.id)}>
                 {candidate.kind} · {candidate.status}
               </button>
@@ -329,6 +406,12 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
           <h3>{selectedCandidate.id}</h3>
           <p>Status: {selectedCandidate.status}</p>
           <p>Provenance: {selectedCandidate.provenance.chunk_ids.join(', ')}</p>
+          {conflict && (
+            <div role="alert">
+              The candidate changed on disk. Your draft is preserved.
+              <button type="button" className="secondary" onClick={() => void reloadConflictedCandidate()}>Reload server version</button>
+            </div>
+          )}
           {selectedCandidate.kind === 'codex' && (
             <>
               <label>
@@ -352,7 +435,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
           )}
           {selectedCandidate.status === 'pending' && (
             <div className="actions">
-              <button type="button" onClick={() => void handleSave()} disabled={busy !== null || !dirty}>Save</button>
+              <button type="button" onClick={() => void handleSave()} disabled={busy !== null || !dirty || !isProposalValid(draft)}>Save</button>
               {selectedCandidate.kind === 'codex' && mergeOptions.length > 0 && (
                 <>
                   <select aria-label="Merge target" value={mergeTargetID} onChange={(event) => setMergeTargetID(event.target.value)}>
@@ -364,8 +447,8 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
                   <button type="button" onClick={() => void handleMerge()} disabled={busy !== null || !mergeTargetID}>Merge</button>
                 </>
               )}
-              <button type="button" className="secondary" onClick={() => void handleDiscard()} disabled={busy !== null}>Discard</button>
-              <button type="button" onClick={() => void handleAccept()} disabled={busy !== null}>Accept</button>
+              <button type="button" className="secondary" onClick={() => setPendingDecision('discard')} disabled={busy !== null}>Discard</button>
+              <button type="button" onClick={() => setPendingDecision('accept')} disabled={busy !== null || dirty}>Accept</button>
             </div>
           )}
         </section>
@@ -378,6 +461,14 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
         confirmLabel="Discard draft"
         onConfirm={confirmCandidateChange}
         onCancel={() => setPendingCandidateID(null)}
+      />
+      <ConfirmDialog
+        open={pendingDecision !== null}
+        title={pendingDecision === 'accept' ? 'Accept candidate into canon?' : 'Discard candidate?'}
+        message={pendingDecision === 'accept' ? 'This creates one canonical story artifact.' : 'The proposal remains auditable but cannot be edited.'}
+        confirmLabel={pendingDecision === 'accept' ? 'Accept candidate' : 'Discard candidate'}
+        onConfirm={confirmDecision}
+        onCancel={() => setPendingDecision(null)}
       />
     </section>
   )
@@ -410,4 +501,11 @@ function codexDraftDescription(proposal: ImportCandidateProposal): string {
 
 function structuredDraftTitle(proposal: ImportCandidateProposal): string {
   return 'title' in proposal ? proposal.title : ''
+}
+
+function isProposalValid(proposal: ImportCandidateProposal): boolean {
+  if ('name' in proposal) {
+    return proposal.name.trim().length > 0 && proposal.description.trim().length > 0
+  }
+  return 'title' in proposal && proposal.title.trim().length > 0
 }

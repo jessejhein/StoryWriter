@@ -12,6 +12,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -31,6 +33,7 @@ var (
 	chunkIDPattern     = regexp.MustCompile(`^chk_[0-9a-f]{20}$`)
 	candidateIDPattern = regexp.MustCompile(`^cand_[0-9a-f]{20}$`)
 	digestPattern      = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	revisionPattern    = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 )
 
 type ImportFile struct {
@@ -63,6 +66,14 @@ func ValidateChunkID(value string) error {
 
 func ValidateCandidateID(value string) error {
 	return validateStableID(candidateIDPattern, value)
+}
+
+// ValidateCandidateRevision rejects malformed optimistic concurrency tokens.
+func ValidateCandidateRevision(value string) error {
+	if !revisionPattern.MatchString(value) {
+		return fmt.Errorf("candidate revision is invalid: %w", ErrInvalidCandidate)
+	}
+	return nil
 }
 
 func (manifest ImportManifest) Summary() ImportSummary {
@@ -252,82 +263,7 @@ func containsControlRune(value string) bool {
 }
 
 func normalizePortablePathUnicode(value string) string {
-	type pair struct {
-		base     rune
-		combiner rune
-	}
-
-	replacements := map[pair]rune{
-		{'A', '\u0301'}: '\u00c1',
-		{'E', '\u0301'}: '\u00c9',
-		{'I', '\u0301'}: '\u00cd',
-		{'O', '\u0301'}: '\u00d3',
-		{'U', '\u0301'}: '\u00da',
-		{'Y', '\u0301'}: '\u00dd',
-		{'a', '\u0301'}: '\u00e1',
-		{'e', '\u0301'}: '\u00e9',
-		{'i', '\u0301'}: '\u00ed',
-		{'o', '\u0301'}: '\u00f3',
-		{'u', '\u0301'}: '\u00fa',
-		{'y', '\u0301'}: '\u00fd',
-		{'A', '\u0300'}: '\u00c0',
-		{'E', '\u0300'}: '\u00c8',
-		{'I', '\u0300'}: '\u00cc',
-		{'O', '\u0300'}: '\u00d2',
-		{'U', '\u0300'}: '\u00d9',
-		{'a', '\u0300'}: '\u00e0',
-		{'e', '\u0300'}: '\u00e8',
-		{'i', '\u0300'}: '\u00ec',
-		{'o', '\u0300'}: '\u00f2',
-		{'u', '\u0300'}: '\u00f9',
-		{'A', '\u0302'}: '\u00c2',
-		{'E', '\u0302'}: '\u00ca',
-		{'I', '\u0302'}: '\u00ce',
-		{'O', '\u0302'}: '\u00d4',
-		{'U', '\u0302'}: '\u00db',
-		{'a', '\u0302'}: '\u00e2',
-		{'e', '\u0302'}: '\u00ea',
-		{'i', '\u0302'}: '\u00ee',
-		{'o', '\u0302'}: '\u00f4',
-		{'u', '\u0302'}: '\u00fb',
-		{'A', '\u0308'}: '\u00c4',
-		{'E', '\u0308'}: '\u00cb',
-		{'I', '\u0308'}: '\u00cf',
-		{'O', '\u0308'}: '\u00d6',
-		{'U', '\u0308'}: '\u00dc',
-		{'Y', '\u0308'}: '\u0178',
-		{'a', '\u0308'}: '\u00e4',
-		{'e', '\u0308'}: '\u00eb',
-		{'i', '\u0308'}: '\u00ef',
-		{'o', '\u0308'}: '\u00f6',
-		{'u', '\u0308'}: '\u00fc',
-		{'y', '\u0308'}: '\u00ff',
-		{'A', '\u0303'}: '\u00c3',
-		{'N', '\u0303'}: '\u00d1',
-		{'O', '\u0303'}: '\u00d5',
-		{'a', '\u0303'}: '\u00e3',
-		{'n', '\u0303'}: '\u00f1',
-		{'o', '\u0303'}: '\u00f5',
-		{'C', '\u0327'}: '\u00c7',
-		{'c', '\u0327'}: '\u00e7',
-	}
-
-	runes := []rune(value)
-	if len(runes) < 2 {
-		return value
-	}
-	normalized := make([]rune, 0, len(runes))
-	for index := 0; index < len(runes); index++ {
-		if index+1 < len(runes) {
-			if combined, ok := replacements[pair{base: runes[index], combiner: runes[index+1]}]; ok {
-				normalized = append(normalized, combined)
-				index++
-				continue
-			}
-		}
-		normalized = append(normalized, runes[index])
-	}
-	return string(normalized)
+	return norm.NFC.String(value)
 }
 
 const (

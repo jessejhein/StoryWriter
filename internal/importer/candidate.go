@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -240,8 +241,10 @@ func (s *CandidateStore) Load(projectPath, candidateID string) (Candidate, error
 		return Candidate{}, err
 	}
 	var candidate Candidate
-	if err := yaml.Unmarshal(body, &candidate); err != nil {
-		return Candidate{}, fmt.Errorf("decode candidate: %w", err)
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&candidate); err != nil {
+		return Candidate{}, fmt.Errorf("decode candidate: %v: %w", err, ErrInvalidCandidate)
 	}
 	return NormalizeCandidate(candidate)
 }
@@ -394,6 +397,24 @@ func normalizeCandidateDecision(candidate Candidate) (Candidate, error) {
 		candidate.Decision.ReplacementCandidateID = nil
 		if len(candidate.Decision.CanonicalRefs) != 1 {
 			return Candidate{}, fmt.Errorf("accepted candidate must record exactly one canonical ref: %w", ErrInvalidCandidate)
+		}
+		ref := candidate.Decision.CanonicalRefs[0]
+		if ref.Kind != string(candidate.Kind) {
+			return Candidate{}, fmt.Errorf("accepted candidate canonical ref kind is invalid: %w", ErrInvalidCandidate)
+		}
+		var err error
+		switch candidate.Kind {
+		case CandidateKindCodex:
+			err = codex.ValidateEntryID(ref.ID)
+		case CandidateKindArc:
+			err = story.ValidateArcID(ref.ID)
+		case CandidateKindChapter:
+			err = story.ValidateChapterID(ref.ID)
+		case CandidateKindScene:
+			err = story.ValidateSceneID(ref.ID)
+		}
+		if err != nil {
+			return Candidate{}, fmt.Errorf("accepted candidate canonical ref is invalid: %w", ErrInvalidCandidate)
 		}
 	default:
 		return Candidate{}, ErrInvalidCandidate

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,13 @@ func TestCreateWritesStarterProjectAndInitializesStores(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(projectPath, relativePath)); err != nil {
 			t.Errorf("starter path %q: %v", relativePath, err)
 		}
+	}
+	gitignore, err := os.ReadFile(filepath.Join(projectPath, ".gitignore"))
+	if err != nil {
+		t.Fatalf("ReadFile(.gitignore) error = %v", err)
+	}
+	if !strings.Contains(string(gitignore), ".storywork/import/") {
+		t.Fatal(".gitignore does not exclude rebuildable import data")
 	}
 
 	command := exec.Command("git", "-C", projectPath, "rev-list", "--count", "HEAD")

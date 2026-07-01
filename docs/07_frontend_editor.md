@@ -123,7 +123,11 @@ The Milestone 6 import review workbench follows the same dirty-draft rule: it
 keeps import/review navigation inside `web/src/imports/`, requires confirmation
 before switching candidates with unsaved edits, preserves the local draft across
 409 conflict responses, and renders terminal accepted/merged/discarded
-candidates as visibly non-editable.
+candidates as visibly non-editable. Chunk text is inspectable in keyboard-
+operable disclosures; kind/status filters expose visible and total counts;
+accept and discard require confirmation; conflicts offer an explicit server
+reload; dirty drafts install `beforeunload` protection; and stale chunk
+responses are ignored after import selection changes.
 
 ## Do not build yet
 

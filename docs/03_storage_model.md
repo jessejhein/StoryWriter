@@ -61,6 +61,7 @@ Ignored:
 
 - `.storywork/*.sqlite`
 - `.storywork/tmp/`
+- `.storywork/import/`
 - credentials
 - local app settings
 - generated exports unless user chooses to track them
@@ -230,8 +231,10 @@ Milestone 6 uses three distinct storage areas:
   imported Markdown snapshot. The stored paths are normalized import-relative
   paths only; no external source directory is retained.
 - `.storywork/import/<import_id>/` contains rebuildable derived chunk data and
-  transient extraction-attempt state. Deleting it is recoverable by rebuilding
-  from `imports/raw/`.
+  successful extraction-attempt metadata. Attempt records contain only mode,
+  selected chunk IDs, resulting candidate IDs, and non-secret provider identity;
+  raw provider output is never retained. Deleting this tree is safe because it
+  is ignored by Git and does not contain canonical author work.
 - `imports/review/<candidate_id>.yaml` contains durable review candidates,
   revisions, provenance, and terminal decisions. These are tracked because they
   are author work product, but they are still proposals and not canon.

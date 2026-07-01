@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,6 +58,28 @@ func TestImportServicePublishesSnapshotRebuildsIndexAndCommits(t *testing.T) {
 	}
 	if len(git.commitMessages) != 1 || git.commitMessages[0] != "Import notes snapshot imp_0123456789abcdef0123" {
 		t.Fatalf("commit messages = %v", git.commitMessages)
+	}
+}
+
+func TestImportServiceRollsBackPublishedSnapshotWhenCheckpointFails(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	sourcePath := t.TempDir()
+	writeTestFile(t, sourcePath+"/notes.md", "Alpha")
+	git := &importerGitStub{clean: true, commitErr: errors.New("checkpoint failed")}
+	index := &importerIndexStub{}
+	service := NewService(fakeImporterSession{current: project.Project{Path: projectPath}, ok: true}, git, index, NewSourceStore(),
+		&fakeImporterIDs{importIDs: []string{"imp_0123456789abcdef0123"}}, time.Now)
+
+	if _, err := service.ImportDirectory(context.Background(), sourcePath); err == nil {
+		t.Fatal("ImportDirectory() error = nil")
+	}
+	if _, err := os.Stat(filepath.Join(projectPath, "imports", "raw", "imp_0123456789abcdef0123")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("published import survived rollback: %v", err)
+	}
+	if git.unstageCalls != 1 || index.rebuildCalls != 2 {
+		t.Fatalf("rollback calls: unstage=%d rebuild=%d", git.unstageCalls, index.rebuildCalls)
 	}
 }
 
@@ -140,6 +163,87 @@ func TestExtractPublishesValidatedCandidatesWithoutCanonMutation(t *testing.T) {
 		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("extract mutated canon path %s err=%v", path, err)
 		}
+	}
+}
+
+func TestExtractReturnsOnlyTheNewCandidateBatch(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	sourcePath := t.TempDir()
+	writeTestFile(t, sourcePath+"/notes.md", "# Act One\n")
+	store := NewCandidateStore()
+	_, err := store.Create(projectPath, Candidate{
+		Version: CandidateVersion, ID: "cand_0123456789abcdef0001", Kind: CandidateKindArc,
+		ProposalVersion: 1, Status: CandidateStatusPending,
+		Provenance: Provenance{ChunkIDs: []string{"chk_0123456789abcdef0001"}},
+		Proposal:   CandidateProposal{Arc: &ArcProposal{Title: "Older"}},
+		Decision:   CandidateDecision{CanonicalRefs: []CanonicalRef{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(
+		fakeImporterSession{current: project.Project{Path: projectPath}, ok: true},
+		&importerGitStub{clean: true}, &importerIndexStub{}, NewSourceStore(),
+		&fakeImporterIDs{importIDs: []string{"imp_0123456789abcdef0123"}, candidateIDs: []string{"cand_0123456789abcdef0002"}}, time.Now,
+	).WithExtractor(&fakeExtractor{result: extract.Result{Proposals: []extract.Proposal{
+		{Kind: "arc", Arc: &extract.ArcProposal{Kind: "arc", LocalID: "new_arc", Title: "New"}},
+	}}})
+	imported, err := service.ImportDirectory(context.Background(), sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := service.ListChunks(context.Background(), imported.Import.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := service.Extract(context.Background(), ExtractRequest{
+		ImportID: imported.Import.ID, ChunkIDs: []string{chunks[0].ID}, Mode: extract.ModeStructure,
+		ProfileID: "profile", Model: "model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Candidates) != 1 || response.Candidates[0].ID != "cand_0123456789abcdef0002" {
+		t.Fatalf("Extract() candidates = %+v, want only the new batch", response.Candidates)
+	}
+	all, err := service.ListCandidates(context.Background())
+	if err != nil || len(all) != 2 {
+		t.Fatalf("ListCandidates() = %+v, err=%v", all, err)
+	}
+}
+
+func TestExtractionCheckpointFailureLeavesNoPartialCandidateBatch(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	sourcePath := t.TempDir()
+	writeTestFile(t, sourcePath+"/notes.md", "# Act One\n")
+	git := &importerGitStub{clean: true}
+	index := &importerIndexStub{}
+	service := NewService(fakeImporterSession{current: project.Project{Path: projectPath}, ok: true}, git, index, NewSourceStore(),
+		&fakeImporterIDs{importIDs: []string{"imp_0123456789abcdef0123"}, candidateIDs: []string{"cand_0123456789abcdef0001", "cand_0123456789abcdef0002"}}, time.Now,
+	).WithExtractor(&fakeExtractor{result: extract.Result{Proposals: []extract.Proposal{
+		{Kind: "arc", Arc: &extract.ArcProposal{Kind: "arc", LocalID: "arc_local", Title: "Act One"}},
+		{Kind: "chapter", Chapter: &extract.ChapterProposal{Kind: "chapter", LocalID: "chapter_local", Title: "Chapter", ParentLocalID: "arc_local"}},
+	}}})
+	imported, err := service.ImportDirectory(context.Background(), sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := service.ListChunks(context.Background(), imported.Import.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	git.commitErr = errors.New("checkpoint failed")
+	_, err = service.Extract(context.Background(), ExtractRequest{ImportID: imported.Import.ID, ChunkIDs: []string{chunks[0].ID}, Mode: extract.ModeStructure, ProfileID: "p", Model: "m"})
+	if err == nil {
+		t.Fatal("Extract() error = nil")
+	}
+	candidates, listErr := service.ListCandidates(context.Background())
+	if listErr != nil || len(candidates) != 0 {
+		t.Fatalf("candidates after rollback = %+v, err=%v", candidates, listErr)
 	}
 }
 
@@ -267,6 +371,87 @@ func TestReviewOperationsEditDiscardMergeAndAccept(t *testing.T) {
 	}
 }
 
+func TestAcceptCandidateCheckpointFailureRestoresCandidateAndCanonicalMutation(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	store := NewCandidateStore()
+	seed, err := store.Create(projectPath, Candidate{
+		Version: CandidateVersion, ID: "cand_0123456789abcdef0123", Kind: CandidateKindArc,
+		ProposalVersion: 1, Status: CandidateStatusPending,
+		Provenance: Provenance{ChunkIDs: []string{"chk_0123456789abcdef0123"}},
+		Proposal:   CandidateProposal{Arc: &ArcProposal{Title: "Act One"}},
+		Decision:   CandidateDecision{CanonicalRefs: []CanonicalRef{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(candidatePath(projectPath, seed.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack := false
+	mutator := &fakeStoryMutator{result: story.ImportMutationResult{Kind: story.ImportMutationArc, ID: "arc_0123456789abcdef0123", Rollback: func() error { rolledBack = true; return nil }}}
+	git := &importerGitStub{clean: true, commitErr: errors.New("checkpoint failed")}
+	service := NewService(fakeImporterSession{current: project.Project{Path: projectPath}, ok: true}, git, &importerIndexStub{}, NewSourceStore(), &fakeImporterIDs{}, time.Now).WithStoryMutator(mutator)
+
+	if _, _, err := service.AcceptCandidate(context.Background(), seed.ID, seed.Revision); err == nil {
+		t.Fatal("AcceptCandidate() error = nil")
+	}
+	after, err := os.ReadFile(candidatePath(projectPath, seed.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) || !rolledBack || git.unstageCalls != 1 {
+		t.Fatalf("rollback state: bytes_equal=%v canonical_rollback=%v unstage=%d", string(after) == string(before), rolledBack, git.unstageCalls)
+	}
+}
+
+func TestConcurrentCandidateDecisionsHaveExactlyOneWinner(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	store := NewCandidateStore()
+	seed, err := store.Create(projectPath, Candidate{
+		Version: CandidateVersion, ID: "cand_0123456789abcdef0123", Kind: CandidateKindArc,
+		ProposalVersion: 1, Status: CandidateStatusPending,
+		Provenance: Provenance{ChunkIDs: []string{"chk_0123456789abcdef0123"}},
+		Proposal:   CandidateProposal{Arc: &ArcProposal{Title: "Act One"}},
+		Decision:   CandidateDecision{CanonicalRefs: []CanonicalRef{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(fakeImporterSession{current: project.Project{Path: projectPath}, ok: true}, &importerGitStub{clean: true}, &importerIndexStub{}, NewSourceStore(), &fakeImporterIDs{}, time.Now)
+
+	start := make(chan struct{})
+	errorsByDecision := make([]error, 2)
+	var group sync.WaitGroup
+	for index := range errorsByDecision {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			<-start
+			_, errorsByDecision[index] = service.DiscardCandidate(context.Background(), seed.ID, seed.Revision)
+		}(index)
+	}
+	close(start)
+	group.Wait()
+	winners := 0
+	conflicts := 0
+	for _, decisionErr := range errorsByDecision {
+		if decisionErr == nil {
+			winners++
+		}
+		if errors.Is(decisionErr, ErrCandidateConflict) || errors.Is(decisionErr, ErrCandidateTerminal) {
+			conflicts++
+		}
+	}
+	if winners != 1 || conflicts != 1 {
+		t.Fatalf("decision errors = %v, want one winner and one conflict", errorsByDecision)
+	}
+}
+
 type fakeImporterSession struct {
 	current project.Project
 	ok      bool
@@ -295,6 +480,7 @@ type importerGitStub struct {
 	commitMessages []string
 	commitErr      error
 	unstageErr     error
+	unstageCalls   int
 }
 
 func (s importerGitStub) IsClean(context.Context, string) (bool, error) {
@@ -306,7 +492,8 @@ func (s *importerGitStub) CommitAll(_ context.Context, _ string, message string)
 	return s.commitErr
 }
 
-func (s importerGitStub) UnstageAll(context.Context, string) error {
+func (s *importerGitStub) UnstageAll(context.Context, string) error {
+	s.unstageCalls++
 	return s.unstageErr
 }
 

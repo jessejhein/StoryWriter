@@ -177,8 +177,10 @@ func (snapshot *PreparedSnapshot) Files() []ImportFile {
 }
 
 func (snapshot *PreparedSnapshot) Publish() (func() error, error) {
-	if err := snapshot.fs.RemoveAll(snapshot.finalPath); err == nil {
-		// final path should be unused; RemoveAll keeps retries idempotent in tests.
+	if _, err := snapshot.fs.Lstat(snapshot.finalPath); err == nil {
+		return nil, fmt.Errorf("publish import snapshot: destination already exists")
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("inspect import destination: %w", err)
 	}
 	if err := snapshot.fs.Rename(snapshot.stagePath, snapshot.finalPath); err != nil {
 		return nil, fmt.Errorf("publish import snapshot: %w", err)

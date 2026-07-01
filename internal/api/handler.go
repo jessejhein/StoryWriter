@@ -150,6 +150,15 @@ func writeBodyLimitError(writer http.ResponseWriter, err error) {
 	writeError(writer, status, err)
 }
 
+func writeImportBodyError(writer http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeError(writer, http.StatusRequestEntityTooLarge, errors.New("request body exceeds the 1 MiB limit"))
+		return
+	}
+	writeError(writer, http.StatusBadRequest, err)
+}
+
 // StoryStore serves and mutates the active project's outline, scenes, and Codex state.
 type StoryStore interface {
 	// Outline returns the active project's hierarchical outline.
@@ -353,7 +362,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			SourceDirectory string `json:"source_directory"`
 		}
 		if err := decodeJSONWithRequiredFields(writer, request, &importRequest, 1<<20, requiredJSONField{name: "source_directory"}); err != nil {
-			writeBodyLimitError(writer, err)
+			writeImportBodyError(writer, err)
 			return
 		}
 		response, err := stories.ImportDirectory(request.Context(), importRequest.SourceDirectory)
@@ -364,6 +373,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusCreated, response)
 	})
 	mux.HandleFunc("GET /api/imports", func(writer http.ResponseWriter, request *http.Request) {
+		if err := validateExactQuery(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
 		imports, err := stories.ListImports(request.Context())
 		if err != nil {
 			writeImportError(writer, err)
@@ -375,6 +388,14 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, map[string]any{"imports": imports})
 	})
 	mux.HandleFunc("GET /api/imports/{import_id}/chunks", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := validateExactQuery(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
 		chunks, err := stories.ListImportChunks(request.Context(), request.PathValue("import_id"))
 		if err != nil {
 			writeImportError(writer, err)
@@ -386,6 +407,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, map[string]any{"chunks": chunks})
 	})
 	mux.HandleFunc("POST /api/imports/{import_id}/extractions", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
 		var extractionRequest struct {
 			ChunkIDs  []string     `json:"chunk_ids"`
 			Mode      extract.Mode `json:"mode"`
@@ -398,7 +423,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			requiredJSONField{name: "profile_id"},
 			requiredJSONField{name: "model"},
 		); err != nil {
-			writeBodyLimitError(writer, err)
+			writeImportBodyError(writer, err)
 			return
 		}
 		extraction, err := stories.ExtractImport(request.Context(), importer.ExtractRequest{
@@ -436,6 +461,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, map[string]any{"candidates": response})
 	})
 	mux.HandleFunc("GET /api/import-candidates/{candidate_id}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
 		candidate, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
@@ -444,9 +473,13 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, newImportCandidateResponse(candidate))
 	})
 	mux.HandleFunc("PUT /api/import-candidates/{candidate_id}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
 		body, err := readJSONBodyWithLimit(writer, request, 1<<20)
 		if err != nil {
-			writeBodyLimitError(writer, err)
+			writeImportBodyError(writer, err)
 			return
 		}
 		var editEnvelope struct {
@@ -459,6 +492,10 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		if err := decodeJSONBytes(body, &editEnvelope); err != nil {
 			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(editEnvelope.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
 			return
 		}
 		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
@@ -479,9 +516,13 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, newImportCandidateResponse(candidate))
 	})
 	mux.HandleFunc("POST /api/import-candidates/{candidate_id}/merge", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
 		body, err := readJSONBodyWithLimit(writer, request, 1<<20)
 		if err != nil {
-			writeBodyLimitError(writer, err)
+			writeImportBodyError(writer, err)
 			return
 		}
 		var mergeEnvelope struct {
@@ -501,6 +542,18 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		if err := decodeJSONBytes(body, &mergeEnvelope); err != nil {
 			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := importer.ValidateCandidateID(mergeEnvelope.OtherCandidateID); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(mergeEnvelope.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(mergeEnvelope.OtherExpectedRevision); err != nil {
+			writeImportError(writer, err)
 			return
 		}
 		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
@@ -526,11 +579,19 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusCreated, map[string]any{"candidate": newImportCandidateResponse(candidate), "merged_candidate_ids": mergedIDs})
 	})
 	mux.HandleFunc("POST /api/import-candidates/{candidate_id}/discard", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
 		var discardRequest struct {
 			ExpectedRevision string `json:"expected_revision"`
 		}
 		if err := decodeJSONWithRequiredFields(writer, request, &discardRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
-			writeBodyLimitError(writer, err)
+			writeImportBodyError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(discardRequest.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
 			return
 		}
 		candidate, err := stories.DiscardImportCandidate(request.Context(), request.PathValue("candidate_id"), discardRequest.ExpectedRevision)
@@ -541,11 +602,19 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, newImportCandidateResponse(candidate))
 	})
 	mux.HandleFunc("POST /api/import-candidates/{candidate_id}/accept", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
 		var acceptRequest struct {
 			ExpectedRevision string `json:"expected_revision"`
 		}
 		if err := decodeJSONWithRequiredFields(writer, request, &acceptRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
-			writeBodyLimitError(writer, err)
+			writeImportBodyError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(acceptRequest.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
 			return
 		}
 		candidate, canonicalRefs, err := stories.AcceptImportCandidate(request.Context(), request.PathValue("candidate_id"), acceptRequest.ExpectedRevision)
@@ -1395,17 +1464,17 @@ func writeStoryError(writer http.ResponseWriter, err error) {
 func writeImportError(writer http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree), errors.Is(err, importer.ErrCandidateConflict), errors.Is(err, importer.ErrCandidateTerminal), errors.Is(err, importer.ErrParentNotAccepted), errors.Is(err, importer.ErrNoCandidateChanges):
-		writeError(writer, http.StatusConflict, err)
-	case errors.Is(err, importer.ErrInvalidSourceDirectory), errors.Is(err, importer.ErrNoEligibleFiles), errors.Is(err, importer.ErrSymlinkRefused), errors.Is(err, importer.ErrSourceChanged), errors.Is(err, importer.ErrInvalidContent), errors.Is(err, importer.ErrInvalidCandidate), errors.Is(err, extract.ErrInvalidRequest), errors.Is(err, extract.ErrInvalidResponse):
-		writeError(writer, http.StatusBadRequest, err)
-	case errors.Is(err, agent.ErrProviderRejected):
-		writeError(writer, http.StatusBadGateway, err)
+		writeError(writer, http.StatusConflict, errors.New("import operation conflicts with current project state"))
+	case errors.Is(err, importer.ErrInvalidSourceDirectory), errors.Is(err, importer.ErrNoEligibleFiles), errors.Is(err, importer.ErrSymlinkRefused), errors.Is(err, importer.ErrSourceChanged), errors.Is(err, importer.ErrInvalidContent), errors.Is(err, importer.ErrInvalidCandidate), errors.Is(err, importer.ErrInvalidID), errors.Is(err, importer.ErrInvalidPath), errors.Is(err, extract.ErrInvalidRequest):
+		writeError(writer, http.StatusBadRequest, errors.New("invalid import request"))
+	case errors.Is(err, extract.ErrInvalidResponse), errors.Is(err, agent.ErrProviderRejected):
+		writeError(writer, http.StatusBadGateway, errors.New("extraction provider returned an invalid response"))
 	case errors.Is(err, agent.ErrProviderOffline), errors.Is(err, agent.ErrProviderInvalid):
-		writeError(writer, http.StatusServiceUnavailable, err)
+		writeError(writer, http.StatusServiceUnavailable, errors.New("extraction provider is unavailable"))
 	case errors.Is(err, os.ErrNotExist):
-		writeError(writer, http.StatusNotFound, err)
+		writeError(writer, http.StatusNotFound, errors.New("import resource not found"))
 	default:
-		writeError(writer, http.StatusInternalServerError, err)
+		writeError(writer, http.StatusInternalServerError, errors.New("import operation failed"))
 	}
 }
 
