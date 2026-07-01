@@ -97,12 +97,28 @@ type fakeRunIDGenerator struct {
 }
 
 type fakeProfileResolver struct {
-	resolved provider.ResolvedProfile
-	found    bool
-	err      error
+	resolved  provider.ResolvedProfile
+	found     bool
+	err       error
+	byID      map[string]provider.ResolvedProfile
+	foundByID map[string]bool
 }
 
-func (r *fakeProfileResolver) Resolve(context.Context, string) (provider.ResolvedProfile, bool, error) {
+func (r *fakeProfileResolver) Resolve(_ context.Context, profileID string) (provider.ResolvedProfile, bool, error) {
+	if r.err != nil {
+		return provider.ResolvedProfile{}, false, r.err
+	}
+	if r.byID != nil {
+		resolved, ok := r.byID[profileID]
+		if !ok {
+			return provider.ResolvedProfile{}, r.foundByID[profileID], nil
+		}
+		found := true
+		if r.foundByID != nil {
+			found = r.foundByID[profileID]
+		}
+		return resolved, found, nil
+	}
 	return r.resolved, r.found, r.err
 }
 
@@ -170,6 +186,7 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	)
@@ -231,6 +248,7 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		secondRunStore,
 		&fakeRunIDGenerator{next: "run_ffffffffffffffffffff"},
 	)
@@ -311,6 +329,7 @@ func TestServiceRejectsInvalidProviderOutputBeforeRunInsertion(t *testing.T) {
 		&fakeSceneLoader{scene: scene},
 		&fakeAcceptor{},
 		&fakeProvider{response: agent.GenerateResponse{Replacement: " \t"}},
+		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	)
@@ -406,10 +425,10 @@ func TestServiceFiltersRealProviderStylesAndRechecksRunTimeReadiness(t *testing.
 		&fakeSceneLoader{scene: scene},
 		&fakeAcceptor{},
 		&fakeProvider{response: agent.GenerateResponse{Replacement: "Refined text"}},
+		resolver,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	)
-	service.SetProfileResolver(resolver)
 
 	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
 		Surface:        agent.SurfaceEditor,
@@ -437,6 +456,102 @@ func TestServiceFiltersRealProviderStylesAndRechecksRunTimeReadiness(t *testing.
 	})
 	if !errors.Is(err, ErrProviderInvalid) {
 		t.Fatalf("Run(missing credential) error = %v, want ErrProviderInvalid", err)
+	}
+}
+
+// BDD trace:
+//   - Requirements: M5-R08, M5-R09.
+//   - Scenario: 5.2.1, 5.2.2.
+//   - Test purpose: verify compatible styles are listed in style-name then
+//     style-ID order regardless of registry order, while incompatible styles are
+//     excluded and action ordering remains agent-name then ID.
+func TestAvailableActionsSortsCompatibleStylesByNameThenID(t *testing.T) {
+	t.Parallel()
+
+	linePolish := agent.Agent{
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeSelection}, MinWords: 2, MaxWords: 1500},
+		ModelRequirements: agent.ModelRequirements{MinContextTokens: 2048},
+		ContextPolicy:     agent.ContextPolicy{Required: []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet}},
+		RAGPolicy:         agent.RAGPolicy{Mode: agent.RAGModeNone},
+		Control:           agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
+		Output:            agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	alphaAgent := linePolish
+	alphaAgent.ID = "alpha_polish"
+	alphaAgent.Name = "Alpha Polish"
+
+	styles := []agent.Style{
+		{Version: 2, ID: "zeta_id", Name: "Zeta Voice", ProviderProfileID: "ready_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+		{Version: 2, ID: "alpha_b", Name: "Alpha Voice", ProviderProfileID: "ready_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+		{Version: 2, ID: "alpha_a", Name: "Alpha Voice", ProviderProfileID: "ready_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+		{Version: 2, ID: "first_but_incompatible", Name: "Aardvark Voice", ProviderProfileID: "small_context", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+	}
+	scene := testActionScene()
+	resolver := &fakeProfileResolver{
+		byID: map[string]provider.ResolvedProfile{
+			"ready_profile": {
+				Profile: provider.Profile{
+					ID:      "ready_profile",
+					Type:    provider.TypeOpenAICompatible,
+					BaseURL: "http://127.0.0.1:1234/v1",
+					Auth:    provider.AuthConfig{Type: provider.AuthTypeNone},
+					Capabilities: provider.Capabilities{
+						Chat:             true,
+						MaxContextTokens: 8192,
+					},
+					Readiness: provider.ReadinessReady,
+				},
+			},
+			"small_context": {
+				Profile: provider.Profile{
+					ID:      "small_context",
+					Type:    provider.TypeOpenAICompatible,
+					BaseURL: "http://127.0.0.1:1234/v1",
+					Auth:    provider.AuthConfig{Type: provider.AuthTypeNone},
+					Capabilities: provider.Capabilities{
+						Chat:             true,
+						MaxContextTokens: 32,
+					},
+					Readiness: provider.ReadinessReady,
+				},
+			},
+		},
+		foundByID: map[string]bool{
+			"ready_profile": true,
+			"small_context": true,
+		},
+	}
+	service := NewService(
+		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish, alphaAgent}, Styles: styles}},
+		&fakeSceneLoader{scene: scene},
+		&fakeAcceptor{},
+		&fakeProvider{response: agent.GenerateResponse{Replacement: "Refined text"}},
+		resolver,
+		NewRunStore(),
+		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
+	)
+
+	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
+		Surface:        agent.SurfaceEditor,
+		InputScope:     agent.InputScopeSelection,
+		SceneID:        scene.ID,
+		SelectionWords: 2,
+	})
+	if err != nil {
+		t.Fatalf("AvailableActions() error = %v", err)
+	}
+	if got := []string{actions[0].AgentID, actions[1].AgentID}; !slices.Equal(got, []string{"alpha_polish", "line_polish"}) {
+		t.Fatalf("action ordering = %v, want [alpha_polish line_polish]", got)
+	}
+	for _, actionDefinition := range actions {
+		if !slices.Equal(actionDefinition.StyleIDs, []string{"alpha_a", "alpha_b", "zeta_id"}) {
+			t.Fatalf("style ordering = %v, want [alpha_a alpha_b zeta_id]", actionDefinition.StyleIDs)
+		}
 	}
 }
 
@@ -490,6 +605,7 @@ func TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims(t *testing.T
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	)
@@ -843,6 +959,7 @@ func newActionTestService(scene story.SceneDocument, provider *fakeProvider, acc
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		runs,
 		ids,
 	)

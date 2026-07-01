@@ -4,8 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,7 @@ func TestMilestone5RealProviderFlowWithRealAdapters(t *testing.T) {
 
 	ctx := context.Background()
 	var outboundRequests int
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		outboundRequests++
 		if request.URL.Path != "/v1/chat/completions" || request.Method != http.MethodPost {
 			t.Errorf("provider request = %s %s", request.Method, request.URL.Path)
@@ -58,21 +59,35 @@ func TestMilestone5RealProviderFlowWithRealAdapters(t *testing.T) {
 		}
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{"id":"response-metadata","choices":[{"message":{"role":"assistant","content":"Provider polished selection"},"finish_reason":"stop"}]}`))
-	}))
-	defer server.Close()
+	})
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		if errors.Is(err, os.ErrPermission) || strings.Contains(err.Error(), "operation not permitted") {
+			t.Skipf("local loopback listener unavailable in this environment: %v", err)
+		}
+		t.Fatalf("Listen() error = %v", err)
+	}
+	server := &http.Server{Handler: handler}
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	defer func() {
+		_ = server.Shutdown(context.Background())
+	}()
+	serverURL := "http://" + listener.Addr().String()
 
 	configPath := filepath.Join(t.TempDir(), "app-config", "providers.yaml")
 	profileStore := provider.NewStore(configPath)
 	profileService := provider.NewService(profileStore, provider.EnvironmentBroker{})
 	profiles := []provider.Profile{{
-		ID: "local_openai", Name: "Local OpenAI", Type: provider.TypeOpenAICompatible, BaseURL: server.URL + "/v1",
+		ID: "local_openai", Name: "Local OpenAI", Type: provider.TypeOpenAICompatible, BaseURL: serverURL + "/v1",
 		Auth:         provider.AuthConfig{Type: provider.AuthTypeNone},
 		Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192},
 	}}
 	if _, revision, err := profileService.Save(ctx, profiles, nil); err != nil || revision == nil {
 		t.Fatalf("Save(provider profiles) = revision %v, error %v", revision, err)
 	}
-	if contents := mustReadFile(t, configPath); bytes.Contains(contents, []byte("secret")) || !bytes.Contains(contents, []byte(server.URL)) {
+	if contents := mustReadFile(t, configPath); bytes.Contains(contents, []byte("secret")) || !bytes.Contains(contents, []byte(serverURL)) {
 		t.Fatalf("provider config contents are incorrect: %s", contents)
 	}
 
@@ -118,8 +133,7 @@ func TestMilestone5RealProviderFlowWithRealAdapters(t *testing.T) {
 		t.Fatalf("git commit: %v: %s", err, output)
 	}
 
-	actions := action.NewService(session, agent.NewLoader(), stories, stories, agent.NewDispatcher(profileService, server.Client()), action.NewRunStore(), &staticRunIDGenerator{ids: []string{"run_00000000000000000001", "run_00000000000000000002"}})
-	actions.SetProfileResolver(profileService)
+	actions := action.NewService(session, agent.NewLoader(), stories, stories, agent.NewDispatcher(profileService, &http.Client{}), profileService, action.NewRunStore(), &staticRunIDGenerator{ids: []string{"run_00000000000000000001", "run_00000000000000000002"}})
 	available, err := actions.AvailableActions(ctx, agent.AvailabilityInput{Surface: agent.SurfaceEditor, InputScope: agent.InputScopeSelection, SceneID: saved.ID, SelectionWords: agent.WordCount(selected)})
 	if err != nil || len(available) != 1 || !containsString(available[0].StyleIDs, "real_provider") {
 		t.Fatalf("AvailableActions() = %#v, %v", available, err)

@@ -371,9 +371,5 @@ func errorsIsAny(err error, targets ...error) bool {
 
 func isTimeoutError(err error) bool {
 	var netErr net.Error
-	return errorAs(err, &netErr) && netErr.Timeout()
-}
-
-func errorAs(err error, target any) bool {
-	return errors.As(err, target)
+	return errors.As(err, &netErr) && netErr.Timeout()
 }

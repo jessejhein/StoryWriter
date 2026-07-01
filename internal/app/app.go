@@ -110,30 +110,21 @@ func NewHandler(version string) http.Handler {
 	projects := project.NewService(git, disposableIndex, time.Now)
 	files := storyfile.New()
 	stories := story.NewService(session, files, git, disposableIndex, story.NewRandomIDGenerator())
-	actions := action.NewService(
-		session,
-		agent.NewLoader(),
-		stories,
-		stories,
-		nil,
-		action.NewRunStore(),
-		action.NewRandomIDGenerator(),
-	)
 	configDir, configErr := provider.ResolveConfigDir(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
 	providerService := provider.NewService(
 		provider.NewStore(filepath.Join(configDir, "providers.yaml")),
 		provider.EnvironmentBroker{LookupEnv: os.LookupEnv},
 	)
-	actions = action.NewService(
+	actions := action.NewService(
 		session,
 		agent.NewLoader(),
 		stories,
 		stories,
 		agent.NewDispatcher(providerService, nil),
+		providerService,
 		action.NewRunStore(),
 		action.NewRandomIDGenerator(),
 	)
-	actions.SetProfileResolver(providerService)
 	return api.NewHandler(projects, session, &compositeStore{
 		stories:     stories,
 		actions:     actions,

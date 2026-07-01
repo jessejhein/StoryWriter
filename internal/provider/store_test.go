@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -329,4 +330,433 @@ func TestStoreCanonicalNamesRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// BDD trace:
+//   - Requirements: M5-R01, M5-R02.
+//   - Scenario: 5.1.2, 5.1.3.
+//   - Test purpose: verify each atomic-save failure mode wraps ErrProfileStore,
+//     preserves the previous canonical file before rename, cleans temp files
+//     when possible, and leaves first-create failures without a destination.
+func TestStoreSaveFailureInjection(t *testing.T) {
+	t.Parallel()
+
+	profiles := []Profile{testLocalOllamaProfile()}
+	validExistingBytes := mustCanonicalProfiles(t, []Profile{testHostedOpenAIProfile()})
+	existingRevision := ComputeRevision(validExistingBytes)
+
+	testCases := []struct {
+		name                   string
+		existing               bool
+		mutate                 func(t *testing.T, store *Store, state *tempFileState)
+		wantPath               string
+		wantCleanupAttempt     bool
+		wantDestinationPresent bool
+		wantPersistedChanged   bool
+	}{
+		{
+			name: "mkdir failure",
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				store.mkdirAll = func(string, os.FileMode) error { return errors.New("mkdir failed") }
+			},
+			wantPath:               "create provider config dir",
+			wantDestinationPresent: false,
+		},
+		{
+			name: "temp create failure",
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				store.openTempFile = func(string, os.FileMode) (tempFile, error) { return nil, errors.New("open temp failed") }
+			},
+			wantPath:               "create temp provider config",
+			wantDestinationPresent: false,
+		},
+		{
+			name:     "partial write failure preserves existing",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				state.writeN = 7
+				state.writeErr = errors.New("short write")
+			},
+			wantPath:               "write temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+		{
+			name:     "zero byte write failure preserves existing",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				state.writeN = 0
+				state.writeErr = errors.New("write failed")
+			},
+			wantPath:               "write temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+		{
+			name:     "chmod failure preserves existing",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				state.chmodErr = errors.New("chmod failed")
+			},
+			wantPath:               "chmod temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+		{
+			name:     "sync failure preserves existing",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				state.syncErr = errors.New("sync failed")
+			},
+			wantPath:               "sync temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+		{
+			name:     "close failure preserves existing",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				state.closeErr = errors.New("close failed")
+			},
+			wantPath:               "close temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+		{
+			name:     "rename failure preserves existing",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				store.rename = func(string, string) error { return errors.New("rename failed") }
+			},
+			wantPath:               "rename temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+		{
+			name:     "dir sync failure leaves renamed replacement visible",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				store.openTempFile = func(path string, mode os.FileMode) (tempFile, error) {
+					return os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
+				}
+				store.syncDir = func(string) error { return errors.New("dir sync failed") }
+			},
+			wantPath:               "sync provider config dir",
+			wantDestinationPresent: true,
+			wantPersistedChanged:   true,
+		},
+		{
+			name:     "cleanup remove failure keeps primary write error",
+			existing: true,
+			mutate: func(t *testing.T, store *Store, state *tempFileState) {
+				t.Helper()
+				state.writeErr = errors.New("write failed")
+				store.remove = func(string) error {
+					state.cleanupAttempts++
+					return errors.New("remove failed")
+				}
+			},
+			wantPath:               "write temp provider config",
+			wantCleanupAttempt:     true,
+			wantDestinationPresent: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			root := t.TempDir()
+			path := filepath.Join(root, "config", "providers.yaml")
+			if tc.existing {
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatalf("MkdirAll() error = %v", err)
+				}
+				if err := os.WriteFile(path, validExistingBytes, 0o600); err != nil {
+					t.Fatalf("WriteFile(existing) error = %v", err)
+				}
+			}
+
+			store := NewStore(path)
+			state := &tempFileState{path: filepath.Join(filepath.Dir(path), ".providers.yaml.tmp")}
+			store.remove = func(path string) error {
+				state.cleanupAttempts++
+				return nil
+			}
+			store.openTempFile = func(string, os.FileMode) (tempFile, error) {
+				file := &tempFileStub{state: state}
+				return file, nil
+			}
+			tc.mutate(t, store, state)
+
+			var expectedRevision *string
+			if tc.existing {
+				expectedRevision = &existingRevision
+			}
+			_, _, err := store.Save(context.Background(), profiles, expectedRevision)
+			if err == nil {
+				t.Fatal("Save() error = nil, want failure")
+			}
+			if !errors.Is(err, ErrProfileStore) {
+				t.Fatalf("Save() error = %v, want ErrProfileStore", err)
+			}
+			if !strings.Contains(err.Error(), tc.wantPath) {
+				t.Fatalf("Save() error = %q, want path %q", err, tc.wantPath)
+			}
+			if tc.wantCleanupAttempt && state.cleanupAttempts == 0 {
+				t.Fatal("cleanup remove attempts = 0, want at least one")
+			}
+
+			persistedBytes, readErr := os.ReadFile(path)
+			if tc.wantDestinationPresent {
+				if readErr != nil {
+					t.Fatalf("ReadFile(destination) error = %v", readErr)
+				}
+				switch {
+				case tc.wantPersistedChanged:
+					wantBytes := mustCanonicalProfiles(t, profiles)
+					if string(persistedBytes) != string(wantBytes) {
+						t.Fatalf("persisted bytes = %q, want renamed replacement", string(persistedBytes))
+					}
+				case tc.existing:
+					if string(persistedBytes) != string(validExistingBytes) {
+						t.Fatalf("persisted bytes changed to %q", string(persistedBytes))
+					}
+				}
+			} else if !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatalf("ReadFile(destination) error = %v, want not exist", readErr)
+			}
+		})
+	}
+}
+
+// BDD trace:
+//   - Requirements: M5-R01, M5-R02.
+//   - Scenario: 5.1.2, 5.1.3.
+//   - Test purpose: verify successful saves write a 0600 file, leave no temp
+//     artifact, and serialize concurrent whole-document replacements so exactly
+//     one caller wins a shared revision.
+func TestStoreSavePermissionsAndConcurrentRevisionConflicts(t *testing.T) {
+	t.Parallel()
+
+	t.Run("successful save uses 0600 and no leaked temp file", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		path := filepath.Join(root, "providers.yaml")
+		store := NewStore(path)
+		saved, revision, err := store.Save(context.Background(), []Profile{testLocalOllamaProfile()}, nil)
+		if err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+		if revision == nil || len(saved) != 1 {
+			t.Fatalf("Save() = (%#v, %v)", saved, revision)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("Stat() error = %v", err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("providers.yaml mode = %#o, want 0600", got)
+		}
+		if _, err := os.Stat(filepath.Join(root, ".providers.yaml.tmp")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("temp artifact err = %v, want not exist", err)
+		}
+	})
+
+	t.Run("concurrent same revision allows one winner", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		path := filepath.Join(root, "providers.yaml")
+		store := NewStore(path)
+		initialProfiles := []Profile{testLocalOllamaProfile()}
+		_, revision, err := store.Save(context.Background(), initialProfiles, nil)
+		if err != nil {
+			t.Fatalf("Save(initial) error = %v", err)
+		}
+
+		enterRename := make(chan struct{}, 1)
+		releaseRename := make(chan struct{})
+		store.rename = func(oldPath, newPath string) error {
+			enterRename <- struct{}{}
+			<-releaseRename
+			return os.Rename(oldPath, newPath)
+		}
+
+		winnerProfiles := []Profile{testHostedOpenAIProfile()}
+		loserProfiles := []Profile{testLocalOllamaProfile(), testHostedOpenAIProfile()}
+		type result struct {
+			revision *string
+			err      error
+		}
+		firstResult := make(chan result, 1)
+		secondResult := make(chan result, 1)
+
+		go func() {
+			_, nextRevision, err := store.Save(context.Background(), winnerProfiles, revision)
+			firstResult <- result{revision: nextRevision, err: err}
+		}()
+
+		<-enterRename
+		go func() {
+			_, nextRevision, err := store.Save(context.Background(), loserProfiles, revision)
+			secondResult <- result{revision: nextRevision, err: err}
+		}()
+
+		close(releaseRename)
+		first := <-firstResult
+		second := <-secondResult
+		if first.err != nil {
+			t.Fatalf("first Save() error = %v", first.err)
+		}
+		if !errors.Is(second.err, ErrProfileRevisionConflict) {
+			t.Fatalf("second Save() error = %v, want ErrProfileRevisionConflict", second.err)
+		}
+
+		loaded, loadedRevision, err := store.Load(context.Background())
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if loadedRevision == nil || first.revision == nil || *loadedRevision != *first.revision {
+			t.Fatalf("Load() revision = %v, want %v", loadedRevision, first.revision)
+		}
+		if len(loaded) != 1 || loaded[0].ID != "hosted_api" {
+			t.Fatalf("Load() profiles = %#v", loaded)
+		}
+	})
+
+	t.Run("concurrent initial create allows one winner", func(t *testing.T) {
+		t.Parallel()
+
+		root := t.TempDir()
+		path := filepath.Join(root, "providers.yaml")
+		store := NewStore(path)
+		enterRename := make(chan struct{}, 1)
+		releaseRename := make(chan struct{})
+		store.rename = func(oldPath, newPath string) error {
+			enterRename <- struct{}{}
+			<-releaseRename
+			return os.Rename(oldPath, newPath)
+		}
+
+		type result struct {
+			err error
+		}
+		firstResult := make(chan result, 1)
+		secondResult := make(chan result, 1)
+		go func() {
+			_, _, err := store.Save(context.Background(), []Profile{testLocalOllamaProfile()}, nil)
+			firstResult <- result{err: err}
+		}()
+		<-enterRename
+		go func() {
+			_, _, err := store.Save(context.Background(), []Profile{testHostedOpenAIProfile()}, nil)
+			secondResult <- result{err: err}
+		}()
+		close(releaseRename)
+
+		first := <-firstResult
+		second := <-secondResult
+		if first.err != nil {
+			t.Fatalf("first Save() error = %v", first.err)
+		}
+		if !errors.Is(second.err, ErrProfileRevisionConflict) {
+			t.Fatalf("second Save() error = %v, want ErrProfileRevisionConflict", second.err)
+		}
+	})
+}
+
+type tempFileState struct {
+	path            string
+	writeN          int
+	writeErr        error
+	chmodErr        error
+	syncErr         error
+	closeErr        error
+	cleanupAttempts int
+	mu              sync.Mutex
+	writes          []byte
+}
+
+type tempFileStub struct {
+	state *tempFileState
+}
+
+func (f *tempFileStub) Write(contents []byte) (int, error) {
+	f.state.mu.Lock()
+	defer f.state.mu.Unlock()
+
+	n := len(contents)
+	if f.state.writeErr != nil {
+		n = f.state.writeN
+		if n > len(contents) {
+			n = len(contents)
+		}
+	}
+	f.state.writes = append(f.state.writes, contents[:n]...)
+	return n, f.state.writeErr
+}
+
+func (f *tempFileStub) Chmod(os.FileMode) error { return f.state.chmodErr }
+
+func (f *tempFileStub) Sync() error { return f.state.syncErr }
+
+func (f *tempFileStub) Close() error { return f.state.closeErr }
+
+func (f *tempFileStub) Name() string { return f.state.path }
+
+func testLocalOllamaProfile() Profile {
+	return Profile{
+		ID:      "local_ollama",
+		Name:    "Local Ollama",
+		Type:    TypeOllama,
+		BaseURL: "http://127.0.0.1:11434",
+		Auth:    AuthConfig{Type: AuthTypeNone},
+		Capabilities: Capabilities{
+			Chat:             true,
+			Streaming:        false,
+			StructuredOutput: false,
+			MaxContextTokens: 8192,
+		},
+	}
+}
+
+func testHostedOpenAIProfile() Profile {
+	return Profile{
+		ID:      "hosted_api",
+		Name:    "Hosted API",
+		Type:    TypeOpenAICompatible,
+		BaseURL: "https://api.example.test/v1",
+		Auth: AuthConfig{
+			Type:          AuthTypeBearerEnv,
+			CredentialEnv: "STORYWORK_HOSTED_API_KEY",
+		},
+		Capabilities: Capabilities{
+			Chat:             true,
+			Streaming:        false,
+			StructuredOutput: false,
+			MaxContextTokens: 32768,
+		},
+	}
+}
+
+func mustCanonicalProfiles(t *testing.T, profiles []Profile) []byte {
+	t.Helper()
+
+	_, canonical, _, err := ValidateProfiles(profiles)
+	if err != nil {
+		t.Fatalf("ValidateProfiles() error = %v", err)
+	}
+	return canonical
 }

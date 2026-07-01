@@ -123,6 +123,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 		storyService,
 		storyService,
 		agent.NewMockProvider(),
+		nil,
 		action.NewRunStore(),
 		&staticRunIDGenerator{ids: []string{
 			"run_00000000000000000001",
@@ -268,6 +269,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
 		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
 		agent.NewMockProvider(),
+		nil,
 		action.NewRunStore(),
 		&staticRunIDGenerator{ids: []string{"run_00000000000000000005"}},
 	)

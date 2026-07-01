@@ -228,20 +228,17 @@ type Service struct {
 	ids      RunIDGenerator
 }
 
-func NewService(session Session, loader RegistryLoader, scenes SceneLoader, acceptor PatchAcceptor, provider agent.TextGenerator, runs *RunStore, ids RunIDGenerator) *Service {
+func NewService(session Session, loader RegistryLoader, scenes SceneLoader, acceptor PatchAcceptor, provider agent.TextGenerator, resolver ProfileResolver, runs *RunStore, ids RunIDGenerator) *Service {
 	return &Service{
 		session:  session,
 		loader:   loader,
 		scenes:   scenes,
 		acceptor: acceptor,
 		provider: provider,
+		resolver: resolver,
 		runs:     runs,
 		ids:      ids,
 	}
-}
-
-func (s *Service) SetProfileResolver(resolver ProfileResolver) {
-	s.resolver = resolver
 }
 
 func (s *Service) Agents(ctx context.Context) ([]agent.Agent, error) {
@@ -272,18 +269,28 @@ func (s *Service) AvailableActions(ctx context.Context, input agent.Availability
 		if !decision.Applicable {
 			continue
 		}
-		styleIDs = styleIDs[:0]
+		compatibleStyles := make([]agent.Style, 0, len(registry.Styles))
 		for _, style := range registry.Styles {
 			compatible, err := s.styleCompatible(ctx, decision.Agent, style)
 			if err != nil {
 				return nil, err
 			}
 			if compatible {
-				styleIDs = append(styleIDs, style.ID)
+				compatibleStyles = append(compatibleStyles, style)
 			}
 		}
-		if len(styleIDs) == 0 {
+		if len(compatibleStyles) == 0 {
 			continue
+		}
+		sort.Slice(compatibleStyles, func(i, j int) bool {
+			if compatibleStyles[i].Name != compatibleStyles[j].Name {
+				return compatibleStyles[i].Name < compatibleStyles[j].Name
+			}
+			return compatibleStyles[i].ID < compatibleStyles[j].ID
+		})
+		styleIDs = styleIDs[:0]
+		for _, style := range compatibleStyles {
+			styleIDs = append(styleIDs, style.ID)
 		}
 		result = append(result, AvailableAction{
 			AgentID:            decision.Agent.ID,

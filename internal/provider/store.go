@@ -14,29 +14,27 @@ import (
 )
 
 type Store struct {
-	path      string
-	mu        sync.Mutex
-	readFile  func(string) ([]byte, error)
-	writeFile func(string, []byte, os.FileMode) error
-	mkdirAll  func(string, os.FileMode) error
-	rename    func(string, string) error
-	remove    func(string) error
-	openFile  func(string, int, os.FileMode) (*os.File, error)
-	syncDir   func(string) error
-	lstat     func(string) (os.FileInfo, error)
+	path         string
+	mu           sync.Mutex
+	readFile     func(string) ([]byte, error)
+	mkdirAll     func(string, os.FileMode) error
+	rename       func(string, string) error
+	remove       func(string) error
+	openTempFile func(string, os.FileMode) (tempFile, error)
+	syncDir      func(string) error
+	lstat        func(string) (os.FileInfo, error)
 }
 
 func NewStore(path string) *Store {
 	return &Store{
-		path:      filepath.Clean(path),
-		readFile:  os.ReadFile,
-		writeFile: os.WriteFile,
-		mkdirAll:  os.MkdirAll,
-		rename:    os.Rename,
-		remove:    os.Remove,
-		openFile:  os.OpenFile,
-		syncDir:   defaultSyncDir,
-		lstat:     os.Lstat,
+		path:         filepath.Clean(path),
+		readFile:     os.ReadFile,
+		mkdirAll:     os.MkdirAll,
+		rename:       os.Rename,
+		remove:       os.Remove,
+		openTempFile: defaultOpenTempFile,
+		syncDir:      defaultSyncDir,
+		lstat:        os.Lstat,
 	}
 }
 
@@ -118,14 +116,17 @@ func (s *Store) writeCanonicalLocked(contents []byte) error {
 	if err := s.mkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create provider config dir: %w: %w", err, ErrProfileStore)
 	}
-	tmpFile, err := s.openFile(filepath.Join(dir, ".providers.yaml.tmp"), os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	tmpFile, err := s.openTempFile(filepath.Join(dir, ".providers.yaml.tmp"), 0o600)
 	if err != nil {
 		return fmt.Errorf("create temp provider config: %w: %w", err, ErrProfileStore)
 	}
 	tmpPath := tmpFile.Name()
 	cleanup := true
+	closed := false
 	defer func() {
-		_ = tmpFile.Close()
+		if !closed {
+			_ = tmpFile.Close()
+		}
 		if cleanup {
 			_ = s.remove(tmpPath)
 		}
@@ -140,8 +141,10 @@ func (s *Store) writeCanonicalLocked(contents []byte) error {
 		return fmt.Errorf("sync temp provider config: %w: %w", err, ErrProfileStore)
 	}
 	if err := tmpFile.Close(); err != nil {
+		closed = true
 		return fmt.Errorf("close temp provider config: %w: %w", err, ErrProfileStore)
 	}
+	closed = true
 	if err := s.rename(tmpPath, s.path); err != nil {
 		return fmt.Errorf("rename temp provider config: %w: %w", err, ErrProfileStore)
 	}
@@ -178,6 +181,18 @@ func decodeCanonical(contents []byte) (yamlDocument, error) {
 		return yamlDocument{}, errors.New("profiles is required")
 	}
 	return document, nil
+}
+
+type tempFile interface {
+	Write([]byte) (int, error)
+	Chmod(os.FileMode) error
+	Sync() error
+	Close() error
+	Name() string
+}
+
+func defaultOpenTempFile(path string, mode os.FileMode) (tempFile, error) {
+	return os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, mode)
 }
 
 func defaultSyncDir(path string) error {

@@ -87,6 +87,20 @@ func (s resolvedProfileStub) Resolve(context.Context, string) (provider.Resolved
 	return s.profile, s.found, s.err
 }
 
+type closingReadCloser struct {
+	reader io.Reader
+	closed bool
+}
+
+func (c *closingReadCloser) Read(p []byte) (int, error) {
+	return c.reader.Read(p)
+}
+
+func (c *closingReadCloser) Close() error {
+	c.closed = true
+	return nil
+}
+
 // BDD trace:
 //   - Requirements: M5-R05, M5-R06, M5-R07, M5-R10.
 //   - Scenarios: 5.3.1, 5.3.2, 5.4.1.
@@ -469,4 +483,222 @@ func TestDispatcherRefusesRedirectsWithInjectedClient(t *testing.T) {
 	if requestCount != 1 {
 		t.Fatalf("outbound request count = %d, want 1", requestCount)
 	}
+}
+
+// Test: real-provider execution must fail closed before outbound I/O when the
+// profile is missing or incompatible with the agent's declared requirements.
+// Requirements: M5-R08, M5-R09, M5-R10.
+func TestDispatcherRejectsMissingProfilesAndIncompatibleRequirements(t *testing.T) {
+	t.Parallel()
+
+	baseAgent := Agent{
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 100},
+		ModelRequirements: ModelRequirements{MinContextTokens: 2048},
+		ContextPolicy:     ContextPolicy{Required: []ContextPack{ContextSelectedText, ContextStyleSheet}},
+		RAGPolicy:         RAGPolicy{Mode: RAGModeNone},
+		Control:           Control{OutputMode: OutputModePatch, RequiresAcceptance: true},
+		Output:            Output{Type: OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	baseStyle := Style{Version: 2, ID: "real_style", Name: "Real Style", ProviderProfileID: "real_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"}
+	panicClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("unexpected outbound request")
+		return nil, nil
+	})}
+
+	readyProfile := provider.ResolvedProfile{
+		Profile: provider.Profile{
+			ID:      "real_profile",
+			Type:    provider.TypeOpenAICompatible,
+			BaseURL: "https://api.example.test/v1",
+			Auth:    provider.AuthConfig{Type: provider.AuthTypeNone},
+			Capabilities: provider.Capabilities{
+				Chat:             true,
+				MaxContextTokens: 8192,
+			},
+			Readiness: provider.ReadinessReady,
+		},
+	}
+
+	tests := []struct {
+		name     string
+		resolver profileResolver
+		agent    Agent
+		want     error
+	}{
+		{name: "resolver missing", resolver: nil, agent: baseAgent, want: ErrProviderInvalid},
+		{name: "profile not found", resolver: resolvedProfileStub{found: false}, agent: baseAgent, want: ErrProviderInvalid},
+		{name: "missing credential", resolver: resolvedProfileStub{profile: func() provider.ResolvedProfile {
+			profile := readyProfile
+			profile.Auth = provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "STORYWORK_KEY"}
+			profile.Readiness = provider.ReadinessMissingCredential
+			return profile
+		}(), found: true}, agent: baseAgent, want: ErrProviderInvalid},
+		{name: "chat unsupported", resolver: resolvedProfileStub{profile: func() provider.ResolvedProfile {
+			profile := readyProfile
+			profile.Capabilities.Chat = false
+			return profile
+		}(), found: true}, agent: baseAgent, want: ErrProviderInvalid},
+		{name: "context too small", resolver: resolvedProfileStub{profile: func() provider.ResolvedProfile {
+			profile := readyProfile
+			profile.Capabilities.MaxContextTokens = 16
+			return profile
+		}(), found: true}, agent: baseAgent, want: ErrProviderInvalid},
+		{name: "streaming required", resolver: resolvedProfileStub{profile: readyProfile, found: true}, agent: func() Agent {
+			agentDefinition := baseAgent
+			agentDefinition.ModelRequirements.SupportsStreaming = true
+			return agentDefinition
+		}(), want: ErrProviderInvalid},
+		{name: "structured output required", resolver: resolvedProfileStub{profile: readyProfile, found: true}, agent: func() Agent {
+			agentDefinition := baseAgent
+			agentDefinition.ModelRequirements.SupportsStructuredOutput = true
+			return agentDefinition
+		}(), want: ErrProviderInvalid},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := NewDispatcher(tc.resolver, panicClient).Generate(context.Background(), GenerateRequest{
+				Agent:   tc.agent,
+				Style:   baseStyle,
+				Packet:  ContextPacket{SelectedText: "Original", Style: baseStyle},
+				Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Generate() error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// Test: the HTTP adapter must close response bodies on success and failure and
+// reject oversize request/response payloads without leaking provider secrets.
+// Requirements: M5-R04, M5-R07.
+func TestHTTPGeneratorClosesBodiesAndEnforcesSizeLimits(t *testing.T) {
+	t.Parallel()
+
+	agentDefinition := Agent{
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 100},
+		ModelRequirements: ModelRequirements{MinContextTokens: 1},
+		ContextPolicy:     ContextPolicy{Required: []ContextPack{ContextSelectedText, ContextStyleSheet}},
+		RAGPolicy:         RAGPolicy{Mode: RAGModeNone},
+		Control:           Control{OutputMode: OutputModePatch, RequiresAcceptance: true},
+		Output:            Output{Type: OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	style := Style{Version: 2, ID: "style", Name: "Style", ProviderProfileID: "hosted", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"}
+	resolver := resolvedProfileStub{profile: provider.ResolvedProfile{Profile: provider.Profile{
+		ID: "hosted", Type: provider.TypeOpenAICompatible, BaseURL: "https://origin.example/v1",
+		Auth:         provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "STORYWORK_KEY"},
+		Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192}, Readiness: provider.ReadinessReady,
+	}, Credential: provider.Credential{Value: "sentinel-secret"}}, found: true}
+
+	t.Run("success and malformed responses close the body", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name string
+			body string
+			want error
+		}{
+			{name: "success", body: `{"choices":[{"message":{"content":"Rewritten"}}]}`},
+			{name: "malformed", body: `{"choices":[`, want: ErrProviderRejected},
+		}
+		for _, tc := range tests {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				responseBody := &closingReadCloser{reader: strings.NewReader(tc.body)}
+				client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       responseBody,
+					}, nil
+				})}
+				_, err := NewDispatcher(resolver, client).Generate(context.Background(), GenerateRequest{
+					Agent:   agentDefinition,
+					Style:   style,
+					Packet:  ContextPacket{SelectedText: "Original", Style: style},
+					Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+				})
+				if tc.want == nil && err != nil {
+					t.Fatalf("Generate() error = %v", err)
+				}
+				if tc.want != nil && !errors.Is(err, tc.want) {
+					t.Fatalf("Generate() error = %v, want %v", err, tc.want)
+				}
+				if !responseBody.closed {
+					t.Fatal("response body was not closed")
+				}
+			})
+		}
+	})
+
+	t.Run("oversize request is rejected before network", func(t *testing.T) {
+		t.Parallel()
+
+		client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			t.Fatal("unexpected outbound request")
+			return nil, nil
+		})}
+		hugeStyle := style
+		hugeStyle.SystemPrompt = strings.Repeat("x", 7<<20)
+		_, err := NewDispatcher(resolver, client).Generate(context.Background(), GenerateRequest{
+			Agent:   agentDefinition,
+			Style:   hugeStyle,
+			Packet:  ContextPacket{SelectedText: "Original", Style: hugeStyle},
+			Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+		})
+		if !errors.Is(err, ErrProviderRejected) {
+			t.Fatalf("Generate() error = %v, want ErrProviderRejected", err)
+		}
+	})
+
+	t.Run("oversize response and redirect errors stay secret-safe", func(t *testing.T) {
+		t.Parallel()
+
+		oversizedJSON := `{"choices":[{"message":{"content":"` + strings.Repeat("a", 2<<20) + `"}}]}`
+		for _, testCase := range []struct {
+			name       string
+			statusCode int
+			header     http.Header
+			body       string
+		}{
+			{name: "oversize response", statusCode: http.StatusOK, header: http.Header{"Content-Type": []string{"application/json"}}, body: oversizedJSON},
+			{name: "redirect", statusCode: http.StatusFound, header: http.Header{"Location": []string{"https://redirected.example/sentinel-secret"}}, body: "sentinel-secret"},
+		} {
+			testCase := testCase
+			t.Run(testCase.name, func(t *testing.T) {
+				t.Parallel()
+				client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+					return &http.Response{
+						StatusCode: testCase.statusCode,
+						Header:     testCase.header,
+						Body:       io.NopCloser(strings.NewReader(testCase.body)),
+					}, nil
+				})}
+				_, err := NewDispatcher(resolver, client).Generate(context.Background(), GenerateRequest{
+					Agent:   agentDefinition,
+					Style:   style,
+					Packet:  ContextPacket{SelectedText: "Original", Style: style},
+					Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+				})
+				if !errors.Is(err, ErrProviderRejected) {
+					t.Fatalf("Generate() error = %v, want ErrProviderRejected", err)
+				}
+				if strings.Contains(err.Error(), "sentinel-secret") {
+					t.Fatalf("Generate() error leaked sentinel: %v", err)
+				}
+			})
+		}
+	})
 }

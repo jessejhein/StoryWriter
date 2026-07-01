@@ -63,7 +63,7 @@ export default function App() {
     event.preventDefault()
     const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null
     const mode = submitter?.value === 'open' ? 'open' : 'create'
-      setError('')
+    setError('')
     try {
       setProject(mode === 'create' ? await createProject(name, path) : await openProject(path))
       setShellView({ area: 'project', view: { mode: 'outline' } })
