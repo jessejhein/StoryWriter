@@ -230,6 +230,11 @@ At least one local endpoint and one API-key provider path can run a simple text 
 
 ## Milestone 6 — Markdown import and extraction review queue
 
+Status: planned. The durable implementation contract is
+`docs/15_milestone_6_task_prompt.md`; follow
+`.plans/milestone_6_implementation.md` and do not claim completion before its
+evidence, documentation, status, and verification gates pass.
+
 ### Goal
 
 Import messy notes and create reviewable candidates.

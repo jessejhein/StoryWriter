@@ -33,7 +33,8 @@ my-novel/
 │   └── dry_modern_fantasy.yaml
 ├── imports/
 │   ├── raw/
-│   └── processed/
+│   ├── processed/
+│   └── review/
 └── .storywork/
     ├── index.sqlite
     ├── embeddings.sqlite
@@ -53,7 +54,10 @@ Tracked:
 - `progressions/`
 - `agents/`
 - `styles/`
-- `imports/raw/` when the user chooses to preserve source notes
+- `imports/raw/` when the user chooses to preserve source notes; Milestone 6
+  uses tracked copy-only snapshots
+- `imports/review/` for durable extraction proposals and author decisions once
+  Milestone 6 is implemented
 
 Ignored:
 
@@ -210,12 +214,15 @@ SQLite stores derived/query state:
 - Codex search index,
 - mention index,
 - active progression cache,
-- import chunks,
-- extraction candidates,
+- import chunks and transient extraction-attempt data,
 - agent run logs,
 - embeddings/vector data if implemented.
 
-SQLite must not be the only copy of canonical prose, Codex, outline, agents, or styles.
+SQLite must not be the only copy of canonical prose, Codex, outline, agents, or
+styles.
+It must also not be the only copy of a review candidate or author review
+decision. Milestone 6 stores those durable proposals under `imports/review/`;
+only reproducible chunks and transient attempt data belong in `.storywork/`.
 
 ## Application provider configuration
 
