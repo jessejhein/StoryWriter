@@ -171,11 +171,48 @@ focus placement, and the no-second-save editor acceptance flow.
 
 ### Milestone 6
 
-- Markdown folder import finds `.md` files.
-- Imported notes are chunked.
-- Extraction produces candidates.
-- Candidates do not mutate canon until accepted.
-- Merge candidate combines aliases/tags correctly.
+- `internal/importer/model_test.go`:
+  `TestManifestValidateEnforcesCanonicalForm`,
+  `TestManifestValidateRejectsInvalidMetadataAndLimits`,
+  `TestNormalizePortableRelativePathRejectsUnsafeComponents`,
+  `TestDetectCaseFoldedCollisionRejectsPortableConflicts`,
+  `TestDiscoveryPolicyFiltersAndOrdersEligibleMarkdownPaths`,
+  `TestManifestSummaryOmitsExternalSourcePath`
+- `internal/importer/source_store_test.go`:
+  `TestSourceStorePrepareSnapshotCopiesEligibleMarkdownFiles`,
+  `TestSourceStorePrepareSnapshotRejectsInvalidSourceDirectory`,
+  `TestSourceStorePrepareSnapshotRejectsSymlinkAndInvalidUTF8`
+- `internal/importer/chunk_test.go`:
+  `TestChunkMarkdownSplitsDeterministicallyAtHeadingAndBlankBoundaries`,
+  `TestChunkMarkdownHandlesOversizedLinesWithoutSplittingRunesOrLines`
+- `internal/extract/model_test.go`:
+  `TestValidateRequestRejectsUnknownModeAndOversizedPayload`,
+  `TestParseResponseRequiresStrictSingleObject`
+- `internal/importer/candidate_model_test.go`:
+  `TestNormalizeCandidateValidatesKindsProvenanceAndDecisionState`,
+  `TestNormalizeCandidateRejectsUnsupportedProposalVersionAndMismatchedRevision`
+- `internal/importer/import_service_test.go`:
+  `TestImportServiceRequiresActiveCleanProject`,
+  `TestImportServicePublishesSnapshotRebuildsIndexAndCommits`,
+  `TestExtractPublishesValidatedCandidatesWithoutCanonMutation`,
+  `TestReviewOperationsEditDiscardMergeAndAccept`
+- `internal/story/import_mutation_service_test.go`:
+  `TestApplyImportMutationCreatesCanonicalFilesWithoutCheckpoint`
+- `internal/api/import_handler_test.go`:
+  `TestImportRoutesReturnExactJSONShapes`,
+  `TestImportRouteStatusMapping`
+- `web/src/api.imports.test.ts`:
+  `uses the documented import-review routes and JSON bodies`
+- `web/src/imports/ImportReviewWorkbench.test.tsx`:
+  `imports notes, extracts candidates, and accepts one candidate`,
+  `confirms candidate navigation when a draft is dirty`
+- `web/src/App.imports_navigation.test.tsx`:
+  `opens import review after project creation`
+
+This evidence covers snapshot import validation, no external-path retention,
+deterministic chunking, strict extraction decoding, durable candidate queue
+rules, review transitions, story-owned acceptance, exact HTTP contracts, UI
+dirty-state protection, and the full import-to-accept flow.
 
 ### Milestone 7
 

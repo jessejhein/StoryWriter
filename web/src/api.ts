@@ -191,6 +191,91 @@ export type ProviderProfilesResponse = {
   revision: string | null
 }
 
+export type ImportSummary = {
+  id: string
+  created_at: string
+  file_count: number
+  total_bytes: number
+}
+
+export type ImportFile = {
+  path: string
+  bytes: number
+  sha256: string
+}
+
+export type ImportResponse = {
+  import: ImportSummary
+  files: ImportFile[]
+}
+
+export type ImportChunk = {
+  id: string
+  import_id: string
+  source_path: string
+  start_line: number
+  end_line: number
+  text: string
+  sha256: string
+}
+
+export type ImportCandidateKind = 'codex' | 'arc' | 'chapter' | 'scene'
+export type ImportCandidateStatus = 'pending' | 'merged' | 'discarded' | 'accepted'
+
+export type ImportCanonicalRef = {
+  kind: 'codex' | 'arc' | 'chapter' | 'scene'
+  id: string
+}
+
+export type CodexCandidateProposal = {
+  type: CodexEntryType
+  name: string
+  aliases: string[]
+  tags: string[]
+  description: string
+}
+
+export type ArcCandidateProposal = { title: string }
+export type ChapterCandidateProposal = { title: string; parent_candidate_id: string }
+export type SceneCandidateProposal = { title: string; parent_candidate_id: string }
+
+export type ImportCandidateProposal =
+  | CodexCandidateProposal
+  | ArcCandidateProposal
+  | ChapterCandidateProposal
+  | SceneCandidateProposal
+
+export type ImportCandidate = {
+  id: string
+  kind: ImportCandidateKind
+  proposal_version: number
+  status: ImportCandidateStatus
+  revision: string
+  provenance: { chunk_ids: string[] }
+  proposal: ImportCandidateProposal
+  replacement_candidate_id: string | null
+  canonical_refs: ImportCanonicalRef[]
+}
+
+export type ImportExtractionResponse = {
+  candidates: ImportCandidate[]
+  provider: {
+    profile_id: string
+    type: 'openai_compatible' | 'ollama'
+    model: string
+  }
+}
+
+export type ImportMergeResponse = {
+  candidate: ImportCandidate
+  merged_candidate_ids: string[]
+}
+
+export type ImportAcceptResponse = {
+  candidate: ImportCandidate
+  canonical_refs: ImportCanonicalRef[]
+}
+
 export type ActionDecisionResponse = {
   run_id: string
   status: 'accepted' | 'rejected'
@@ -437,4 +522,62 @@ export function saveCodexProgressions(entryID: string, requestBody: SaveCodexPro
 /** getCodexActiveState resolves one Codex entry as of the supplied scene ID. */
 export function getCodexActiveState(entryID: string, sceneID: string): Promise<CodexActiveState> {
   return request(`/api/codex/${entryID}/active?scene_id=${encodeURIComponent(sceneID)}`)
+}
+
+export function createImport(sourceDirectory: string): Promise<ImportResponse> {
+  return postJSON('/api/imports', { source_directory: sourceDirectory })
+}
+
+export function getImports(): Promise<{ imports: ImportSummary[] }> {
+  return request('/api/imports')
+}
+
+export function getImportChunks(importID: string): Promise<{ chunks: ImportChunk[] }> {
+  return request(`/api/imports/${importID}/chunks`)
+}
+
+export function extractImport(importID: string, requestBody: {
+  chunk_ids: string[]
+  mode: 'structure'
+  profile_id: string
+  model: string
+}): Promise<ImportExtractionResponse> {
+  return postJSON(`/api/imports/${importID}/extractions`, requestBody)
+}
+
+export function getImportCandidates(filters?: { status?: ImportCandidateStatus; kind?: ImportCandidateKind }): Promise<{ candidates: ImportCandidate[] }> {
+  const query = new URLSearchParams()
+  if (filters?.status) query.set('status', filters.status)
+  if (filters?.kind) query.set('kind', filters.kind)
+  const suffix = query.toString() ? `?${query.toString()}` : ''
+  return request(`/api/import-candidates${suffix}`)
+}
+
+export function getImportCandidate(candidateID: string): Promise<ImportCandidate> {
+  return request(`/api/import-candidates/${candidateID}`)
+}
+
+export function updateImportCandidate(candidateID: string, proposal: ImportCandidateProposal, expectedRevision: string): Promise<ImportCandidate> {
+  return request(`/api/import-candidates/${candidateID}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ proposal, expected_revision: expectedRevision }),
+  })
+}
+
+export function mergeImportCandidate(candidateID: string, requestBody: {
+  other_candidate_id: string
+  expected_revision: string
+  other_expected_revision: string
+  proposal: ImportCandidateProposal
+}): Promise<ImportMergeResponse> {
+  return postJSON(`/api/import-candidates/${candidateID}/merge`, requestBody)
+}
+
+export function discardImportCandidate(candidateID: string, expectedRevision: string): Promise<ImportCandidate> {
+  return postJSON(`/api/import-candidates/${candidateID}/discard`, { expected_revision: expectedRevision })
+}
+
+export function acceptImportCandidate(candidateID: string, expectedRevision: string): Promise<ImportAcceptResponse> {
+  return postJSON(`/api/import-candidates/${candidateID}/accept`, { expected_revision: expectedRevision })
 }

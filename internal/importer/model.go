@@ -15,17 +15,17 @@ import (
 )
 
 const (
-	ManifestVersion    = 1
-	maxImportFiles     = 500
-	maxImportFileBytes = 5 << 20
+	ManifestVersion     = 1
+	maxImportFiles      = 500
+	maxImportFileBytes  = 5 << 20
 	maxImportBatchBytes = 50 << 20
 )
 
 var (
-	ErrInvalidID            = errors.New("invalid import identifier")
-	ErrInvalidManifest      = errors.New("invalid import manifest")
-	ErrInvalidPath          = errors.New("invalid portable import path")
-	ErrCaseFoldedCollision  = errors.New("portable path case-folded collision")
+	ErrInvalidID           = errors.New("invalid import identifier")
+	ErrInvalidManifest     = errors.New("invalid import manifest")
+	ErrInvalidPath         = errors.New("invalid portable import path")
+	ErrCaseFoldedCollision = errors.New("portable path case-folded collision")
 
 	importIDPattern    = regexp.MustCompile(`^imp_[0-9a-f]{20}$`)
 	chunkIDPattern     = regexp.MustCompile(`^chk_[0-9a-f]{20}$`)
@@ -47,10 +47,10 @@ type ImportManifest struct {
 }
 
 type ImportSummary struct {
-	ID        string `json:"id"`
-	CreatedAt string `json:"created_at"`
-	FileCount int    `json:"file_count"`
-	TotalBytes int64 `json:"total_bytes"`
+	ID         string `json:"id"`
+	CreatedAt  string `json:"created_at"`
+	FileCount  int    `json:"file_count"`
+	TotalBytes int64  `json:"total_bytes"`
 }
 
 func ValidateImportID(value string) error {

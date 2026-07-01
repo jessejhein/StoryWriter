@@ -102,6 +102,32 @@ type MutationResult struct {
 	Outline   Outline `json:"outline"`
 }
 
+// ImportMutationKind identifies the canonical artifact an importer acceptance creates.
+type ImportMutationKind string
+
+const (
+	ImportMutationArc     ImportMutationKind = "arc"
+	ImportMutationChapter ImportMutationKind = "chapter"
+	ImportMutationScene   ImportMutationKind = "scene"
+	ImportMutationCodex   ImportMutationKind = "codex"
+)
+
+// ImportMutationRequest describes one no-checkpoint canonical creation used by
+// Milestone 6 candidate acceptance.
+type ImportMutationRequest struct {
+	Kind     ImportMutationKind
+	ParentID string
+	Title    string
+	Codex    codex.SaveEntryRequest
+}
+
+// ImportMutationResult reports the new canonical artifact and a rollback handle.
+type ImportMutationResult struct {
+	Kind     ImportMutationKind
+	ID       string
+	Rollback func() error
+}
+
 // Service coordinates outline reads and structural mutations.
 type Service struct {
 	session Session
@@ -763,6 +789,31 @@ func (s *Service) ResolveActiveCodexState(ctx context.Context, entryID, sceneID 
 	return codex.ResolveActiveState(entry, progressions.Progressions, flattenOutlineScenes(outline), sceneID)
 }
 
+// ApplyImportMutation creates one canonical artifact without rebuilding the
+// index or creating a checkpoint. The caller owns any surrounding transaction.
+func (s *Service) ApplyImportMutation(ctx context.Context, request ImportMutationRequest) (ImportMutationResult, error) {
+	current, err := s.currentProject()
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	switch request.Kind {
+	case ImportMutationArc:
+		return s.applyImportArc(ctx, current.Path, request.Title)
+	case ImportMutationChapter:
+		return s.applyImportChapter(ctx, current.Path, request.ParentID, request.Title)
+	case ImportMutationScene:
+		return s.applyImportScene(ctx, current.Path, request.ParentID, request.Title)
+	case ImportMutationCodex:
+		return s.applyImportCodex(ctx, current.Path, request.Codex)
+	default:
+		return ImportMutationResult{}, fmt.Errorf("unknown import mutation kind %q", request.Kind)
+	}
+}
+
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
 	var reloaded Outline
 	if err := s.persistFiles(ctx, projectPath, message, files, func() error {
@@ -821,6 +872,144 @@ func (s *Service) rollbackMutation(ctx context.Context, projectPath string, roll
 		joined = append(joined, err)
 	}
 	return errors.Join(joined...)
+}
+
+func (s *Service) applyImportArc(ctx context.Context, projectPath, title string) (ImportMutationResult, error) {
+	outline, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	arcID, err := s.nextUnusedID(ctx, projectPath, NodeKindArc)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	next, err := AddArc(outline, arcID, title)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	arc := next.Arcs[len(next.Arcs)-1]
+	outlineBytes, err := s.files.MarshalOutline(next)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	arcBytes, err := s.files.MarshalArc(arc)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{
+		"outline.yaml": outlineBytes,
+		filepath.ToSlash(filepath.Join("arcs", arcID+".yaml")): arcBytes,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationArc, ID: arcID, Rollback: rollback}, nil
+}
+
+func (s *Service) applyImportChapter(ctx context.Context, projectPath, arcID, title string) (ImportMutationResult, error) {
+	outline, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	chapterID, err := s.nextUnusedID(ctx, projectPath, NodeKindChapter)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	next, err := AddChapter(outline, arcID, chapterID, title)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	chapter, err := findChapter(next, chapterID)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	outlineBytes, err := s.files.MarshalOutline(next)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	chapterBytes, err := s.files.MarshalChapter(chapter)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{
+		"outline.yaml": outlineBytes,
+		filepath.ToSlash(filepath.Join("chapters", chapterID+".yaml")): chapterBytes,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationChapter, ID: chapterID, Rollback: rollback}, nil
+}
+
+func (s *Service) applyImportScene(ctx context.Context, projectPath, chapterID, title string) (ImportMutationResult, error) {
+	outline, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	sceneID, err := s.nextUnusedID(ctx, projectPath, NodeKindScene)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	next, err := AddScene(outline, chapterID, sceneID, title)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	scene, err := findScene(next, sceneID)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	outlineBytes, err := s.files.MarshalOutline(next)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	sceneBytes, err := s.files.MarshalScene(scene)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{
+		"outline.yaml": outlineBytes,
+		filepath.ToSlash(filepath.Join("scenes", sceneID+".md")): sceneBytes,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationScene, ID: sceneID, Rollback: rollback}, nil
+}
+
+func (s *Service) applyImportCodex(ctx context.Context, projectPath string, request codex.SaveEntryRequest) (ImportMutationResult, error) {
+	request, err := codex.NormalizeCreateRequest(request)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	entryID, err := s.nextUnusedID(ctx, projectPath, codexNodeKind(request.Type))
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	nextEntry, err := codex.NormalizeEntry(codex.Entry{
+		ID:          entryID,
+		Type:        request.Type,
+		Name:        request.Name,
+		Aliases:     request.Aliases,
+		Tags:        request.Tags,
+		Description: request.Description,
+		Metadata:    request.Metadata,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	entryBytes, err := s.files.MarshalCodexEntry(nextEntry)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	relativePath, err := codexEntryPath(nextEntry)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{relativePath: entryBytes})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationCodex, ID: entryID, Rollback: rollback}, nil
 }
 
 func (s *Service) currentProject() (project.Project, error) {

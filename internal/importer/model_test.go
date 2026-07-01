@@ -92,9 +92,9 @@ func TestManifestValidateRejectsInvalidMetadataAndLimits(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name     string
-		mutate   func(*ImportManifest)
-		wantErr  error
+		name    string
+		mutate  func(*ImportManifest)
+		wantErr error
 	}{
 		{name: "wrong version", mutate: func(m *ImportManifest) { m.Version = 0 }, wantErr: ErrInvalidManifest},
 		{name: "empty files", mutate: func(m *ImportManifest) { m.Files = nil }, wantErr: ErrInvalidManifest},

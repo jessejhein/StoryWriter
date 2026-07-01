@@ -80,13 +80,13 @@ type CandidateProposal struct {
 }
 
 type Candidate struct {
-	Version         int             `yaml:"version"`
-	ID              string          `yaml:"id"`
-	Kind            CandidateKind   `yaml:"kind"`
-	ProposalVersion int             `yaml:"proposal_version"`
-	Status          CandidateStatus `yaml:"status"`
-	Revision        string          `yaml:"revision"`
-	Provenance      Provenance      `yaml:"provenance"`
+	Version         int               `yaml:"version"`
+	ID              string            `yaml:"id"`
+	Kind            CandidateKind     `yaml:"kind"`
+	ProposalVersion int               `yaml:"proposal_version"`
+	Status          CandidateStatus   `yaml:"status"`
+	Revision        string            `yaml:"revision"`
+	Provenance      Provenance        `yaml:"provenance"`
 	Proposal        CandidateProposal `yaml:"proposal"`
 	Decision        CandidateDecision `yaml:"decision"`
 }
@@ -95,6 +95,8 @@ var (
 	ErrInvalidCandidate   = errors.New("invalid import candidate")
 	ErrCandidateConflict  = errors.New("stale import candidate revision")
 	ErrCandidateTerminal  = errors.New("candidate is not pending")
+	ErrNoCandidateChanges = errors.New("candidate has no changes")
+	ErrParentNotAccepted  = errors.New("parent candidate is not accepted")
 )
 
 type candidateHandler interface {
@@ -415,4 +417,67 @@ func normalizeSortedUniqueStrings(values []string) []string {
 	}
 	slices.Sort(normalized)
 	return normalized
+}
+
+func ValidateCandidateKind(value string) (CandidateKind, error) {
+	switch CandidateKind(value) {
+	case CandidateKindCodex, CandidateKindArc, CandidateKindChapter, CandidateKindScene:
+		return CandidateKind(value), nil
+	default:
+		return "", ErrInvalidCandidate
+	}
+}
+
+func ValidateCandidateStatus(value string) (CandidateStatus, error) {
+	switch CandidateStatus(value) {
+	case CandidateStatusPending, CandidateStatusMerged, CandidateStatusDiscarded, CandidateStatusAccepted:
+		return CandidateStatus(value), nil
+	default:
+		return "", ErrInvalidCandidate
+	}
+}
+
+func proposalsEqual(left, right CandidateProposal) bool {
+	return codexProposalEqual(left.Codex, right.Codex) &&
+		arcProposalEqual(left.Arc, right.Arc) &&
+		chapterProposalEqual(left.Chapter, right.Chapter) &&
+		sceneProposalEqual(left.Scene, right.Scene)
+}
+
+func codexProposalEqual(left, right *CodexProposal) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Type == right.Type &&
+		left.Name == right.Name &&
+		left.Description == right.Description &&
+		slices.Equal(left.Aliases, right.Aliases) &&
+		slices.Equal(left.Tags, right.Tags)
+}
+
+func arcProposalEqual(left, right *ArcProposal) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Title == right.Title
+}
+
+func chapterProposalEqual(left, right *ChapterProposal) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Title == right.Title && left.ParentCandidateID == right.ParentCandidateID
+}
+
+func sceneProposalEqual(left, right *SceneProposal) bool {
+	if left == nil || right == nil {
+		return left == right
+	}
+	return left.Title == right.Title && left.ParentCandidateID == right.ParentCandidateID
+}
+
+func unionChunkIDs(left, right []string) []string {
+	combined := append(append([]string(nil), left...), right...)
+	slices.Sort(combined)
+	return slices.Compact(combined)
 }

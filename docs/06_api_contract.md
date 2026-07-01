@@ -250,6 +250,167 @@ Missing configuration returns:
 {"profiles":[],"revision":null}
 ```
 
+## Import review
+
+Milestone 6 adds a strict active-project import/review API. All routes return
+JSON errors with the existing `{"error":"..."}` shape. Other methods return
+`405 Method Not Allowed` with `Allow`.
+
+```http
+POST /api/imports
+GET  /api/imports
+GET  /api/imports/{import_id}/chunks
+POST /api/imports/{import_id}/extractions
+GET  /api/import-candidates?status=pending&kind=codex
+GET  /api/import-candidates/{candidate_id}
+PUT  /api/import-candidates/{candidate_id}
+POST /api/import-candidates/{candidate_id}/merge
+POST /api/import-candidates/{candidate_id}/discard
+POST /api/import-candidates/{candidate_id}/accept
+```
+
+Create import request:
+
+```json
+{"source_directory":"/absolute/path/to/notes"}
+```
+
+Create import response:
+
+```json
+{
+  "import": {
+    "id": "imp_0123456789abcdef0123",
+    "created_at": "2026-06-30T12:00:00Z",
+    "file_count": 1,
+    "total_bytes": 12
+  },
+  "files": [
+    {
+      "path": "notes/characters.md",
+      "bytes": 12,
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ]
+}
+```
+
+List imports returns `{"imports":[...]}`. No response includes an external
+source path.
+
+Chunk response:
+
+```json
+{
+  "chunks": [
+    {
+      "id": "chk_0123456789abcdef0123",
+      "import_id": "imp_0123456789abcdef0123",
+      "source_path": "notes/characters.md",
+      "start_line": 1,
+      "end_line": 2,
+      "text": "# Characters\nMara\n",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    }
+  ]
+}
+```
+
+Extraction request:
+
+```json
+{
+  "chunk_ids": ["chk_0123456789abcdef0123"],
+  "mode": "structure",
+  "profile_id": "local_ollama",
+  "model": "qwen2.5:7b"
+}
+```
+
+Extraction response:
+
+```json
+{
+  "candidates": [
+    {
+      "id": "cand_0123456789abcdef0123",
+      "kind": "codex",
+      "proposal_version": 1,
+      "status": "pending",
+      "revision": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "provenance": {"chunk_ids": ["chk_0123456789abcdef0123"]},
+      "proposal": {
+        "type": "character",
+        "name": "Mara Venn",
+        "aliases": ["Mara"],
+        "tags": ["pilot"],
+        "description": "A cautious salvage pilot."
+      },
+      "replacement_candidate_id": null,
+      "canonical_refs": []
+    }
+  ],
+  "provider": {
+    "profile_id": "local_ollama",
+    "type": "ollama",
+    "model": "qwen2.5:7b"
+  }
+}
+```
+
+Candidate list and load responses use the same candidate object shape. Lists
+always use arrays, never `null`.
+
+Candidate edit request:
+
+```json
+{
+  "proposal": {
+    "type": "character",
+    "name": "Mara Venn",
+    "aliases": ["Mara"],
+    "tags": ["pilot"],
+    "description": "Edited author text."
+  },
+  "expected_revision": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}
+```
+
+Merge response:
+
+```json
+{
+  "candidate": {/* merged candidate */},
+  "merged_candidate_ids": [
+    "cand_0123456789abcdef0123",
+    "cand_abcdef0123456789abcd"
+  ]
+}
+```
+
+Accept response:
+
+```json
+{
+  "candidate": {/* accepted candidate */},
+  "canonical_refs": [{"kind": "codex", "id": "char_0123456789abcdef0123"}]
+}
+```
+
+Import-review status rules:
+
+- `400 Bad Request`: malformed JSON, invalid path/ID/filter, empty import,
+  invalid chunk selection, invalid merge request, or invalid generated data.
+- `404 Not Found`: import or candidate ID is well formed but absent.
+- `409 Conflict`: no active project, dirty worktree, stale revision,
+  non-pending candidate, duplicate claim, or unaccepted parent candidate.
+- `413 Request Entity Too Large`: request body exceeds 1 MiB.
+- `502 Bad Gateway`: provider rejects or returns invalid output.
+- `503 Service Unavailable`: provider profile is unavailable or invalid at run
+  time.
+- `500 Internal Server Error`: filesystem, index, Git, rollback, or unexpected
+  adapter failure.
+
 ## Agents and styles
 
 Milestone 5 extends the Milestone 4 registry and action contract. Agent, style,

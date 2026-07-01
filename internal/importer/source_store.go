@@ -23,13 +23,15 @@ var (
 
 type osFS struct{}
 
-func (osFS) Lstat(path string) (fs.FileInfo, error)                 { return os.Lstat(path) }
-func (osFS) ReadDir(path string) ([]fs.DirEntry, error)             { return os.ReadDir(path) }
-func (osFS) ReadFile(path string) ([]byte, error)                   { return os.ReadFile(path) }
-func (osFS) MkdirAll(path string, perm fs.FileMode) error           { return os.MkdirAll(path, perm) }
-func (osFS) WriteFile(path string, data []byte, perm fs.FileMode) error { return os.WriteFile(path, data, perm) }
-func (osFS) RemoveAll(path string) error                            { return os.RemoveAll(path) }
-func (osFS) Rename(oldPath, newPath string) error                   { return os.Rename(oldPath, newPath) }
+func (osFS) Lstat(path string) (fs.FileInfo, error)       { return os.Lstat(path) }
+func (osFS) ReadDir(path string) ([]fs.DirEntry, error)   { return os.ReadDir(path) }
+func (osFS) ReadFile(path string) ([]byte, error)         { return os.ReadFile(path) }
+func (osFS) MkdirAll(path string, perm fs.FileMode) error { return os.MkdirAll(path, perm) }
+func (osFS) WriteFile(path string, data []byte, perm fs.FileMode) error {
+	return os.WriteFile(path, data, perm)
+}
+func (osFS) RemoveAll(path string) error          { return os.RemoveAll(path) }
+func (osFS) Rename(oldPath, newPath string) error { return os.Rename(oldPath, newPath) }
 func (osFS) OpenFile(name string, flag int, perm fs.FileMode) (*os.File, error) {
 	return os.OpenFile(name, flag, perm)
 }
@@ -46,10 +48,10 @@ type sourceFileSystem interface {
 }
 
 type PrepareSnapshotRequest struct {
-	ProjectPath      string
-	SourceDirectory  string
-	ImportID         string
-	CreatedAt        time.Time
+	ProjectPath     string
+	SourceDirectory string
+	ImportID        string
+	CreatedAt       time.Time
 }
 
 type PreparedSnapshot struct {

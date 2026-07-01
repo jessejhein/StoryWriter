@@ -11,6 +11,7 @@ import { createProject, getHealth, openProject, type Project } from './api'
 import ConfirmDialog from './components/ConfirmDialog'
 import CodexWorkbench from './codex/CodexWorkbench'
 import SceneEditor from './editor/SceneEditor'
+import ImportReviewWorkbench from './imports/ImportReviewWorkbench'
 import OutlineWorkbench from './outline/OutlineWorkbench'
 import ProviderWorkbench from './providers/ProviderWorkbench'
 import './styles.css'
@@ -18,6 +19,7 @@ import './styles.css'
 type ProjectView =
   | { mode: 'outline' }
   | { mode: 'codex' }
+  | { mode: 'imports' }
   | { mode: 'scene'; sceneID: string }
 
 type ShellView =
@@ -149,6 +151,7 @@ export default function App() {
           <nav className="project-nav">
             <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'outline' } })}>Outline</button>
             <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'codex' } })}>Codex</button>
+            <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'imports' } })}>Import Review</button>
           </nav>
           {shellView.view.mode === 'outline' ? (
             <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigate({ area: 'project', view: { mode: 'scene', sceneID } })} />
@@ -160,6 +163,8 @@ export default function App() {
               onBack={() => navigate({ area: 'project', view: { mode: 'outline' } })}
               onDirtyChange={setDirty}
             />
+          ) : shellView.view.mode === 'imports' ? (
+            <ImportReviewWorkbench onDirtyChange={setDirty} />
           ) : (
             <CodexWorkbench project={project} onDirtyChange={setDirty} />
           )}

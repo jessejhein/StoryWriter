@@ -62,9 +62,13 @@ Reasons:
 
 ### Import review screen
 
-- Show imported files.
-- Show extraction candidates.
-- Approve/edit/merge/discard.
+- Require an active project.
+- Enter an absolute source directory and create an import snapshot.
+- Show imports, imported files, and deterministic chunks with provenance.
+- Choose a ready provider/model and run structure extraction.
+- Show candidate status, provenance, and editable proposal fields.
+- Save edits, merge compatible pending candidates, discard, or accept.
+- Confirm before losing dirty candidate edits.
 
 ### Branch screen
 
@@ -114,6 +118,12 @@ remains tied to dirty authored drafts that would lose unsaved user work, not to
 a discardable clean preview. Milestone 5 adds non-secret provider identity
 (profile ID, provider type, model) to that preview while continuing to hide
 endpoint URLs and credential references.
+
+The Milestone 6 import review workbench follows the same dirty-draft rule: it
+keeps import/review navigation inside `web/src/imports/`, requires confirmation
+before switching candidates with unsaved edits, preserves the local draft across
+409 conflict responses, and renders terminal accepted/merged/discarded
+candidates as visibly non-editable.
 
 ## Do not build yet
 

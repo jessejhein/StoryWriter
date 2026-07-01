@@ -15,7 +15,9 @@ import (
 	"storywork/internal/agent"
 	"storywork/internal/api"
 	"storywork/internal/codex"
+	"storywork/internal/extract"
 	"storywork/internal/gitstore"
+	"storywork/internal/importer"
 	"storywork/internal/index"
 	"storywork/internal/project"
 	"storywork/internal/provider"
@@ -28,6 +30,7 @@ type compositeStore struct {
 	stories   *story.Service
 	actions   *action.Service
 	providers *providerDependencies
+	imports   *importer.Service
 }
 
 var errInvalidProviderConfigPath = errors.New("invalid provider config path")
@@ -135,6 +138,36 @@ func (s *compositeStore) ProviderProfiles(ctx context.Context) ([]provider.Profi
 func (s *compositeStore) SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
 	return s.providers.Save(ctx, profiles, expectedRevision)
 }
+func (s *compositeStore) ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error) {
+	return s.imports.ImportDirectory(ctx, sourceDirectory)
+}
+func (s *compositeStore) ListImports(ctx context.Context) ([]importer.ImportSummary, error) {
+	return s.imports.ListImports(ctx)
+}
+func (s *compositeStore) ListImportChunks(ctx context.Context, importID string) ([]importer.Chunk, error) {
+	return s.imports.ListChunks(ctx, importID)
+}
+func (s *compositeStore) ExtractImport(ctx context.Context, request importer.ExtractRequest) (importer.ExtractResponse, error) {
+	return s.imports.Extract(ctx, request)
+}
+func (s *compositeStore) ListImportCandidates(ctx context.Context, status *importer.CandidateStatus, kind *importer.CandidateKind) ([]importer.Candidate, error) {
+	return s.imports.ListCandidatesFiltered(ctx, status, kind)
+}
+func (s *compositeStore) LoadImportCandidate(ctx context.Context, candidateID string) (importer.Candidate, error) {
+	return s.imports.LoadCandidate(ctx, candidateID)
+}
+func (s *compositeStore) UpdateImportCandidate(ctx context.Context, candidateID, expectedRevision string, proposal importer.CandidateProposal) (importer.Candidate, error) {
+	return s.imports.UpdateCandidate(ctx, candidateID, expectedRevision, proposal)
+}
+func (s *compositeStore) MergeImportCandidates(ctx context.Context, candidateID string, request importer.MergeRequest) (importer.Candidate, []string, error) {
+	return s.imports.MergeCandidates(ctx, candidateID, request)
+}
+func (s *compositeStore) DiscardImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, error) {
+	return s.imports.DiscardCandidate(ctx, candidateID, expectedRevision)
+}
+func (s *compositeStore) AcceptImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, []importer.CanonicalRef, error) {
+	return s.imports.AcceptCandidate(ctx, candidateID, expectedRevision)
+}
 
 // NewHandler creates the production HTTP application for the supplied version string.
 func NewHandler(version string) http.Handler {
@@ -145,6 +178,9 @@ func NewHandler(version string) http.Handler {
 	files := storyfile.New()
 	stories := story.NewService(session, files, git, disposableIndex, story.NewRandomIDGenerator())
 	providerService := newProviderDependencies(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
+	importService := importer.NewService(session, git, disposableIndex, importer.NewSourceStore(), importer.NewRandomIDGenerator(), time.Now).
+		WithExtractor(extract.NewRemoteExtractor(providerService, nil)).
+		WithStoryMutator(stories)
 	actions := action.NewService(
 		session,
 		agent.NewLoader(),
@@ -159,5 +195,6 @@ func NewHandler(version string) http.Handler {
 		stories:   stories,
 		actions:   actions,
 		providers: providerService,
+		imports:   importService,
 	}, version)
 }
