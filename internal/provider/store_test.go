@@ -255,6 +255,37 @@ func TestValidateProfilesAndStoreRejectInvalidState(t *testing.T) {
 	}
 }
 
+// Test: provider configuration refuses filesystem indirection and non-files.
+// Requirements: M5-R01.
+func TestStoreRejectsSymlinkAndNonRegularConfig(t *testing.T) {
+	t.Parallel()
+
+	t.Run("symlink", func(t *testing.T) {
+		dir := t.TempDir()
+		target := filepath.Join(dir, "target.yaml")
+		if err := os.WriteFile(target, []byte("not read"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "providers.yaml")
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := NewStore(path).Load(context.Background()); !errors.Is(err, ErrProfileStore) {
+			t.Fatalf("Load() error = %v, want ErrProfileStore", err)
+		}
+	})
+
+	t.Run("directory", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "providers.yaml")
+		if err := os.Mkdir(path, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := NewStore(path).Load(context.Background()); !errors.Is(err, ErrProfileStore) {
+			t.Fatalf("Load() error = %v, want ErrProfileStore", err)
+		}
+	})
+}
+
 // BDD trace:
 //   - Requirements: M5-R03, M5-R04.
 //   - Scenario: 5.1.4.

@@ -140,11 +140,11 @@ func (s *Store) writeCanonicalLocked(contents []byte) error {
 	if err := tmpFile.Sync(); err != nil {
 		return fmt.Errorf("sync temp provider config: %w: %w", err, ErrProfileStore)
 	}
-	if err := tmpFile.Close(); err != nil {
-		closed = true
-		return fmt.Errorf("close temp provider config: %w: %w", err, ErrProfileStore)
-	}
+	closeErr := tmpFile.Close()
 	closed = true
+	if closeErr != nil {
+		return fmt.Errorf("close temp provider config: %w: %w", closeErr, ErrProfileStore)
+	}
 	if err := s.rename(tmpPath, s.path); err != nil {
 		return fmt.Errorf("rename temp provider config: %w: %w", err, ErrProfileStore)
 	}

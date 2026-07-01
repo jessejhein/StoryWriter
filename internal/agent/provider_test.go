@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -68,6 +69,61 @@ func TestMockProviderProducesDeterministicReplacementAndHonorsCancellation(t *te
 		Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
 	}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Generate(canceled) error = %v, want context.Canceled", err)
+	}
+}
+
+// Test: Ollama-specific response envelopes reject upstream failures, malformed
+// JSON, and empty message content over the real HTTP stack.
+// Requirements: M5-R06, M5-R07.
+func TestOllamaAdapterRejectsInvalidResponsesOverHTTP(t *testing.T) {
+	t.Parallel()
+
+	definition := Agent{
+		Version: 2, ID: "line_polish", Name: "Line Polish", Description: "Rewrite.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 10},
+		ModelRequirements: ModelRequirements{MinContextTokens: 1},
+		ContextPolicy:     ContextPolicy{Required: []ContextPack{ContextSelectedText, ContextStyleSheet}},
+		RAGPolicy:         RAGPolicy{Mode: RAGModeNone}, Control: Control{OutputMode: OutputModePatch, RequiresAcceptance: true},
+		Output: Output{Type: OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	style := Style{Version: 2, ID: "ollama_style", Name: "Ollama", ProviderProfileID: "ollama", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"}
+
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+		want   error
+	}{
+		{name: "non-success", status: http.StatusInternalServerError, body: `{"error":"private upstream detail"}`, want: ErrProviderRejected},
+		{name: "malformed", status: http.StatusOK, body: `{"message":`, want: ErrProviderRejected},
+		{name: "empty content", status: http.StatusOK, body: `{"message":{"content":"  "}}`, want: ErrProviderRejected},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/chat" || r.Method != http.MethodPost {
+					t.Errorf("request = %s %s, want POST /api/chat", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+
+			resolver := resolvedProfileStub{profile: provider.ResolvedProfile{Profile: provider.Profile{
+				ID: "ollama", Type: provider.TypeOllama, BaseURL: server.URL,
+				Auth:         provider.AuthConfig{Type: provider.AuthTypeNone},
+				Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192}, Readiness: provider.ReadinessReady,
+			}}, found: true}
+			_, err := NewDispatcher(resolver, server.Client()).Generate(context.Background(), GenerateRequest{
+				Agent: definition, Style: style, Packet: ContextPacket{SelectedText: "Original", Style: style},
+				Summary: ContextSummary{PacksUsed: []ContextPack{ContextSelectedText, ContextStyleSheet}, RAGMode: RAGModeNone},
+			})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("Generate() error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 
@@ -548,6 +604,15 @@ func TestDispatcherRejectsMissingProfilesAndIncompatibleRequirements(t *testing.
 			return profile
 		}(), found: true}, agent: baseAgent, want: ErrProviderInvalid},
 		{name: "streaming required", resolver: resolvedProfileStub{profile: readyProfile, found: true}, agent: func() Agent {
+			agentDefinition := baseAgent
+			agentDefinition.ModelRequirements.SupportsStreaming = true
+			return agentDefinition
+		}(), want: ErrProviderInvalid},
+		{name: "streaming declared but adapter unsupported", resolver: resolvedProfileStub{profile: func() provider.ResolvedProfile {
+			profile := readyProfile
+			profile.Capabilities.Streaming = true
+			return profile
+		}(), found: true}, agent: func() Agent {
 			agentDefinition := baseAgent
 			agentDefinition.ModelRequirements.SupportsStreaming = true
 			return agentDefinition

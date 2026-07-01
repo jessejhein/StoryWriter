@@ -2,9 +2,11 @@ package action
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +16,27 @@ import (
 	"storywork/internal/provider"
 	"storywork/internal/story"
 )
+
+// Test: serialized action runs contain provider identity but cannot disclose a credential.
+// Requirements: M5-R04, M5-R11, M5-R12.
+func TestRunJSONExcludesProviderCredentialValues(t *testing.T) {
+	t.Parallel()
+
+	run := Run{
+		RunID: "run_00000000000000000001", Status: RunPending,
+		Provider: agent.ProviderIdentity{ProfileID: "hosted", Type: provider.TypeOpenAICompatible, Model: "model"},
+	}
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(encoded), "sentinel-action-run-credential") {
+		t.Fatalf("serialized run leaked credential: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"profile_id":"hosted"`) {
+		t.Fatalf("serialized run omitted provider identity: %s", encoded)
+	}
+}
 
 type fakeSession struct {
 	project project.Project

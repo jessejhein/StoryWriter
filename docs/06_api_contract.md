@@ -217,6 +217,9 @@ GET /api/provider-profiles
 PUT /api/provider-profiles
 ```
 
+Other methods return `405 Method Not Allowed` with `Allow: GET, PUT`. A PUT
+body larger than 1 MiB returns `413 Request Entity Too Large`.
+
 Configured response:
 
 ```json

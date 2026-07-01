@@ -93,3 +93,12 @@ For this source repository:
 - Keep changes small.
 - Update docs when implementation changes behavior.
 - Do not commit secrets, generated binaries, SQLite databases, or node modules.
+
+## Commit style
+
+Use this default format for commits in this repository:
+
+- Summary line first, written as a short imperative sentence.
+- Body after a blank line, with brief paragraphs or bullets that identify the fixes, features, and test cases included in the commit.
+- Mention the specific files or areas changed when that helps make the scope clearer.
+- Keep the message factual and reviewable; avoid vague progress summaries.

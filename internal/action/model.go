@@ -8,8 +8,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"unicode"
-	"unicode/utf8"
 
 	"storywork/internal/agent"
 	"storywork/internal/project"
@@ -422,21 +420,14 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 }
 
 func validateGeneratedReplacement(replacement string) (string, error) {
-	if !utf8.ValidString(replacement) {
-		return "", fmt.Errorf("replacement is invalid UTF-8: %w", ErrProviderInvalid)
+	normalized, err := agent.NormalizeGeneratedReplacement(replacement)
+	if errors.Is(err, agent.ErrProviderInvalid) {
+		return "", fmt.Errorf("%w: %w", ErrProviderInvalid, err)
 	}
-	replacement = strings.ReplaceAll(replacement, "\r\n", "\n")
-	replacement = strings.ReplaceAll(replacement, "\r", "\n")
-	if len(replacement) > 5<<20 {
-		return "", fmt.Errorf("replacement exceeds 5 MiB: %w", ErrProviderRejected)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrProviderRejected, err)
 	}
-	if strings.TrimFunc(replacement, unicode.IsSpace) == "" {
-		return "", fmt.Errorf("replacement is empty: %w", ErrProviderRejected)
-	}
-	if strings.ContainsRune(replacement, '\x00') {
-		return "", fmt.Errorf("replacement contains NUL: %w", ErrProviderRejected)
-	}
-	return replacement, nil
+	return normalized, nil
 }
 
 func (s *Service) styleCompatible(ctx context.Context, agentDefinition agent.Agent, style agent.Style) (bool, error) {
@@ -452,7 +443,7 @@ func (s *Service) styleCompatible(ctx context.Context, agentDefinition agent.Age
 		profileCopy := resolved.Profile
 		profileRef = &profileCopy
 	}
-	decision := agent.Compatibility(agentDefinition, style, profileRef, resolved.Readiness)
+	decision := agent.ExecutableCompatibility(agentDefinition, style, profileRef, resolved.Readiness)
 	return decision.Compatible, nil
 }
 

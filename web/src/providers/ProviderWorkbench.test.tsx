@@ -1,28 +1,46 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { expect, test, vi } from 'vitest'
+import { beforeEach, expect, test, vi } from 'vitest'
 import ProviderWorkbench from './ProviderWorkbench'
+import { normalizeProfiles } from './providerState'
 
-vi.mock('../api', () => ({
-  APIError: class APIError extends Error {
-    status: number
-    constructor(status: number, message: string) {
-      super(message)
-      this.status = status
-    }
-  },
-  getProviderProfiles: vi.fn(),
-  saveProviderProfiles: vi.fn(),
-}))
+let responses: Array<{ status?: number; body: unknown }>
+const fetchMock = vi.fn<(path: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => {
+  const next = responses.shift()
+  if (!next) throw new Error('unexpected fetch')
+  return new Response(JSON.stringify(next.body), {
+    status: next.status ?? 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+})
 
-const api = await import('../api')
+beforeEach(() => {
+  responses = []
+  fetchMock.mockClear()
+  vi.stubGlobal('fetch', fetchMock)
+})
+
+test('normalizes profile ordering for dirty-state comparisons', () => {
+  const alpha = { ...profileFixture, id: 'alpha', name: 'Alpha' }
+  const zeta = { ...profileFixture, id: 'zeta', name: 'Zeta' }
+  expect(normalizeProfiles([zeta, alpha])).toBe(normalizeProfiles([alpha, zeta]))
+})
+
+const profileFixture = {
+  id: 'profile',
+  name: 'Profile',
+  type: 'ollama' as const,
+  base_url: 'http://127.0.0.1:11434',
+  auth: { type: 'none' as const, credential_env: '' },
+  capabilities: { chat: true, streaming: false, structured_output: false, max_context_tokens: 8192 },
+}
 
 test('loads provider settings, edits a profile, and saves a clean baseline', async () => {
   const onDirtyChange = vi.fn()
-  vi.mocked(api.getProviderProfiles).mockResolvedValue({
+  responses.push({ body: {
     profiles: [],
     revision: null,
-  })
-  vi.mocked(api.saveProviderProfiles).mockResolvedValue({
+  } })
+  responses.push({ body: {
     profiles: [{
       id: 'local_ollama',
       name: 'Local Ollama',
@@ -33,7 +51,7 @@ test('loads provider settings, edits a profile, and saves a clean baseline', asy
       readiness: 'ready',
     }],
     revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  })
+  } })
 
   render(<ProviderWorkbench onDirtyChange={onDirtyChange} />)
 
@@ -46,20 +64,18 @@ test('loads provider settings, edits a profile, and saves a clean baseline', asy
   fireEvent.click(screen.getByRole('button', { name: 'Save' }))
 
   await waitFor(() => expect(screen.getByText('Saved')).toBeInTheDocument())
-  expect(api.saveProviderProfiles).toHaveBeenCalledWith([
-    expect.objectContaining({
-      id: 'local_ollama',
-      name: 'Local Ollama',
-      type: 'ollama',
-    }),
-  ], null)
+  expect(fetchMock).toHaveBeenLastCalledWith('/api/provider-profiles', expect.objectContaining({ method: 'PUT' }))
+  const request = fetchMock.mock.calls[1][1] as RequestInit
+  expect(JSON.parse(String(request.body))).toEqual(expect.objectContaining({
+    profiles: [expect.objectContaining({ id: 'local_ollama', name: 'Local Ollama', type: 'ollama' })],
+    expected_revision: null,
+  }))
   expect(onDirtyChange).toHaveBeenCalled()
 })
 
 test('shows conflict feedback and reload confirmation for a dirty draft', async () => {
   const onDirtyChange = vi.fn()
-  vi.mocked(api.getProviderProfiles)
-    .mockResolvedValueOnce({
+  responses.push({ body: {
       profiles: [{
         id: 'hosted_api',
         name: 'Hosted API',
@@ -70,12 +86,12 @@ test('shows conflict feedback and reload confirmation for a dirty draft', async 
         readiness: 'missing_credential',
       }],
       revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-    })
-    .mockResolvedValueOnce({
+  } })
+  responses.push({ status: 409, body: { error: 'stale expected revision' } })
+  responses.push({ body: {
       profiles: [],
       revision: null,
-    })
-  vi.mocked(api.saveProviderProfiles).mockRejectedValue(new api.APIError(409, 'stale expected revision'))
+  } })
 
   render(<ProviderWorkbench onDirtyChange={onDirtyChange} />)
 
@@ -90,8 +106,8 @@ test('shows conflict feedback and reload confirmation for a dirty draft', async 
 })
 
 test('clears saved feedback on the next edit and disables save for invalid profiles', async () => {
-  vi.mocked(api.getProviderProfiles).mockResolvedValue({ profiles: [], revision: null })
-  vi.mocked(api.saveProviderProfiles).mockResolvedValue({
+  responses.push({ body: { profiles: [], revision: null } })
+  responses.push({ body: {
     profiles: [{
       id: 'local_ollama',
       name: 'Local Ollama',
@@ -102,7 +118,7 @@ test('clears saved feedback on the next edit and disables save for invalid profi
       readiness: 'ready',
     }],
     revision: 'sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-  })
+  } })
 
   render(<ProviderWorkbench onDirtyChange={vi.fn()} />)
   await waitFor(() => expect(screen.getByText('No provider profiles are configured yet.')).toBeInTheDocument())

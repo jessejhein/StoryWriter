@@ -329,6 +329,22 @@ func Compatibility(agent Agent, style Style, profile *provider.Profile, readines
 	return CompatibilityDecision{Compatible: true, Reason: CompatibilityCompatible}
 }
 
+// ExecutableCompatibility additionally accounts for capabilities not implemented
+// by the current adapters, even when a profile declares them.
+func ExecutableCompatibility(agent Agent, style Style, profile *provider.Profile, readiness provider.Readiness) CompatibilityDecision {
+	decision := Compatibility(agent, style, profile, readiness)
+	if !decision.Compatible || decision.Reason == CompatibilityMock {
+		return decision
+	}
+	if agent.ModelRequirements.SupportsStreaming {
+		return CompatibilityDecision{Reason: CompatibilityStreamingUnsupported}
+	}
+	if agent.ModelRequirements.SupportsStructuredOutput {
+		return CompatibilityDecision{Reason: CompatibilityStructuredOutputUnsupported}
+	}
+	return decision
+}
+
 func ApplicableAgents(agents []Agent, input AvailabilityInput) []AvailabilityDecision {
 	decisions := make([]AvailabilityDecision, 0, len(agents))
 	for _, item := range agents {

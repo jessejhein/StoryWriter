@@ -181,8 +181,11 @@ function sameShellView(left: ShellView, right: ShellView) {
   if (left.area !== right.area) {
     return false
   }
-  if (left.area === 'providers' || right.area === 'providers') {
+  if (left.area === 'providers') {
     return true
+  }
+  if (right.area === 'providers') {
+    return false
   }
   return left.view.mode === right.view.mode && (left.view.mode !== 'scene' || right.view.mode !== 'scene' || left.view.sceneID === right.view.sceneID)
 }

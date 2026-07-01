@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { APIError, getProviderProfiles, saveProviderProfiles, type ProviderProfile } from '../api'
 import ConfirmDialog from '../components/ConfirmDialog'
+import { normalizeProfiles } from './providerState'
 
 type Props = {
   onDirtyChange: (dirty: boolean) => void
@@ -37,13 +38,6 @@ function cloneProfiles(profiles: ProviderProfile[]) {
     auth: { ...profile.auth },
     capabilities: { ...profile.capabilities },
   }))
-}
-
-function normalizeProfiles(profiles: ProviderProfile[]) {
-  return JSON.stringify(profiles.map((profile) => ({
-    ...profile,
-    readiness: undefined,
-  })))
 }
 
 function validateProfiles(profiles: ProviderProfile[]): string | null {

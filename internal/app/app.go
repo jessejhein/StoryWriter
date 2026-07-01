@@ -4,6 +4,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -23,10 +25,48 @@ import (
 )
 
 type compositeStore struct {
-	stories     *story.Service
-	actions     *action.Service
-	providers   *provider.Service
-	providerErr error
+	stories   *story.Service
+	actions   *action.Service
+	providers *providerDependencies
+}
+
+var errInvalidProviderConfigPath = errors.New("invalid provider config path")
+
+type providerDependencies struct {
+	service   *provider.Service
+	configErr error
+}
+
+func newProviderDependencies(override string, userConfigDir func() (string, error)) *providerDependencies {
+	configDir, err := provider.ResolveConfigDir(override, userConfigDir)
+	if err != nil {
+		return &providerDependencies{configErr: fmt.Errorf("%w: %w", errInvalidProviderConfigPath, err)}
+	}
+	return &providerDependencies{service: provider.NewService(
+		provider.NewStore(filepath.Join(configDir, "providers.yaml")),
+		provider.EnvironmentBroker{LookupEnv: os.LookupEnv},
+	)}
+}
+
+func (p *providerDependencies) List(ctx context.Context) ([]provider.Profile, *string, error) {
+	if p.configErr != nil {
+		return nil, nil, p.configErr
+	}
+	return p.service.List(ctx)
+}
+
+func (p *providerDependencies) Save(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
+	if p.configErr != nil {
+		return nil, nil, p.configErr
+	}
+	return p.service.Save(ctx, profiles, expectedRevision)
+}
+
+func (p *providerDependencies) Resolve(ctx context.Context, profileID string) (provider.ResolvedProfile, bool, error) {
+	if p.configErr != nil {
+		return provider.ResolvedProfile{}, false, p.configErr
+	}
+	return p.service.Resolve(ctx, profileID)
 }
 
 func (s *compositeStore) Outline(ctx context.Context) (story.Outline, error) {
@@ -90,15 +130,9 @@ func (s *compositeStore) Reject(ctx context.Context, runID string) (action.Run, 
 	return s.actions.Reject(ctx, runID)
 }
 func (s *compositeStore) ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error) {
-	if s.providerErr != nil {
-		return nil, nil, s.providerErr
-	}
 	return s.providers.List(ctx)
 }
 func (s *compositeStore) SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
-	if s.providerErr != nil {
-		return nil, nil, s.providerErr
-	}
 	return s.providers.Save(ctx, profiles, expectedRevision)
 }
 
@@ -110,11 +144,7 @@ func NewHandler(version string) http.Handler {
 	projects := project.NewService(git, disposableIndex, time.Now)
 	files := storyfile.New()
 	stories := story.NewService(session, files, git, disposableIndex, story.NewRandomIDGenerator())
-	configDir, configErr := provider.ResolveConfigDir(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
-	providerService := provider.NewService(
-		provider.NewStore(filepath.Join(configDir, "providers.yaml")),
-		provider.EnvironmentBroker{LookupEnv: os.LookupEnv},
-	)
+	providerService := newProviderDependencies(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
 	actions := action.NewService(
 		session,
 		agent.NewLoader(),
@@ -126,9 +156,8 @@ func NewHandler(version string) http.Handler {
 		action.NewRandomIDGenerator(),
 	)
 	return api.NewHandler(projects, session, &compositeStore{
-		stories:     stories,
-		actions:     actions,
-		providers:   providerService,
-		providerErr: configErr,
+		stories:   stories,
+		actions:   actions,
+		providers: providerService,
 	}, version)
 }
