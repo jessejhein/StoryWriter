@@ -2,17 +2,41 @@ package action
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"storywork/internal/agent"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 )
+
+// Test: serialized action runs contain provider identity but cannot disclose a credential.
+// Requirements: M5-R04, M5-R11, M5-R12.
+func TestRunJSONExcludesProviderCredentialValues(t *testing.T) {
+	t.Parallel()
+
+	run := Run{
+		RunID: "run_00000000000000000001", Status: RunPending,
+		Provider: agent.ProviderIdentity{ProfileID: "hosted", Type: provider.TypeOpenAICompatible, Model: "model"},
+	}
+	encoded, err := json.Marshal(run)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(encoded), "sentinel-action-run-credential") {
+		t.Fatalf("serialized run leaked credential: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"profile_id":"hosted"`) {
+		t.Fatalf("serialized run omitted provider identity: %s", encoded)
+	}
+}
 
 type fakeSession struct {
 	project project.Project
@@ -95,6 +119,32 @@ type fakeRunIDGenerator struct {
 	calls int
 }
 
+type fakeProfileResolver struct {
+	resolved  provider.ResolvedProfile
+	found     bool
+	err       error
+	byID      map[string]provider.ResolvedProfile
+	foundByID map[string]bool
+}
+
+func (r *fakeProfileResolver) Resolve(_ context.Context, profileID string) (provider.ResolvedProfile, bool, error) {
+	if r.err != nil {
+		return provider.ResolvedProfile{}, false, r.err
+	}
+	if r.byID != nil {
+		resolved, ok := r.byID[profileID]
+		if !ok {
+			return provider.ResolvedProfile{}, r.foundByID[profileID], nil
+		}
+		found := true
+		if r.foundByID != nil {
+			found = r.foundByID[profileID]
+		}
+		return resolved, found, nil
+	}
+	return r.resolved, r.found, r.err
+}
+
 func (g *fakeRunIDGenerator) Next() (string, error) {
 	g.calls++
 	return g.next, g.err
@@ -159,6 +209,7 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	)
@@ -220,6 +271,7 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		secondRunStore,
 		&fakeRunIDGenerator{next: "run_ffffffffffffffffffff"},
 	)
@@ -247,6 +299,282 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 	}
 	if acceptor.calls != 1 || acceptor.request.OriginalText != "Alpha beta" || acceptor.request.ReplacementText != "Mock polished: Alpha beta" {
 		t.Fatalf("acceptor request = %#v", acceptor.request)
+	}
+}
+
+// BDD trace:
+//   - Requirements: M5-R10, M5-R11.
+//   - Scenario: 5.5.2.
+//   - Test purpose: verify invalid provider output is rejected before any
+//     transient run is inserted or project mutation path is reached.
+func TestServiceRejectsInvalidProviderOutputBeforeRunInsertion(t *testing.T) {
+	t.Parallel()
+
+	linePolish := agent.Agent{
+		Version:     2,
+		ID:          "line_polish",
+		Name:        "Line Polish",
+		Description: "Rewrite selected prose.",
+		AppliesWhen: agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeSelection}, MinWords: 2, MaxWords: 1500},
+		ModelRequirements: agent.ModelRequirements{
+			MinContextTokens: 2048,
+		},
+		ContextPolicy: agent.ContextPolicy{
+			Required:  []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet},
+			Optional:  []agent.ContextPack{agent.ContextSurrounding},
+			Forbidden: []agent.ContextPack{agent.ContextGlobalCodexRAG, agent.ContextRawImportNotes},
+		},
+		RAGPolicy: agent.RAGPolicy{Mode: agent.RAGModeNone},
+		Control:   agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
+		Output:    agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	style := agent.Style{
+		Version:           1,
+		ID:                "precise_editor",
+		Name:              "Precise Editor",
+		ProviderProfileID: "mock_default",
+		Model:             "mock",
+		Temperature:       0.2,
+		SystemPrompt:      "Prompt",
+	}
+	scene := story.SceneDocument{
+		ID:          "scn_0123456789abcdef0123",
+		ChapterID:   "ch_0123456789abcdef0123",
+		Title:       "The Duel",
+		Markdown:    "Alpha beta gamma delta.\n",
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Canonical:   []byte("scene"),
+		FrontMatter: story.SceneFrontMatter{Status: "draft"},
+	}
+	service := NewService(
+		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{style}}},
+		&fakeSceneLoader{scene: scene},
+		&fakeAcceptor{},
+		&fakeProvider{response: agent.GenerateResponse{Replacement: " \t"}},
+		nil,
+		NewRunStore(),
+		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
+	)
+
+	_, err := service.Run(context.Background(), RunRequest{
+		AgentID:       "line_polish",
+		StyleID:       "precise_editor",
+		Surface:       agent.SurfaceEditor,
+		InputScope:    agent.InputScopeSelection,
+		SceneID:       scene.ID,
+		SceneRevision: scene.Revision,
+		Selection:     Selection{StartByte: 0, EndByte: len([]byte("Alpha beta")), Text: "Alpha beta"},
+	})
+	if !errors.Is(err, ErrProviderRejected) {
+		t.Fatalf("Run(invalid output) error = %v, want ErrProviderRejected", err)
+	}
+}
+
+// BDD trace:
+//   - Requirements: M5-R08, M5-R09.
+//   - Scenarios: 5.2.1, 5.2.2, 5.2.3.
+//   - Test purpose: verify available actions expose only compatible real styles
+//     and the run path rechecks credential readiness immediately before
+//     provider execution.
+func TestServiceFiltersRealProviderStylesAndRechecksRunTimeReadiness(t *testing.T) {
+	t.Parallel()
+
+	linePolish := agent.Agent{
+		Version:     2,
+		ID:          "line_polish",
+		Name:        "Line Polish",
+		Description: "Rewrite selected prose.",
+		AppliesWhen: agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeSelection}, MinWords: 2, MaxWords: 1500},
+		ModelRequirements: agent.ModelRequirements{
+			MinContextTokens: 2048,
+		},
+		ContextPolicy: agent.ContextPolicy{
+			Required:  []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet},
+			Optional:  []agent.ContextPack{agent.ContextSurrounding},
+			Forbidden: []agent.ContextPack{agent.ContextGlobalCodexRAG, agent.ContextRawImportNotes},
+		},
+		RAGPolicy: agent.RAGPolicy{Mode: agent.RAGModeNone},
+		Control:   agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
+		Output:    agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	mockStyle := agent.Style{
+		Version:           1,
+		ID:                "precise_editor",
+		Name:              "Precise Editor",
+		ProviderProfileID: "mock_default",
+		Model:             "mock",
+		Temperature:       0.2,
+		SystemPrompt:      "Prompt",
+	}
+	realStyle := agent.Style{
+		Version:           2,
+		ID:                "local_precise_editor",
+		Name:              "Local Precise Editor",
+		ProviderProfileID: "local_openai",
+		Model:             "local-model-name",
+		Temperature:       0.2,
+		SystemPrompt:      "Prompt",
+	}
+	scene := story.SceneDocument{
+		ID:          "scn_0123456789abcdef0123",
+		ChapterID:   "ch_0123456789abcdef0123",
+		Title:       "The Duel",
+		Markdown:    "Alpha beta gamma delta.\n",
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Canonical:   []byte("scene"),
+		FrontMatter: story.SceneFrontMatter{Status: "draft"},
+	}
+	resolver := &fakeProfileResolver{
+		resolved: provider.ResolvedProfile{
+			Profile: provider.Profile{
+				ID:      "local_openai",
+				Type:    provider.TypeOpenAICompatible,
+				BaseURL: "http://127.0.0.1:1234/v1",
+				Auth: provider.AuthConfig{
+					Type: provider.AuthTypeNone,
+				},
+				Capabilities: provider.Capabilities{
+					Chat:             true,
+					MaxContextTokens: 8192,
+				},
+			},
+		},
+		found: true,
+	}
+	service := NewService(
+		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{realStyle, mockStyle}}},
+		&fakeSceneLoader{scene: scene},
+		&fakeAcceptor{},
+		&fakeProvider{response: agent.GenerateResponse{Replacement: "Refined text"}},
+		resolver,
+		NewRunStore(),
+		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
+	)
+
+	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
+		Surface:        agent.SurfaceEditor,
+		InputScope:     agent.InputScopeSelection,
+		SceneID:        scene.ID,
+		SelectionWords: 2,
+	})
+	if err != nil {
+		t.Fatalf("AvailableActions() error = %v", err)
+	}
+	if len(actions) != 1 || !slices.Equal(actions[0].StyleIDs, []string{"local_precise_editor", "precise_editor"}) {
+		t.Fatalf("available actions = %#v", actions)
+	}
+
+	resolver.resolved.Profile.Auth.Type = provider.AuthTypeBearerEnv
+	resolver.resolved.Readiness = provider.ReadinessMissingCredential
+	_, err = service.Run(context.Background(), RunRequest{
+		AgentID:       "line_polish",
+		StyleID:       "local_precise_editor",
+		Surface:       agent.SurfaceEditor,
+		InputScope:    agent.InputScopeSelection,
+		SceneID:       scene.ID,
+		SceneRevision: scene.Revision,
+		Selection:     Selection{StartByte: 0, EndByte: len([]byte("Alpha beta")), Text: "Alpha beta"},
+	})
+	if !errors.Is(err, ErrProviderInvalid) {
+		t.Fatalf("Run(missing credential) error = %v, want ErrProviderInvalid", err)
+	}
+}
+
+// BDD trace:
+//   - Requirements: M5-R08, M5-R09.
+//   - Scenario: 5.2.1, 5.2.2.
+//   - Test purpose: verify compatible styles are listed in style-name then
+//     style-ID order regardless of registry order, while incompatible styles are
+//     excluded and action ordering remains agent-name then ID.
+func TestAvailableActionsSortsCompatibleStylesByNameThenID(t *testing.T) {
+	t.Parallel()
+
+	linePolish := agent.Agent{
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeSelection}, MinWords: 2, MaxWords: 1500},
+		ModelRequirements: agent.ModelRequirements{MinContextTokens: 2048},
+		ContextPolicy:     agent.ContextPolicy{Required: []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet}},
+		RAGPolicy:         agent.RAGPolicy{Mode: agent.RAGModeNone},
+		Control:           agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
+		Output:            agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
+	}
+	alphaAgent := linePolish
+	alphaAgent.ID = "alpha_polish"
+	alphaAgent.Name = "Alpha Polish"
+
+	styles := []agent.Style{
+		{Version: 2, ID: "zeta_id", Name: "Zeta Voice", ProviderProfileID: "ready_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+		{Version: 2, ID: "alpha_b", Name: "Alpha Voice", ProviderProfileID: "ready_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+		{Version: 2, ID: "alpha_a", Name: "Alpha Voice", ProviderProfileID: "ready_profile", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+		{Version: 2, ID: "first_but_incompatible", Name: "Aardvark Voice", ProviderProfileID: "small_context", Model: "model", Temperature: 0.2, SystemPrompt: "Prompt"},
+	}
+	scene := testActionScene()
+	resolver := &fakeProfileResolver{
+		byID: map[string]provider.ResolvedProfile{
+			"ready_profile": {
+				Profile: provider.Profile{
+					ID:      "ready_profile",
+					Type:    provider.TypeOpenAICompatible,
+					BaseURL: "http://127.0.0.1:1234/v1",
+					Auth:    provider.AuthConfig{Type: provider.AuthTypeNone},
+					Capabilities: provider.Capabilities{
+						Chat:             true,
+						MaxContextTokens: 8192,
+					},
+					Readiness: provider.ReadinessReady,
+				},
+			},
+			"small_context": {
+				Profile: provider.Profile{
+					ID:      "small_context",
+					Type:    provider.TypeOpenAICompatible,
+					BaseURL: "http://127.0.0.1:1234/v1",
+					Auth:    provider.AuthConfig{Type: provider.AuthTypeNone},
+					Capabilities: provider.Capabilities{
+						Chat:             true,
+						MaxContextTokens: 32,
+					},
+					Readiness: provider.ReadinessReady,
+				},
+			},
+		},
+		foundByID: map[string]bool{
+			"ready_profile": true,
+			"small_context": true,
+		},
+	}
+	service := NewService(
+		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish, alphaAgent}, Styles: styles}},
+		&fakeSceneLoader{scene: scene},
+		&fakeAcceptor{},
+		&fakeProvider{response: agent.GenerateResponse{Replacement: "Refined text"}},
+		resolver,
+		NewRunStore(),
+		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
+	)
+
+	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
+		Surface:        agent.SurfaceEditor,
+		InputScope:     agent.InputScopeSelection,
+		SceneID:        scene.ID,
+		SelectionWords: 2,
+	})
+	if err != nil {
+		t.Fatalf("AvailableActions() error = %v", err)
+	}
+	if got := []string{actions[0].AgentID, actions[1].AgentID}; !slices.Equal(got, []string{"alpha_polish", "line_polish"}) {
+		t.Fatalf("action ordering = %v, want [alpha_polish line_polish]", got)
+	}
+	for _, actionDefinition := range actions {
+		if !slices.Equal(actionDefinition.StyleIDs, []string{"alpha_a", "alpha_b", "zeta_id"}) {
+			t.Fatalf("style ordering = %v, want [alpha_a alpha_b zeta_id]", actionDefinition.StyleIDs)
+		}
 	}
 }
 
@@ -300,6 +628,7 @@ func TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims(t *testing.T
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	)
@@ -653,6 +982,7 @@ func newActionTestService(scene story.SceneDocument, provider *fakeProvider, acc
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
+		nil,
 		runs,
 		ids,
 	)

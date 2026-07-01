@@ -36,6 +36,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 14. `docs/11_milestone_2_task_prompt.md`
 15. `docs/12_milestone_3_task_prompt.md`
 16. `docs/13_milestone_4_task_prompt.md`
+17. `docs/14_milestone_5_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -75,12 +76,14 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 4 are implemented and the full check suite is green as of
+Milestones 0 through 5 are implemented and `make check` is green as of
 June 30, 2026. The app includes the local project foundation, canonical outline
 editing, the Vim-friendly scene editor with revision conflict protection and
 one Git checkpoint per explicit save, the Codex workbench with strict
-progression validation and active-state resolution, plus the Milestone 4
-agent/style registry and mock AI patch workflow.
+progression validation and active-state resolution, the agent/style registry
+and reviewable AI patch workflow, plus application-level provider profiles,
+credential-readiness reporting, real OpenAI-compatible and Ollama adapters, and
+the provider settings workbench.
 
 Milestone 4 adds:
 
@@ -90,10 +93,9 @@ Milestone 4 adds:
 - transient reviewable runs with explicit reject/accept,
 - revision-safe patch acceptance using the existing scene lock, rollback, index rebuild, and exactly one Git commit.
 
-Milestone 5 is now the next incomplete phase. Its durable Milestone 4 contract,
-working sequence, and completion evidence remain in
-`docs/13_milestone_4_task_prompt.md`, `.plans/milestone_4_implementation.md`,
-`.plans/milestone_4_status.md`, and `.plans/milestone_4_test_evidence.md`.
+Milestone 5 is complete. Its durable contract and working artifacts are
+`docs/14_milestone_5_task_prompt.md` and `.plans/milestone_5_*`. Milestone 6 is
+the next incomplete phase.
 
 ## Development
 

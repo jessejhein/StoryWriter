@@ -138,10 +138,36 @@ focus placement, and the no-second-save editor acceptance flow.
 
 ### Milestone 5
 
-- Provider interface can run fake provider.
-- Local endpoint adapter maps requests correctly.
-- API-key provider path does not store key in project folder.
-- Capability matrix hides incompatible agents.
+- `internal/provider/store_test.go`: canonical bytes/revisions, strict YAML,
+  config path, symlink and invalid-state rejection, optimistic saves,
+  mkdir/temp/write/chmod/sync/close/rename/dir-sync fault injection,
+  concurrent-save conflicts, permissions, credential readiness, and
+  punctuation-safe scalar round trips.
+- `internal/provider/service_test.go`: public readiness and credential
+  non-disclosure across list, save, and resolve boundaries.
+- `internal/agent/model_test.go`: version-2 schema and ordered pure
+  compatibility reason codes.
+- `internal/agent/provider_test.go`: mock/OpenAI/Ollama routing, exact prompts
+  and headers, output normalization, provider metadata tolerance, trailing JSON
+  rejection, incompatible-profile rejection, request/response size limits,
+  response-body closure, and safe failure classification.
+- `internal/action/service_test.go`: capability-aware filtering, run-time
+  readiness revalidation, provider identity, style ordering by style name then
+  ID, invalid/no-op output rejection, and unchanged accept/reject transaction
+  behavior.
+- `internal/action/milestone5_integration_test.go`: real provider profile save,
+  no-auth OpenAI outbound execution, transient reject, explicit accept, Git
+  checkpoint, and persisted scene/provider reload through real adapters.
+- `internal/api/provider_handler_test.go`: exact GET/PUT JSON, null revisions,
+  strict nested required fields, malformed requests, 1 MiB body-limit
+  boundary, conflicts, methods, and safe status mapping without an active
+  project.
+- `web/src/providers/ProviderWorkbench.test.tsx` and
+  `web/src/App.providers_navigation.test.tsx`: empty/edit/save/conflict states,
+  invalid-save prevention, saved-to-dirty transitions, dirty navigation, and
+  beforeunload listener removal after save/unmount.
+- `web/src/editor/SceneEditor.actions.boundary.test.tsx`: non-secret provider
+  identity in the existing preview with unchanged reject/accept behavior.
 
 ### Milestone 6
 

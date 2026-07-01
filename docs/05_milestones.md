@@ -8,8 +8,8 @@ Each milestone is a sprint. Each sprint must leave the app working.
 
 ## Current status
 
-- Milestones 0 through 4: implemented; full check and race suites green on June 30, 2026.
-- Milestone 5: next incomplete phase.
+- Milestones 0 through 5: implemented; `make check` green on June 30, 2026.
+- Milestone 6: next incomplete phase.
 - Milestones 6 through 9: roadmap only.
 
 The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
@@ -198,9 +198,15 @@ Selection -> applicable agents -> mock patch -> diff preview -> accept/reject wo
 
 ## Milestone 5 — Real provider adapters and credential broker v1
 
+Status: complete June 30, 2026. Milestone 6 is the next incomplete phase.
+
 ### Goal
 
 Connect real model providers without leaking credentials into projects.
+
+The durable implementation contract, exact provider/profile schemas, API
+behavior, security constraints, BDD cases, and ordered TDD work are defined in
+`docs/14_milestone_5_task_prompt.md`.
 
 ### Stories
 

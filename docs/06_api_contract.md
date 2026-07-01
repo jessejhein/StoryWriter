@@ -208,10 +208,52 @@ POST /api/codex/{entry_id}/progressions
 GET /api/story-state/as-of/{scene_id}
 ```
 
+## Provider profiles
+
+Provider settings do not require an active project.
+
+```http
+GET /api/provider-profiles
+PUT /api/provider-profiles
+```
+
+Other methods return `405 Method Not Allowed` with `Allow: GET, PUT`. A PUT
+body larger than 1 MiB returns `413 Request Entity Too Large`.
+
+Configured response:
+
+```json
+{
+  "profiles": [
+    {
+      "id": "hosted_api",
+      "name": "Hosted API",
+      "type": "openai_compatible",
+      "base_url": "https://api.example.test/v1",
+      "auth": {"type": "bearer_env", "credential_env": "STORYWORK_HOSTED_API_KEY"},
+      "capabilities": {
+        "chat": true,
+        "streaming": false,
+        "structured_output": false,
+        "max_context_tokens": 32768
+      },
+      "readiness": "ready"
+    }
+  ],
+  "revision": "sha256:..."
+}
+```
+
+Missing configuration returns:
+
+```json
+{"profiles":[],"revision":null}
+```
+
 ## Agents and styles
 
-Milestone 4 implements the exact registry and action contract documented in
-`docs/13_milestone_4_task_prompt.md`. All routes require an active project.
+Milestone 5 extends the Milestone 4 registry and action contract. Agent, style,
+and action routes still require an active project.
 
 ```http
 GET /api/agents
@@ -250,11 +292,13 @@ Style list response:
   "styles": [
     {
       "id": "precise_editor",
+      "version": 1,
       "name": "Precise Editor",
       "provider_profile_id": "mock_default",
       "model": "mock",
       "temperature": 0.2,
-      "system_prompt": "You are a careful prose editor."
+      "system_prompt": "You are a careful prose editor.",
+      "provider_readiness": "ready"
     }
   ]
 }
@@ -323,6 +367,11 @@ Response for patch:
   "context_summary": {
     "packs_used": ["selected_text", "style_sheet"],
     "rag_mode": "none"
+  },
+  "provider": {
+    "profile_id": "mock_default",
+    "type": "openai_compatible",
+    "model": "mock"
   }
 }
 ```

@@ -345,3 +345,23 @@ capabilities:
 ```
 
 Do not offer incompatible agents for a selected provider/model.
+
+## Milestone 5 provider-backed styles
+
+Milestone 5 retains version-1 mock styles unchanged and adds version-2 agents
+with explicit `model_requirements` plus version-2 styles that name an
+application provider profile and model. Registry loading validates project
+syntax only; a missing global profile makes a style unavailable rather than
+making the project invalid.
+
+Compatibility is a pure ordered decision: mock, profile not found, missing
+credential, chat unsupported, context limit too small, streaming unsupported,
+structured-output unsupported, or compatible. Availability exposes only ready,
+compatible style IDs and omits agents with no usable styles. The dispatcher
+repeats the decision immediately before generation so profile and environment
+changes fail closed without creating a run.
+
+Real-provider prompts contain only the agent task, style system prompt, and
+exact selected text. OpenAI-compatible and Ollama results enter the same
+transient patch workflow as mock output. Provider identity is retained for the
+preview, but canon changes only through explicit acceptance.

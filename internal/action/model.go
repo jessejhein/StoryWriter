@@ -11,6 +11,7 @@ import (
 
 	"storywork/internal/agent"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 )
 
@@ -22,6 +23,8 @@ var (
 	ErrAgentNotFound       = errors.New("agent not found")
 	ErrStyleNotFound       = errors.New("style not found")
 	ErrProviderUnavailable = errors.New("provider unavailable")
+	ErrProviderInvalid     = errors.New("provider invalid")
+	ErrProviderRejected    = errors.New("provider rejected")
 	ErrDuplicateRunID      = errors.New("duplicate action run ID")
 )
 
@@ -45,6 +48,10 @@ type PatchAcceptor interface {
 
 type RunIDGenerator interface {
 	Next() (string, error)
+}
+
+type ProfileResolver interface {
+	Resolve(ctx context.Context, profileID string) (provider.ResolvedProfile, bool, error)
 }
 
 type Selection struct {
@@ -82,16 +89,17 @@ const (
 )
 
 type Run struct {
-	RunID          string               `json:"run_id"`
-	Status         RunStatus            `json:"status"`
-	AgentID        string               `json:"agent_id"`
-	StyleID        string               `json:"style_id"`
-	SceneID        string               `json:"scene_id"`
-	SceneRevision  string               `json:"scene_revision"`
-	Selection      Selection            `json:"selection"`
-	OriginalText   string               `json:"-"`
-	Replacement    string               `json:"-"`
-	ContextSummary agent.ContextSummary `json:"context_summary"`
+	RunID          string                 `json:"run_id"`
+	Status         RunStatus              `json:"status"`
+	AgentID        string                 `json:"agent_id"`
+	StyleID        string                 `json:"style_id"`
+	SceneID        string                 `json:"scene_id"`
+	SceneRevision  string                 `json:"scene_revision"`
+	Selection      Selection              `json:"selection"`
+	OriginalText   string                 `json:"-"`
+	Replacement    string                 `json:"-"`
+	ContextSummary agent.ContextSummary   `json:"context_summary"`
+	Provider       agent.ProviderIdentity `json:"provider"`
 }
 
 type RunStore struct {
@@ -213,17 +221,19 @@ type Service struct {
 	scenes   SceneLoader
 	acceptor PatchAcceptor
 	provider agent.TextGenerator
+	resolver ProfileResolver
 	runs     *RunStore
 	ids      RunIDGenerator
 }
 
-func NewService(session Session, loader RegistryLoader, scenes SceneLoader, acceptor PatchAcceptor, provider agent.TextGenerator, runs *RunStore, ids RunIDGenerator) *Service {
+func NewService(session Session, loader RegistryLoader, scenes SceneLoader, acceptor PatchAcceptor, provider agent.TextGenerator, resolver ProfileResolver, runs *RunStore, ids RunIDGenerator) *Service {
 	return &Service{
 		session:  session,
 		loader:   loader,
 		scenes:   scenes,
 		acceptor: acceptor,
 		provider: provider,
+		resolver: resolver,
 		runs:     runs,
 		ids:      ids,
 	}
@@ -252,13 +262,33 @@ func (s *Service) AvailableActions(ctx context.Context, input agent.Availability
 	}
 	decisions := agent.ApplicableAgents(registry.Agents, input)
 	styleIDs := make([]string, 0, len(registry.Styles))
-	for _, style := range registry.Styles {
-		styleIDs = append(styleIDs, style.ID)
-	}
 	result := make([]AvailableAction, 0, len(decisions))
 	for _, decision := range decisions {
 		if !decision.Applicable {
 			continue
+		}
+		compatibleStyles := make([]agent.Style, 0, len(registry.Styles))
+		for _, style := range registry.Styles {
+			compatible, err := s.styleCompatible(ctx, decision.Agent, style)
+			if err != nil {
+				return nil, err
+			}
+			if compatible {
+				compatibleStyles = append(compatibleStyles, style)
+			}
+		}
+		if len(compatibleStyles) == 0 {
+			continue
+		}
+		sort.Slice(compatibleStyles, func(i, j int) bool {
+			if compatibleStyles[i].Name != compatibleStyles[j].Name {
+				return compatibleStyles[i].Name < compatibleStyles[j].Name
+			}
+			return compatibleStyles[i].ID < compatibleStyles[j].ID
+		})
+		styleIDs = styleIDs[:0]
+		for _, style := range compatibleStyles {
+			styleIDs = append(styleIDs, style.ID)
 		}
 		result = append(result, AvailableAction{
 			AgentID:            decision.Agent.ID,
@@ -297,6 +327,11 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
+	if compatible, err := s.styleCompatible(ctx, agentDefinition, styleDefinition); err != nil {
+		return Run{}, err
+	} else if !compatible {
+		return Run{}, fmt.Errorf("style %q is incompatible with agent %q: %w", styleDefinition.ID, agentDefinition.ID, ErrProviderInvalid)
+	}
 	scene, err := s.scenes.LoadScene(ctx, request.SceneID)
 	if err != nil {
 		return Run{}, err
@@ -333,12 +368,22 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 		Summary: summary,
 	})
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, agent.ErrProviderOffline) {
 			return Run{}, fmt.Errorf("%w: %w", ErrProviderUnavailable, err)
+		}
+		if errors.Is(err, agent.ErrProviderInvalid) {
+			return Run{}, fmt.Errorf("%w: %w", ErrProviderInvalid, err)
+		}
+		if errors.Is(err, agent.ErrProviderRejected) {
+			return Run{}, fmt.Errorf("%w: %w", ErrProviderRejected, err)
 		}
 		return Run{}, err
 	}
-	if generated.Replacement == selected {
+	replacement, err := validateGeneratedReplacement(generated.Replacement)
+	if err != nil {
+		return Run{}, err
+	}
+	if replacement == selected {
 		return Run{}, story.ErrNoSceneChanges
 	}
 	run := Run{
@@ -352,8 +397,9 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 			EndByte:   request.Selection.EndByte,
 		},
 		OriginalText:   selected,
-		Replacement:    generated.Replacement,
+		Replacement:    replacement,
 		ContextSummary: summary,
+		Provider:       generated.Provider,
 	}
 	for attempts := 0; attempts < 5; attempts++ {
 		runID, err := s.ids.Next()
@@ -371,6 +417,34 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 		}
 	}
 	return Run{}, errors.New("generate unique action run ID after 5 attempts")
+}
+
+func validateGeneratedReplacement(replacement string) (string, error) {
+	normalized, err := agent.NormalizeGeneratedReplacement(replacement)
+	if errors.Is(err, agent.ErrProviderInvalid) {
+		return "", fmt.Errorf("%w: %w", ErrProviderInvalid, err)
+	}
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrProviderRejected, err)
+	}
+	return normalized, nil
+}
+
+func (s *Service) styleCompatible(ctx context.Context, agentDefinition agent.Agent, style agent.Style) (bool, error) {
+	if s.resolver == nil || (style.Version == 1 && style.ProviderProfileID == "mock_default" && style.Model == "mock") {
+		return true, nil
+	}
+	resolved, found, err := s.resolver.Resolve(ctx, style.ProviderProfileID)
+	if err != nil {
+		return false, err
+	}
+	var profileRef *provider.Profile
+	if found {
+		profileCopy := resolved.Profile
+		profileRef = &profileCopy
+	}
+	decision := agent.ExecutableCompatibility(agentDefinition, style, profileRef, resolved.Readiness)
+	return decision.Compatible, nil
 }
 
 func (s *Service) Reject(ctx context.Context, runID string) (Run, error) {

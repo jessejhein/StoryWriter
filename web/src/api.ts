@@ -103,11 +103,13 @@ export type AgentDefinition = {
 
 export type StyleDefinition = {
   id: string
+  version: number
   name: string
   provider_profile_id: string
   model: string
   temperature: number
   system_prompt: string
+  provider_readiness: 'ready' | 'missing_profile' | 'missing_credential'
 }
 
 export type AvailableAction = {
@@ -159,6 +161,34 @@ export type RunActionResponse = {
     packs_used: string[]
     rag_mode: 'none'
   }
+  provider: {
+    profile_id: string
+    type: 'openai_compatible' | 'ollama'
+    model: string
+  }
+}
+
+export type ProviderProfile = {
+  id: string
+  name: string
+  type: 'openai_compatible' | 'ollama'
+  base_url: string
+  auth: {
+    type: 'none' | 'bearer_env'
+    credential_env: string
+  }
+  capabilities: {
+    chat: boolean
+    streaming: boolean
+    structured_output: boolean
+    max_context_tokens: number
+  }
+  readiness?: 'ready' | 'missing_credential'
+}
+
+export type ProviderProfilesResponse = {
+  profiles: ProviderProfile[]
+  revision: string | null
 }
 
 export type ActionDecisionResponse = {
@@ -349,6 +379,21 @@ export function acceptAction(runID: string, expectedRevision: string): Promise<A
 
 export function rejectAction(runID: string): Promise<ActionDecisionResponse> {
   return request(`/api/actions/${runID}/reject`, { method: 'POST' })
+}
+
+export function getProviderProfiles(): Promise<ProviderProfilesResponse> {
+  return request('/api/provider-profiles')
+}
+
+export function saveProviderProfiles(
+  profiles: ProviderProfile[],
+  expectedRevision: string | null,
+): Promise<ProviderProfilesResponse> {
+  return request('/api/provider-profiles', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ profiles, expected_revision: expectedRevision }),
+  })
 }
 
 /** getCodexEntries loads the active project's full Codex list. */

@@ -4,7 +4,11 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"storywork/internal/action"
@@ -14,14 +18,55 @@ import (
 	"storywork/internal/gitstore"
 	"storywork/internal/index"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 	"storywork/internal/storyfile"
 	"storywork/internal/workspace"
 )
 
 type compositeStore struct {
-	stories *story.Service
-	actions *action.Service
+	stories   *story.Service
+	actions   *action.Service
+	providers *providerDependencies
+}
+
+var errInvalidProviderConfigPath = errors.New("invalid provider config path")
+
+type providerDependencies struct {
+	service   *provider.Service
+	configErr error
+}
+
+func newProviderDependencies(override string, userConfigDir func() (string, error)) *providerDependencies {
+	configDir, err := provider.ResolveConfigDir(override, userConfigDir)
+	if err != nil {
+		return &providerDependencies{configErr: fmt.Errorf("%w: %w", errInvalidProviderConfigPath, err)}
+	}
+	return &providerDependencies{service: provider.NewService(
+		provider.NewStore(filepath.Join(configDir, "providers.yaml")),
+		provider.EnvironmentBroker{LookupEnv: os.LookupEnv},
+	)}
+}
+
+func (p *providerDependencies) List(ctx context.Context) ([]provider.Profile, *string, error) {
+	if p.configErr != nil {
+		return nil, nil, p.configErr
+	}
+	return p.service.List(ctx)
+}
+
+func (p *providerDependencies) Save(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
+	if p.configErr != nil {
+		return nil, nil, p.configErr
+	}
+	return p.service.Save(ctx, profiles, expectedRevision)
+}
+
+func (p *providerDependencies) Resolve(ctx context.Context, profileID string) (provider.ResolvedProfile, bool, error) {
+	if p.configErr != nil {
+		return provider.ResolvedProfile{}, false, p.configErr
+	}
+	return p.service.Resolve(ctx, profileID)
 }
 
 func (s *compositeStore) Outline(ctx context.Context) (story.Outline, error) {
@@ -84,6 +129,12 @@ func (s *compositeStore) Accept(ctx context.Context, runID, expectedRevision str
 func (s *compositeStore) Reject(ctx context.Context, runID string) (action.Run, error) {
 	return s.actions.Reject(ctx, runID)
 }
+func (s *compositeStore) ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error) {
+	return s.providers.List(ctx)
+}
+func (s *compositeStore) SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error) {
+	return s.providers.Save(ctx, profiles, expectedRevision)
+}
 
 // NewHandler creates the production HTTP application for the supplied version string.
 func NewHandler(version string) http.Handler {
@@ -93,14 +144,20 @@ func NewHandler(version string) http.Handler {
 	projects := project.NewService(git, disposableIndex, time.Now)
 	files := storyfile.New()
 	stories := story.NewService(session, files, git, disposableIndex, story.NewRandomIDGenerator())
+	providerService := newProviderDependencies(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
 	actions := action.NewService(
 		session,
 		agent.NewLoader(),
 		stories,
 		stories,
-		agent.NewMockProvider(),
+		agent.NewDispatcher(providerService, nil),
+		providerService,
 		action.NewRunStore(),
 		action.NewRandomIDGenerator(),
 	)
-	return api.NewHandler(projects, session, &compositeStore{stories: stories, actions: actions}, version)
+	return api.NewHandler(projects, session, &compositeStore{
+		stories:   stories,
+		actions:   actions,
+		providers: providerService,
+	}, version)
 }

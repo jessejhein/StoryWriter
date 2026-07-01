@@ -9,12 +9,15 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"storywork/internal/provider"
 )
 
 const (
 	maxIDLength          = 64
 	maxNameRunes         = 100
 	maxDescriptionRunes  = 500
+	maxModelRunes        = 200
 	maxSystemPromptRunes = 4000
 )
 
@@ -95,15 +98,22 @@ type RAGMode string
 const RAGModeNone RAGMode = "none"
 
 type Agent struct {
-	Version       int
-	ID            string
-	Name          string
-	Description   string
-	AppliesWhen   ApplicabilityRule
-	ContextPolicy ContextPolicy
-	RAGPolicy     RAGPolicy
-	Control       Control
-	Output        Output
+	Version           int
+	ID                string
+	Name              string
+	Description       string
+	AppliesWhen       ApplicabilityRule
+	ModelRequirements ModelRequirements
+	ContextPolicy     ContextPolicy
+	RAGPolicy         RAGPolicy
+	Control           Control
+	Output            Output
+}
+
+type ModelRequirements struct {
+	MinContextTokens         int
+	SupportsStreaming        bool
+	SupportsStructuredOutput bool
 }
 
 type ApplicabilityRule struct {
@@ -178,7 +188,7 @@ func ValidateAgent(agent Agent) (Agent, error) {
 	agent.ID = strings.TrimSpace(agent.ID)
 	agent.Name = strings.TrimSpace(agent.Name)
 	agent.Description = strings.TrimSpace(agent.Description)
-	if agent.Version != 1 {
+	if agent.Version != 1 && agent.Version != 2 {
 		return Agent{}, fmt.Errorf("agent %q version %d is unsupported: %w", agent.ID, agent.Version, ErrInvalidAgent)
 	}
 	if err := validateRegistryID(agent.ID); err != nil {
@@ -189,6 +199,18 @@ func ValidateAgent(agent Agent) (Agent, error) {
 	}
 	if err := validateRunes("agent description", agent.Description, maxDescriptionRunes); err != nil {
 		return Agent{}, fmt.Errorf("%w: %w", ErrInvalidAgent, err)
+	}
+	switch agent.Version {
+	case 1:
+		agent.ModelRequirements = ModelRequirements{
+			MinContextTokens:         1,
+			SupportsStreaming:        false,
+			SupportsStructuredOutput: false,
+		}
+	case 2:
+		if agent.ModelRequirements.MinContextTokens < 1 || agent.ModelRequirements.MinContextTokens > 10_000_000 {
+			return Agent{}, fmt.Errorf("agent %q min_context_tokens %d is invalid: %w", agent.ID, agent.ModelRequirements.MinContextTokens, ErrInvalidAgent)
+		}
 	}
 	if err := validateApplicability(agent.AppliesWhen); err != nil {
 		return Agent{}, err
@@ -225,7 +247,7 @@ func ValidateStyle(style Style) (Style, error) {
 	style.ProviderProfileID = strings.TrimSpace(style.ProviderProfileID)
 	style.Model = strings.TrimSpace(style.Model)
 	style.SystemPrompt = strings.TrimSpace(style.SystemPrompt)
-	if style.Version != 1 {
+	if style.Version != 1 && style.Version != 2 {
 		return Style{}, fmt.Errorf("style %q version %d is unsupported: %w", style.ID, style.Version, ErrInvalidStyle)
 	}
 	if err := validateRegistryID(style.ID); err != nil {
@@ -234,11 +256,26 @@ func ValidateStyle(style Style) (Style, error) {
 	if err := validateRunes("style name", style.Name, maxNameRunes); err != nil {
 		return Style{}, fmt.Errorf("%w: %w", ErrInvalidStyle, err)
 	}
-	if style.ProviderProfileID != "mock_default" {
-		return Style{}, fmt.Errorf("style %q provider_profile_id %q is unsupported: %w", style.ID, style.ProviderProfileID, ErrInvalidStyle)
-	}
-	if style.Model != "mock" {
-		return Style{}, fmt.Errorf("style %q model %q is unsupported: %w", style.ID, style.Model, ErrInvalidStyle)
+	switch style.Version {
+	case 1:
+		if style.ProviderProfileID != "mock_default" {
+			return Style{}, fmt.Errorf("style %q provider_profile_id %q is unsupported: %w", style.ID, style.ProviderProfileID, ErrInvalidStyle)
+		}
+		if style.Model != "mock" {
+			return Style{}, fmt.Errorf("style %q model %q is unsupported: %w", style.ID, style.Model, ErrInvalidStyle)
+		}
+	case 2:
+		if err := validateRegistryID(style.ProviderProfileID); err != nil {
+			return Style{}, fmt.Errorf("style %q provider_profile_id: %w", style.ID, err)
+		}
+		if !utf8.ValidString(style.Model) || strings.TrimSpace(style.Model) == "" || utf8.RuneCountInString(style.Model) > maxModelRunes {
+			return Style{}, fmt.Errorf("style %q model %q is invalid: %w", style.ID, style.Model, ErrInvalidStyle)
+		}
+		for _, r := range style.Model {
+			if unicode.IsControl(r) {
+				return Style{}, fmt.Errorf("style %q model %q is invalid: %w", style.ID, style.Model, ErrInvalidStyle)
+			}
+		}
 	}
 	if style.Temperature < 0 || style.Temperature > 2 {
 		return Style{}, fmt.Errorf("style %q temperature %.2f is invalid: %w", style.ID, style.Temperature, ErrInvalidStyle)
@@ -247,6 +284,65 @@ func ValidateStyle(style Style) (Style, error) {
 		return Style{}, fmt.Errorf("%w: %w", ErrInvalidStyle, err)
 	}
 	return style, nil
+}
+
+type CompatibilityReason string
+
+const (
+	CompatibilityMock                        CompatibilityReason = "mock"
+	CompatibilityProfileNotFound             CompatibilityReason = "profile_not_found"
+	CompatibilityMissingCredential           CompatibilityReason = "missing_credential"
+	CompatibilityChatUnsupported             CompatibilityReason = "chat_unsupported"
+	CompatibilityContextLimitTooSmall        CompatibilityReason = "context_limit_too_small"
+	CompatibilityStreamingUnsupported        CompatibilityReason = "streaming_unsupported"
+	CompatibilityStructuredOutputUnsupported CompatibilityReason = "structured_output_unsupported"
+	CompatibilityCompatible                  CompatibilityReason = "compatible"
+)
+
+type CompatibilityDecision struct {
+	Compatible bool
+	Reason     CompatibilityReason
+}
+
+func Compatibility(agent Agent, style Style, profile *provider.Profile, readiness provider.Readiness) CompatibilityDecision {
+	if style.Version == 1 && style.ProviderProfileID == "mock_default" && style.Model == "mock" {
+		return CompatibilityDecision{Compatible: true, Reason: CompatibilityMock}
+	}
+	if profile == nil {
+		return CompatibilityDecision{Reason: CompatibilityProfileNotFound}
+	}
+	if profile.Auth.Type == provider.AuthTypeBearerEnv && readiness != provider.ReadinessReady {
+		return CompatibilityDecision{Reason: CompatibilityMissingCredential}
+	}
+	if !profile.Capabilities.Chat {
+		return CompatibilityDecision{Reason: CompatibilityChatUnsupported}
+	}
+	if profile.Capabilities.MaxContextTokens < agent.ModelRequirements.MinContextTokens {
+		return CompatibilityDecision{Reason: CompatibilityContextLimitTooSmall}
+	}
+	if agent.ModelRequirements.SupportsStreaming && !profile.Capabilities.Streaming {
+		return CompatibilityDecision{Reason: CompatibilityStreamingUnsupported}
+	}
+	if agent.ModelRequirements.SupportsStructuredOutput && !profile.Capabilities.StructuredOutput {
+		return CompatibilityDecision{Reason: CompatibilityStructuredOutputUnsupported}
+	}
+	return CompatibilityDecision{Compatible: true, Reason: CompatibilityCompatible}
+}
+
+// ExecutableCompatibility additionally accounts for capabilities not implemented
+// by the current adapters, even when a profile declares them.
+func ExecutableCompatibility(agent Agent, style Style, profile *provider.Profile, readiness provider.Readiness) CompatibilityDecision {
+	decision := Compatibility(agent, style, profile, readiness)
+	if !decision.Compatible || decision.Reason == CompatibilityMock {
+		return decision
+	}
+	if agent.ModelRequirements.SupportsStreaming {
+		return CompatibilityDecision{Reason: CompatibilityStreamingUnsupported}
+	}
+	if agent.ModelRequirements.SupportsStructuredOutput {
+		return CompatibilityDecision{Reason: CompatibilityStructuredOutputUnsupported}
+	}
+	return decision
 }
 
 func ApplicableAgents(agents []Agent, input AvailabilityInput) []AvailabilityDecision {

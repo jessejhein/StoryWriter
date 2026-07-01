@@ -23,6 +23,8 @@ vi.mock('./api', () => ({
   getCodexProgressions: vi.fn(),
   saveCodexProgressions: vi.fn(),
   getCodexActiveState: vi.fn(),
+  getProviderProfiles: vi.fn(),
+  saveProviderProfiles: vi.fn(),
 }))
 
 const api = await import('./api')

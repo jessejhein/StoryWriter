@@ -69,6 +69,14 @@ Preferred order:
 
 The browser UI should not directly own long-lived provider tokens. In local web mode, the Go backend is the credential broker.
 
+Milestone 5 implements this boundary with application-level `providers.yaml`,
+an environment credential broker, and one provider-neutral text-generation
+interface. Profile storage and readiness belong to `internal/provider`; the
+action lifecycle depends only on the generation and profile-resolution
+boundaries. OpenAI-compatible and Ollama HTTP shapes are adapter details and do
+not enter action runs or API request models. Credentials are resolved for each
+availability/run decision and are passed only to the outbound adapter.
+
 ## Suggested source repository layout
 
 ```text
@@ -125,4 +133,3 @@ The architecture should allow Electron/Tauri later:
 - credentials can use OS store.
 
 Do not build Electron in MVP.
-

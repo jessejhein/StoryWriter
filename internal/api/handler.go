@@ -17,6 +17,7 @@ import (
 	"storywork/internal/agent"
 	"storywork/internal/codex"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 )
 
@@ -153,11 +154,36 @@ type StoryStore interface {
 	Accept(ctx context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error)
 	// Reject discards one pending run without mutating canon.
 	Reject(ctx context.Context, runID string) (action.Run, error)
+	// ProviderProfiles returns the application-level provider profiles and revision.
+	ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error)
+	// SaveProviderProfiles replaces the application-level provider profiles.
+	SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error)
 }
 
 type requiredJSONField struct {
 	name      string
 	allowNull bool
+}
+
+type providerProfileRequest struct {
+	ID           *string                      `json:"id"`
+	Name         *string                      `json:"name"`
+	Type         *provider.Type               `json:"type"`
+	BaseURL      *string                      `json:"base_url"`
+	Auth         *providerAuthRequest         `json:"auth"`
+	Capabilities *providerCapabilitiesRequest `json:"capabilities"`
+}
+
+type providerAuthRequest struct {
+	Type          *provider.AuthType `json:"type"`
+	CredentialEnv *string            `json:"credential_env"`
+}
+
+type providerCapabilitiesRequest struct {
+	Chat             *bool `json:"chat"`
+	Streaming        *bool `json:"streaming"`
+	StructuredOutput *bool `json:"structured_output"`
+	MaxContextTokens *int  `json:"max_context_tokens"`
 }
 
 // NewHandler creates the full local Storywork HTTP router for the current milestone set.
@@ -195,6 +221,62 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		}
 		session.Set(opened)
 		writeJSON(writer, http.StatusOK, opened)
+	})
+	mux.HandleFunc("GET /api/provider-profiles", func(writer http.ResponseWriter, request *http.Request) {
+		profiles, revision, err := stories.ProviderProfiles(request.Context())
+		if err != nil {
+			writeProviderError(writer, err)
+			return
+		}
+		if profiles == nil {
+			profiles = []provider.Profile{}
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"profiles": profiles,
+			"revision": revision,
+		})
+	})
+	mux.HandleFunc("PUT /api/provider-profiles", func(writer http.ResponseWriter, request *http.Request) {
+		var putRequest struct {
+			Profiles         *[]providerProfileRequest `json:"profiles"`
+			ExpectedRevision *string                   `json:"expected_revision"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &putRequest, 1<<20,
+			requiredJSONField{name: "profiles"},
+			requiredJSONField{name: "expected_revision", allowNull: true},
+		); err != nil {
+			var maxBytesErr *http.MaxBytesError
+			if errors.As(err, &maxBytesErr) {
+				writeError(writer, http.StatusRequestEntityTooLarge, errors.New("request body exceeds the 1 MiB limit"))
+				return
+			}
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if putRequest.Profiles == nil {
+			writeError(writer, http.StatusBadRequest, errors.New("profiles is required"))
+			return
+		}
+		if putRequest.ExpectedRevision != nil {
+			if err := provider.ValidateRevision(*putRequest.ExpectedRevision); err != nil {
+				writeError(writer, http.StatusBadRequest, err)
+				return
+			}
+		}
+		domainProfiles, err := decodeProviderProfiles(*putRequest.Profiles)
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		profiles, revision, err := stories.SaveProviderProfiles(request.Context(), domainProfiles, putRequest.ExpectedRevision)
+		if err != nil {
+			writeProviderError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"profiles": profiles,
+			"revision": revision,
+		})
 	})
 	mux.HandleFunc("GET /api/outline", func(writer http.ResponseWriter, request *http.Request) {
 		outline, err := stories.Outline(request.Context())
@@ -500,23 +582,48 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
+		profiles, _, err := stories.ProviderProfiles(request.Context())
+		if err != nil {
+			writeProviderError(writer, err)
+			return
+		}
+		readinessByID := make(map[string]provider.ProfileReadiness, len(profiles))
+		for _, item := range profiles {
+			if item.Readiness == provider.ReadinessMissingCredential {
+				readinessByID[item.ID] = provider.ProfileReadinessMissingCredential
+				continue
+			}
+			readinessByID[item.ID] = provider.ProfileReadinessReady
+		}
 		type styleResponse struct {
-			ID                string  `json:"id"`
-			Name              string  `json:"name"`
-			ProviderProfileID string  `json:"provider_profile_id"`
-			Model             string  `json:"model"`
-			Temperature       float64 `json:"temperature"`
-			SystemPrompt      string  `json:"system_prompt"`
+			ID                string                    `json:"id"`
+			Version           int                       `json:"version"`
+			Name              string                    `json:"name"`
+			ProviderProfileID string                    `json:"provider_profile_id"`
+			Model             string                    `json:"model"`
+			Temperature       float64                   `json:"temperature"`
+			SystemPrompt      string                    `json:"system_prompt"`
+			ProviderReadiness provider.ProfileReadiness `json:"provider_readiness"`
 		}
 		response := make([]styleResponse, 0, len(styles))
 		for _, item := range styles {
+			readiness := provider.ProfileReadinessReady
+			if item.Version == 2 {
+				var ok bool
+				readiness, ok = readinessByID[item.ProviderProfileID]
+				if !ok {
+					readiness = provider.ProfileReadinessMissingProfile
+				}
+			}
 			response = append(response, styleResponse{
 				ID:                item.ID,
+				Version:           item.Version,
 				Name:              item.Name,
 				ProviderProfileID: item.ProviderProfileID,
 				Model:             item.Model,
 				Temperature:       item.Temperature,
 				SystemPrompt:      item.SystemPrompt,
+				ProviderReadiness: readiness,
 			})
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"styles": response})
@@ -622,6 +729,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 				"replacement": run.Replacement,
 			},
 			"context_summary": run.ContextSummary,
+			"provider":        run.Provider,
 		})
 	})
 	mux.HandleFunc("POST /api/actions/{run_id}/accept", func(writer http.ResponseWriter, request *http.Request) {
@@ -674,6 +782,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 	mux.HandleFunc("/api/actions/run", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/accept", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/reject", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/provider-profiles", methodNotAllowed("GET, PUT"))
 	return mux
 }
 
@@ -691,6 +800,39 @@ func validateExactQuery(request *http.Request, allowed ...string) error {
 		}
 	}
 	return nil
+}
+
+func decodeProviderProfiles(requests []providerProfileRequest) ([]provider.Profile, error) {
+	profiles := make([]provider.Profile, 0, len(requests))
+	for index, item := range requests {
+		if item.ID == nil || item.Name == nil || item.Type == nil || item.BaseURL == nil || item.Auth == nil || item.Capabilities == nil {
+			return nil, fmt.Errorf("profile %d requires id, name, type, base_url, auth, and capabilities", index+1)
+		}
+		if item.Auth.Type == nil || item.Auth.CredentialEnv == nil {
+			return nil, fmt.Errorf("profile %d auth requires type and credential_env", index+1)
+		}
+		capabilities := item.Capabilities
+		if capabilities.Chat == nil || capabilities.Streaming == nil || capabilities.StructuredOutput == nil || capabilities.MaxContextTokens == nil {
+			return nil, fmt.Errorf("profile %d capabilities requires chat, streaming, structured_output, and max_context_tokens", index+1)
+		}
+		profiles = append(profiles, provider.Profile{
+			ID:      *item.ID,
+			Name:    *item.Name,
+			Type:    *item.Type,
+			BaseURL: *item.BaseURL,
+			Auth: provider.AuthConfig{
+				Type:          *item.Auth.Type,
+				CredentialEnv: *item.Auth.CredentialEnv,
+			},
+			Capabilities: provider.Capabilities{
+				Chat:             *capabilities.Chat,
+				Streaming:        *capabilities.Streaming,
+				StructuredOutput: *capabilities.StructuredOutput,
+				MaxContextTokens: *capabilities.MaxContextTokens,
+			},
+		})
+	}
+	return profiles, nil
 }
 
 func requireEmptyBody(request *http.Request) error {
@@ -903,6 +1045,17 @@ func writeStoryError(writer http.ResponseWriter, err error) {
 	writeError(writer, statusForStoryError(err), err)
 }
 
+func writeProviderError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, provider.ErrInvalidProfile), errors.Is(err, provider.ErrNoProfileChanges):
+		writeError(writer, http.StatusBadRequest, err)
+	case errors.Is(err, provider.ErrProfileRevisionConflict):
+		writeError(writer, http.StatusConflict, err)
+	default:
+		writeError(writer, http.StatusInternalServerError, err)
+	}
+}
+
 func validateAvailabilityInput(input agent.AvailabilityInput) error {
 	switch input.Surface {
 	case agent.SurfaceEditor, agent.SurfaceChapterView:
@@ -928,7 +1081,7 @@ func statusForStoryError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, story.ErrInvalidTitle), errors.Is(err, story.ErrInvalidID), errors.Is(err, story.ErrInvalidReorder), errors.Is(err, story.ErrInvalidPOV), errors.Is(err, story.ErrInvalidStatus), errors.Is(err, story.ErrInvalidMarkdown), errors.Is(err, story.ErrInvalidRevision), errors.Is(err, story.ErrNoSceneChanges):
 		return http.StatusBadRequest
-	case errors.Is(err, story.ErrInvalidSelection), errors.Is(err, agent.ErrInvalidAgent), errors.Is(err, agent.ErrInvalidStyle), errors.Is(err, agent.ErrInapplicable), errors.Is(err, action.ErrInvalidRunRequest):
+	case errors.Is(err, story.ErrInvalidSelection), errors.Is(err, agent.ErrInvalidAgent), errors.Is(err, agent.ErrInvalidStyle), errors.Is(err, agent.ErrInapplicable), errors.Is(err, action.ErrInvalidRunRequest), errors.Is(err, action.ErrProviderInvalid):
 		return http.StatusBadRequest
 	case errors.Is(err, codex.ErrInvalidType), errors.Is(err, codex.ErrInvalidID), errors.Is(err, codex.ErrInvalidName), errors.Is(err, codex.ErrInvalidAlias), errors.Is(err, codex.ErrInvalidTag), errors.Is(err, codex.ErrInvalidDescription), errors.Is(err, codex.ErrInvalidMetadata), errors.Is(err, codex.ErrInvalidRevision), errors.Is(err, codex.ErrInvalidProgression), errors.Is(err, codex.ErrNoChanges):
 		return http.StatusBadRequest
@@ -940,6 +1093,8 @@ func statusForStoryError(err error) int {
 		return http.StatusNotFound
 	case errors.Is(err, action.ErrRunCapacity), errors.Is(err, action.ErrProviderUnavailable):
 		return http.StatusServiceUnavailable
+	case errors.Is(err, action.ErrProviderRejected):
+		return http.StatusBadGateway
 	default:
 		return http.StatusInternalServerError
 	}

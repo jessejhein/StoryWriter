@@ -590,7 +590,9 @@ export default function SceneEditor({ project, sceneID, onBack, onDirtyChange }:
                           <pre>{previewRun.patch.replacement}</pre>
                         </div>
                       </div>
-                      <p className="section-note">Context packs: {previewRun.context_summary.packs_used.join(', ')}. RAG mode: {previewRun.context_summary.rag_mode}.</p>
+                      <p className="section-note">
+                        Context packs: {previewRun.context_summary.packs_used.join(', ')}. RAG mode: {previewRun.context_summary.rag_mode}. Provider: {previewRun.provider.profile_id} ({previewRun.provider.type}, model {previewRun.provider.model}).
+                      </p>
                       <div className="actions">
                         <button type="button" className="secondary" onClick={() => void copyReplacement()}>Copy replacement</button>
                         <button type="button" className="secondary" onClick={() => void submitRejectAction()} disabled={rejectingAction || acceptingAction}>

@@ -42,6 +42,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			Control:   agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
 		}},
 		styles: []agent.Style{{
+			Version:           1,
 			ID:                "precise_editor",
 			Name:              "Precise Editor",
 			ProviderProfileID: "mock_default",
@@ -67,6 +68,11 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			Selection:     action.Selection{StartByte: 120, EndByte: 640},
 			OriginalText:  "Selected prose...",
 			Replacement:   "Mock polished: Selected prose...",
+			Provider: agent.ProviderIdentity{
+				ProfileID: "mock_default",
+				Type:      "openai_compatible",
+				Model:     "mock",
+			},
 			ContextSummary: agent.ContextSummary{
 				PacksUsed: []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet},
 				RAGMode:   agent.RAGModeNone,
@@ -115,7 +121,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			method:       http.MethodGet,
 			path:         "/api/styles",
 			status:       http.StatusOK,
-			expectedJSON: `{"styles":[{"id":"precise_editor","name":"Precise Editor","provider_profile_id":"mock_default","model":"mock","temperature":0.2,"system_prompt":"You are a careful prose editor."}]}`,
+			expectedJSON: `{"styles":[{"id":"precise_editor","version":1,"name":"Precise Editor","provider_profile_id":"mock_default","model":"mock","temperature":0.2,"system_prompt":"You are a careful prose editor.","provider_readiness":"ready"}]}`,
 		},
 		{
 			name:         "available actions",
@@ -130,7 +136,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			path:         "/api/actions/run",
 			body:         `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":120,"end_byte":640,"text":"Selected prose..."}}`,
 			status:       http.StatusCreated,
-			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"pending","agent_id":"line_polish","style_id":"precise_editor","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":120,"end_byte":640},"output_mode":"patch","patch":{"original":"Selected prose...","replacement":"Mock polished: Selected prose..."},"context_summary":{"packs_used":["selected_text","style_sheet"],"rag_mode":"none"}}`,
+			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"pending","agent_id":"line_polish","style_id":"precise_editor","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":120,"end_byte":640},"output_mode":"patch","patch":{"original":"Selected prose...","replacement":"Mock polished: Selected prose..."},"context_summary":{"packs_used":["selected_text","style_sheet"],"rag_mode":"none"},"provider":{"profile_id":"mock_default","type":"openai_compatible","model":"mock"}}`,
 		},
 		{
 			name:         "accept action",

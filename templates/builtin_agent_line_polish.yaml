@@ -1,4 +1,4 @@
-version: 1
+version: 2
 id: line_polish
 name: Line Polish
 description: Rewrite selected prose for clarity, cadence, and flow while preserving meaning.
@@ -9,6 +9,10 @@ applies_when:
     - selection
   min_words: 20
   max_words: 1500
+model_requirements:
+  min_context_tokens: 2048
+  supports_streaming: false
+  supports_structured_output: false
 context_policy:
   required:
     - selected_text
