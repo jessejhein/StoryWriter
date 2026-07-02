@@ -21,12 +21,12 @@ func TestContextPreviewRouteReturnsExactManifestJSON(t *testing.T) {
 
 	stub := &storyServiceStub{previewResult: action.ContextPreviewResult{
 		Manifest: contextpack.Manifest{
-			Scope: contextpack.ScopeSelection,
-			PacksUsed: []contextpack.Pack{contextpack.PackSelectedText, contextpack.PackStyleSheet},
-			PacksOmitted: []contextpack.PackOmission{},
-			EstimatedInputTokens: 42,
+			Scope:                   contextpack.ScopeSelection,
+			PacksUsed:               []contextpack.Pack{contextpack.PackSelectedText, contextpack.PackStyleSheet},
+			PacksOmitted:            []contextpack.PackOmission{},
+			EstimatedInputTokens:    42,
 			MaxInputEstimatedTokens: 8000,
-			RAGMode: contextpack.RAGModeNone,
+			RAGMode:                 contextpack.RAGModeNone,
 		},
 		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}}
@@ -125,9 +125,9 @@ func TestContextPreviewResponseDoesNotLeakPacketContent(t *testing.T) {
 
 	stub := &storyServiceStub{previewResult: action.ContextPreviewResult{
 		Manifest: contextpack.Manifest{
-			Scope: contextpack.ScopeSelection,
+			Scope:     contextpack.ScopeSelection,
 			PacksUsed: []contextpack.Pack{contextpack.PackSelectedText, contextpack.PackStyleSheet},
-			RAGMode: contextpack.RAGModeNone,
+			RAGMode:   contextpack.RAGModeNone,
 		},
 		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}}

@@ -30,92 +30,94 @@ func (s *activeProjectSessionStub) Set(current project.Project) {
 }
 
 type storyServiceStub struct {
-	outlineResult        story.Outline
-	mutationResult       story.MutationResult
-	sceneResult          story.SceneDocument
-	codexEntries         []codex.Entry
-	codexEntry           codex.Entry
-	progressionDocument  codex.ProgressionDocument
-	activeState          codex.ActiveState
-	outlineErr           error
-	createArcErr         error
-	createChapterErr     error
-	createSceneErr       error
-	reorderErr           error
-	loadSceneErr         error
-	saveSceneErr         error
-	loadCodexErr         error
-	createCodexErr       error
-	updateCodexErr       error
-	loadProgressionsErr  error
-	saveProgressionsErr  error
-	activeCodexErr       error
-	createArcTitle       string
-	createChapterArcID   string
-	createChapterTitle   string
-	createSceneChapterID string
-	createSceneTitle     string
-	reorderRequest       story.ReorderRequest
-	loadSceneID          string
-	saveSceneID          string
-	saveSceneRequest     story.SaveSceneRequest
-	codexEntryID         string
-	saveCodexRequest     codex.SaveEntryRequest
-	progressionEntryID   string
-	saveProgressionsReq  codex.SaveProgressionsRequest
-	activeEntryID        string
-	activeSceneID        string
-	agents               []agent.Agent
-	styles               []agent.Style
-	availableActions     []action.AvailableAction
-	actionRun            action.Run
-	actionRunErr         error
-	agentsErr            error
-	stylesErr            error
-	availableActionsErr  error
-	providerProfiles     []provider.Profile
-	providerRevision     *string
-	providerProfilesErr  error
-	saveProviderErr      error
-	actionAcceptErr      error
-	actionRejectErr      error
-	actionAcceptRun      action.Run
-	actionRejectRun      action.Run
-	actionAcceptScene    story.SceneDocument
-	actionRunRequest     action.RunRequest
-	previewRequest       action.TaggedRunRequest
-	previewResult        action.ContextPreviewResult
-	previewErr           error
-	actionAcceptRunID    string
-	actionAcceptRevision string
-	actionRejectRunID    string
-	availableInput       agent.AvailabilityInput
-	saveProviderInput    []provider.Profile
-	saveProviderExpected *string
-	importResponse       importer.ImportResponse
-	importErr            error
-	importList           []importer.ImportSummary
-	importListErr        error
-	loadImportResponse   importer.ImportResponse
-	loadImportErr        error
-	importChunks         []importer.Chunk
-	importChunksErr      error
-	extractResponse      importer.ExtractResponse
-	extractErr           error
-	candidates           []importer.Candidate
-	candidatesErr        error
-	candidate            importer.Candidate
-	candidateErr         error
-	updateCandidate      importer.Candidate
-	updateCandidateErr   error
-	mergeCandidate       importer.Candidate
-	mergeCandidateIDs    []string
-	mergeCandidateErr    error
-	discardCandidate     importer.Candidate
-	discardCandidateErr  error
-	acceptCandidate      importer.Candidate
-	acceptRefs           []importer.CanonicalRef
-	acceptCandidateErr   error
+	outlineResult           story.Outline
+	mutationResult          story.MutationResult
+	sceneResult             story.SceneDocument
+	codexEntries            []codex.Entry
+	codexEntry              codex.Entry
+	progressionDocument     codex.ProgressionDocument
+	activeState             codex.ActiveState
+	outlineErr              error
+	createArcErr            error
+	createChapterErr        error
+	createSceneErr          error
+	reorderErr              error
+	loadSceneErr            error
+	saveSceneErr            error
+	loadCodexErr            error
+	createCodexErr          error
+	updateCodexErr          error
+	loadProgressionsErr     error
+	saveProgressionsErr     error
+	activeCodexErr          error
+	createArcTitle          string
+	createChapterArcID      string
+	createChapterTitle      string
+	createSceneChapterID    string
+	createSceneTitle        string
+	reorderRequest          story.ReorderRequest
+	loadSceneID             string
+	saveSceneID             string
+	saveSceneRequest        story.SaveSceneRequest
+	codexEntryID            string
+	saveCodexRequest        codex.SaveEntryRequest
+	progressionEntryID      string
+	saveProgressionsReq     codex.SaveProgressionsRequest
+	activeEntryID           string
+	activeSceneID           string
+	agents                  []agent.Agent
+	styles                  []agent.Style
+	availableActions        []action.AvailableAction
+	actionRun               action.Run
+	actionRunErr            error
+	agentsErr               error
+	stylesErr               error
+	availableActionsErr     error
+	providerProfiles        []provider.Profile
+	providerRevision        *string
+	providerProfilesErr     error
+	saveProviderErr         error
+	actionAcceptErr         error
+	actionRejectErr         error
+	actionAcceptRun         action.Run
+	actionRejectRun         action.Run
+	actionAcceptScene       story.SceneDocument
+	actionRunRequest        action.RunRequest
+	previewRequest          action.TaggedRunRequest
+	previewResult           action.ContextPreviewResult
+	previewErr              error
+	actionAcceptRunID       string
+	actionAcceptRevision    string
+	actionRejectRunID       string
+	actionInvitationID      string
+	actionInvitationRequest action.InvitationRunRequest
+	availableInput          agent.AvailabilityInput
+	saveProviderInput       []provider.Profile
+	saveProviderExpected    *string
+	importResponse          importer.ImportResponse
+	importErr               error
+	importList              []importer.ImportSummary
+	importListErr           error
+	loadImportResponse      importer.ImportResponse
+	loadImportErr           error
+	importChunks            []importer.Chunk
+	importChunksErr         error
+	extractResponse         importer.ExtractResponse
+	extractErr              error
+	candidates              []importer.Candidate
+	candidatesErr           error
+	candidate               importer.Candidate
+	candidateErr            error
+	updateCandidate         importer.Candidate
+	updateCandidateErr      error
+	mergeCandidate          importer.Candidate
+	mergeCandidateIDs       []string
+	mergeCandidateErr       error
+	discardCandidate        importer.Candidate
+	discardCandidateErr     error
+	acceptCandidate         importer.Candidate
+	acceptRefs              []importer.CanonicalRef
+	acceptCandidateErr      error
 }
 
 func (s *storyServiceStub) Outline(context.Context) (story.Outline, error) {
@@ -210,10 +212,28 @@ func (s *storyServiceStub) Run(_ context.Context, request action.RunRequest) (ac
 	return s.actionRun, s.actionRunErr
 }
 
-func (s *storyServiceStub) Accept(_ context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error) {
+func (s *storyServiceStub) Accept(_ context.Context, runID, expectedRevision string) (action.AcceptResult, error) {
 	s.actionAcceptRunID = runID
 	s.actionAcceptRevision = expectedRevision
-	return s.actionAcceptRun, s.actionAcceptScene, s.actionAcceptErr
+	if s.actionAcceptErr != nil {
+		return action.AcceptResult{}, s.actionAcceptErr
+	}
+	return action.AcceptResult{Run: s.actionAcceptRun, Scene: s.actionAcceptScene}, nil
+}
+
+func (s *storyServiceStub) AcceptBody(_ context.Context, runID, expectedRevision string) (action.AcceptResult, error) {
+	return s.Accept(context.Background(), runID, expectedRevision)
+}
+
+func (s *storyServiceStub) RunTagged(_ context.Context, request action.TaggedRunRequest) (action.Run, error) {
+	s.previewRequest = request
+	return s.actionRun, s.actionRunErr
+}
+
+func (s *storyServiceStub) RunInvitation(_ context.Context, invitationID string, request action.InvitationRunRequest) (action.Run, error) {
+	s.actionInvitationID = invitationID
+	s.actionInvitationRequest = request
+	return s.actionRun, s.actionRunErr
 }
 
 func (s *storyServiceStub) PreviewContext(_ context.Context, request action.TaggedRunRequest) (action.ContextPreviewResult, error) {

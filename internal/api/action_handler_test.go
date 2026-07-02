@@ -143,7 +143,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			path:         "/api/actions/run_0123456789abcdef0123/accept",
 			body:         `{"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
 			status:       http.StatusOK,
-			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"accepted","scene":{"id":"scn_0123456789abcdef0123","chapter_id":"ch_0123456789abcdef0123","title":"The Duel","frontmatter":{"pov":"Luke","status":"draft","exclude_from_ai":false},"markdown":"Updated prose...","revision":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`,
+			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"accepted","scene":{"id":"scn_0123456789abcdef0123","chapter_id":"ch_0123456789abcdef0123","title":"The Duel","frontmatter":{"pov":"Luke","status":"draft","exclude_from_ai":false},"markdown":"Updated prose...","revision":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"follow_up_invitations":null}`,
 		},
 		{
 			name:         "reject action",

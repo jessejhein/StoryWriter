@@ -197,7 +197,13 @@ type ActionStore interface {
 	// Run executes one transient action against canonical scene bytes.
 	Run(ctx context.Context, request action.RunRequest) (action.Run, error)
 	// Accept applies one pending run to canonical scene markdown.
-	Accept(ctx context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error)
+	Accept(ctx context.Context, runID, expectedRevision string) (action.AcceptResult, error)
+	// AcceptBody applies one pending scene body patch to canonical markdown.
+	AcceptBody(ctx context.Context, runID, expectedRevision string) (action.AcceptResult, error)
+	// RunTagged executes one scope-aware action run.
+	RunTagged(ctx context.Context, request action.TaggedRunRequest) (action.Run, error)
+	// RunInvitation executes one explicit follow-up invitation.
+	RunInvitation(ctx context.Context, invitationID string, request action.InvitationRunRequest) (action.Run, error)
 	// Reject discards one pending run without mutating canon.
 	Reject(ctx context.Context, runID string) (action.Run, error)
 	// PreviewContext returns a redacted manifest without provider or run side effects.
@@ -1164,15 +1170,16 @@ func NewHandler(deps HandlerDependencies) http.Handler {
 			writeStoryError(writer, err)
 			return
 		}
-		run, sceneDocument, err := actionStore.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
+		result, err := actionStore.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
 		if err != nil {
 			writeStoryError(writer, err)
 			return
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{
-			"run_id": run.RunID,
-			"status": run.Status,
-			"scene":  sceneDocument,
+			"run_id":                result.Run.RunID,
+			"status":                result.Run.Status,
+			"scene":                 result.Scene,
+			"follow_up_invitations": result.FollowUpInvitations,
 		})
 	})
 	mux.HandleFunc("POST /api/actions/{run_id}/reject", func(writer http.ResponseWriter, request *http.Request) {
@@ -1194,11 +1201,69 @@ func NewHandler(deps HandlerDependencies) http.Handler {
 			"status": run.Status,
 		})
 	})
+	mux.HandleFunc("POST /api/action-invitations/{invitation_id}/run", func(writer http.ResponseWriter, request *http.Request) {
+		invitationID := request.PathValue("invitation_id")
+		if err := action.ValidateInvitationID(invitationID); err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		var runRequest struct {
+			StyleID                string `json:"style_id"`
+			ExpectedTargetRevision string `json:"expected_target_revision"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &runRequest, 1<<20,
+			requiredJSONField{name: "style_id"},
+			requiredJSONField{name: "expected_target_revision"},
+		); err != nil {
+			writeBodyLimitError(writer, err)
+			return
+		}
+		run, err := actionStore.RunInvitation(request.Context(), invitationID, action.InvitationRunRequest{
+			StyleID: runRequest.StyleID, ExpectedTargetRevision: runRequest.ExpectedTargetRevision,
+		})
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		response := map[string]any{
+			"run_id":          run.RunID,
+			"status":          run.Status,
+			"agent_id":        run.AgentID,
+			"style_id":        run.StyleID,
+			"scope":           run.Scope,
+			"parent_run_id":   nullableString(run.ParentRunID),
+			"root_run_id":     run.RootRunID,
+			"chain_depth":     run.ChainDepth,
+			"context_summary": run.ContextSummary,
+			"manifest":        run.Manifest,
+			"provider":        run.Provider,
+		}
+		if run.SceneID != "" {
+			response["scene_id"] = run.SceneID
+			response["scene_revision"] = run.SceneRevision
+		}
+		if run.ChapterID != "" {
+			response["chapter_id"] = run.ChapterID
+			response["chapter_fingerprint"] = run.ChapterFingerprint
+		}
+		if run.Scope == contextpack.ScopeSelection || run.Scope == "" {
+			response["output_mode"] = "patch"
+			response["patch"] = map[string]string{"original": run.OriginalText, "replacement": run.Replacement}
+		} else if run.Scope == contextpack.ScopeScene {
+			response["output_mode"] = "patch"
+			response["patch"] = map[string]string{"original": run.OriginalText, "replacement": run.Replacement}
+		} else if len(run.Findings) > 0 {
+			response["output_mode"] = "suggestion"
+			response["findings"] = run.Findings
+		}
+		writeJSON(writer, http.StatusCreated, response)
+	})
 	mux.HandleFunc("/api/actions/available", methodNotAllowed("GET"))
 	mux.HandleFunc("/api/actions/context-preview", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/run", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/accept", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/reject", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/action-invitations/{invitation_id}/run", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/provider-profiles", methodNotAllowed("GET, PUT"))
 	return mux
 }
@@ -1603,8 +1668,12 @@ func statusForStoryError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound), errors.Is(err, codex.ErrEntryNotFound), errors.Is(err, codex.ErrSceneNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, action.ErrAgentNotFound), errors.Is(err, action.ErrStyleNotFound), errors.Is(err, action.ErrRunNotFound):
+	case errors.Is(err, action.ErrAgentNotFound), errors.Is(err, action.ErrStyleNotFound), errors.Is(err, action.ErrRunNotFound), errors.Is(err, action.ErrInvitationNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, action.ErrInvitationConflict), errors.Is(err, action.ErrLineageConflict):
+		return http.StatusConflict
+	case errors.Is(err, action.ErrInvitationInvalid), errors.Is(err, action.ErrInvitationForbidden):
+		return http.StatusBadRequest
 	case errors.Is(err, action.ErrRunCapacity), errors.Is(err, action.ErrProviderUnavailable):
 		return http.StatusServiceUnavailable
 	case errors.Is(err, action.ErrProviderRejected):
@@ -1699,6 +1768,13 @@ func decodeTaggedRunRequest(writer http.ResponseWriter, request *http.Request) (
 		return action.TaggedRunRequest{}, err
 	}
 	return action.TaggedRunRequest{AgentID: payload.AgentID, StyleID: payload.StyleID, Target: legacy}, nil
+}
+
+func nullableString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func writeError(writer http.ResponseWriter, status int, err error) {
