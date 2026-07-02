@@ -216,6 +216,18 @@ func (s *Service) Reject(ctx context.Context, runID string) (Run, error) {
 	return s.runs.MarkRejected(runID)
 }
 
+// AcceptRun dispatches patch acceptance to the correct scope-specific handler.
+func (s *Service) AcceptRun(ctx context.Context, runID, expectedRevision string) (AcceptResult, error) {
+	run, ok := s.runs.Get(runID)
+	if !ok {
+		return AcceptResult{}, ErrRunNotFound
+	}
+	if run.Scope == contextpack.ScopeScene {
+		return s.AcceptBody(ctx, runID, expectedRevision)
+	}
+	return s.Accept(ctx, runID, expectedRevision)
+}
+
 // Accept applies one pending selection patch to canonical scene markdown.
 func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (AcceptResult, error) {
 	if err := ValidateRunID(runID); err != nil {

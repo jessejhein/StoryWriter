@@ -123,6 +123,7 @@ func (s *Service) LoadSceneMaterial(ctx context.Context, sceneID, expectedRevisi
 		Material: contextpack.Material{
 			Scope:            contextpack.ScopeScene,
 			SceneMarkdown:    scene.Markdown,
+			TargetSceneID:    sceneID,
 			SceneOrder:       sceneOrderRefs(snapshot.outline),
 			CodexCandidates:  candidates,
 			OutlineNeighbors: neighbors,

@@ -119,8 +119,9 @@ type Run struct {
 	Replacement        string                 `json:"-"`
 	Manifest           contextpack.Manifest   `json:"manifest,omitempty"`
 	ContextSummary     agent.ContextSummary   `json:"context_summary,omitempty"`
-	Findings           []Finding              `json:"findings,omitempty"`
-	Provider           agent.ProviderIdentity `json:"provider"`
+	Findings            []Finding              `json:"findings,omitempty"`
+	FollowUpInvitations []PublishedInvitation  `json:"follow_up_invitations,omitempty"`
+	Provider            agent.ProviderIdentity `json:"provider"`
 }
 
 // AcceptResult is the patch acceptance outcome with optional follow-up invitations.

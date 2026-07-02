@@ -135,6 +135,7 @@ type Material struct {
 	Style            StyleSheet
 	SelectionText    string
 	SceneMarkdown    string
+	TargetSceneID    string
 	ChapterScenes    []ChapterSceneText
 	SceneOrder       []SceneOrderRef
 	CodexCandidates  []CodexEntryCandidate

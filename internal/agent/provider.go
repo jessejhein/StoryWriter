@@ -94,7 +94,7 @@ func mockChapterReviewFindings(packet contextpack.ChapterReviewPacket) string {
 			"title":               "Transition loses urgency",
 			"explanation":         "The shift between the two scenes releases tension.",
 			"scene_ids":           []string{packet.ChapterScenes[0].SceneID},
-			"follow_up_agent_ids": []string{"scene_rewrite"},
+			"follow_up_agent_ids": []string{},
 		}},
 	}
 	encoded, _ := json.Marshal(payload)

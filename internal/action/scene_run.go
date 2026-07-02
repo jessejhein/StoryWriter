@@ -128,6 +128,7 @@ func (s *Service) insertTaggedRun(ctx context.Context, request TaggedRunRequest,
 		run.SceneRevision = request.Target.Scene.SceneRevision
 		run.OriginalText = sceneMarkdown
 		run.Replacement = replacement
+		run.ContextSummary = manifestToContextSummary(manifest)
 	case contextpack.ScopeChapterReview:
 		findings, invitations, err := s.parseChapterReviewOutput(generated.Replacement, agentDefinition, materialResult)
 		if err != nil {
@@ -141,9 +142,11 @@ func (s *Service) insertTaggedRun(ctx context.Context, request TaggedRunRequest,
 		if err != nil {
 			return Run{}, err
 		}
-		if _, err := s.publishPreparedInvitations(inserted, invitations); err != nil {
+		published, err := s.publishPreparedInvitations(inserted, invitations)
+		if err != nil {
 			return Run{}, err
 		}
+		inserted.FollowUpInvitations = published
 		return inserted, nil
 	default:
 		return Run{}, fmt.Errorf("scope %q is unsupported: %w", request.Target.Scope, ErrInvalidRunRequest)

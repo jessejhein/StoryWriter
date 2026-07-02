@@ -221,6 +221,10 @@ func (s *storyServiceStub) Accept(_ context.Context, runID, expectedRevision str
 	return action.AcceptResult{Run: s.actionAcceptRun, Scene: s.actionAcceptScene}, nil
 }
 
+func (s *storyServiceStub) AcceptRun(_ context.Context, runID, expectedRevision string) (action.AcceptResult, error) {
+	return s.Accept(context.Background(), runID, expectedRevision)
+}
+
 func (s *storyServiceStub) AcceptBody(_ context.Context, runID, expectedRevision string) (action.AcceptResult, error) {
 	return s.Accept(context.Background(), runID, expectedRevision)
 }

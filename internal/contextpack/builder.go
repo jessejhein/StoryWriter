@@ -266,6 +266,9 @@ func codexEstimateText(entry CodexEntryState) string {
 }
 
 func targetSceneIDFromMaterial(material Material) (string, error) {
+	if material.TargetSceneID != "" {
+		return material.TargetSceneID, nil
+	}
 	if len(material.SceneOrder) == 0 {
 		return "", fmt.Errorf("scene order is required for active codex resolution")
 	}
