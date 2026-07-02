@@ -123,6 +123,17 @@ type SceneOperationMetadata struct {
 	Scope       string
 }
 
+// AcceptSceneBodyPatchRequest applies one reviewed full scene body replacement.
+type AcceptSceneBodyPatchRequest struct {
+	RunID               string
+	SceneID             string
+	RunSceneRevision    string
+	ExpectedRevision    string
+	OriginalMarkdown    string
+	ReplacementMarkdown string
+	Operation           *SceneOperationMetadata
+}
+
 // AcceptScenePatchRequest applies one reviewed action replacement to a canonical scene.
 type AcceptScenePatchRequest struct {
 	RunID            string

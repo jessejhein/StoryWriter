@@ -509,6 +509,85 @@ func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatch
 	return nextScene, nil
 }
 
+// AcceptSceneBodyPatch validates and persists one reviewed full scene body replacement.
+func (s *Service) AcceptSceneBodyPatch(ctx context.Context, request AcceptSceneBodyPatchRequest) (SceneDocument, error) {
+	current, err := s.currentProject()
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateSceneID(request.SceneID); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateRevision(request.RunSceneRevision); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateRevision(request.ExpectedRevision); err != nil {
+		return SceneDocument{}, err
+	}
+	if request.RunID == "" {
+		return SceneDocument{}, fmt.Errorf("run_id is required: %w", ErrInvalidSelection)
+	}
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
+
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if !clean {
+		return SceneDocument{}, ErrDirtyWorktree
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	sceneRef, err := findScene(outline, request.SceneID)
+	if err != nil {
+		if errors.Is(err, ErrParentNotFound) {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", request.SceneID, ErrSceneNotFound)
+		}
+		return SceneDocument{}, err
+	}
+	currentScene, err := s.files.LoadScene(ctx, current.Path, request.SceneID)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if currentScene.ChapterID != sceneRef.ChapterID {
+		return SceneDocument{}, fmt.Errorf("scene %q chapter mismatch: %w", request.SceneID, ErrSceneNotFound)
+	}
+	if currentScene.Revision != request.RunSceneRevision || currentScene.Revision != request.ExpectedRevision {
+		return SceneDocument{}, fmt.Errorf("scene %q revision changed: %w", request.SceneID, ErrStaleRevision)
+	}
+	if currentScene.Markdown != request.OriginalMarkdown {
+		return SceneDocument{}, fmt.Errorf("scene %q markdown changed: %w", request.SceneID, ErrStaleRevision)
+	}
+	replacement, err := NormalizeMarkdown(request.ReplacementMarkdown)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if replacement == currentScene.Markdown {
+		return SceneDocument{}, ErrNoSceneChanges
+	}
+	nextScene := currentScene
+	nextScene.Markdown = replacement
+	sceneBytes, err := s.files.MarshalSceneDocument(nextScene)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	commitMessage, err := commitMessageForBodyPatch(request)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.persistFiles(ctx, current.Path, commitMessage, map[string][]byte{
+		filepath.ToSlash(filepath.Join("scenes", request.SceneID+".md")): sceneBytes,
+	}, nil); err != nil {
+		return SceneDocument{}, err
+	}
+	nextScene.Revision = ComputeRevision(sceneBytes)
+	nextScene.Canonical = append([]byte(nil), sceneBytes...)
+	return nextScene, nil
+}
+
 // CodexEntries returns the current active project's validated Codex list.
 func (s *Service) CodexEntries(ctx context.Context) ([]codex.Entry, error) {
 	s.mutations.RLock()
@@ -861,14 +940,22 @@ func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message,
 }
 
 func commitMessageForScenePatch(request AcceptScenePatchRequest) (gitstore.CommitMessage, error) {
-	message := gitstore.CommitMessage{Subject: "Accept AI patch " + request.RunID}
-	if request.Operation == nil {
+	return commitMessageForOperation(request.RunID, request.Operation)
+}
+
+func commitMessageForBodyPatch(request AcceptSceneBodyPatchRequest) (gitstore.CommitMessage, error) {
+	return commitMessageForOperation(request.RunID, request.Operation)
+}
+
+func commitMessageForOperation(runID string, operation *SceneOperationMetadata) (gitstore.CommitMessage, error) {
+	message := gitstore.CommitMessage{Subject: "Accept AI patch " + runID}
+	if operation == nil {
 		return message, nil
 	}
-	message.OperationID = request.Operation.OperationID
-	message.TriggeredBy = request.Operation.TriggeredBy
-	message.DependsOn = request.Operation.DependsOn
-	message.Scope = request.Operation.Scope
+	message.OperationID = operation.OperationID
+	message.TriggeredBy = operation.TriggeredBy
+	message.DependsOn = operation.DependsOn
+	message.Scope = operation.Scope
 	if _, err := gitstore.FormatCommitMessage(message); err != nil {
 		return gitstore.CommitMessage{}, fmt.Errorf("operation metadata: %w", err)
 	}
