@@ -35,21 +35,21 @@ const (
 
 // Invitation is one process-local follow-up offer.
 type Invitation struct {
-	ID            string
-	ParentRunID   string
-	RootRunID     string
-	ChainDepth    int
-	AgentID       string
-	Scope         contextpack.Scope
-	SceneID       string
-	ChapterID     string
-	Relationship  InvitationRelationship
-	Status        string
+	ID           string
+	ParentRunID  string
+	RootRunID    string
+	ChainDepth   int
+	AgentID      string
+	Scope        contextpack.Scope
+	SceneID      string
+	ChapterID    string
+	Relationship InvitationRelationship
+	Status       string
 }
 
 // InvitationRunRequest authorizes one explicit invitation execution.
 type InvitationRunRequest struct {
-	StyleID               string
+	StyleID                string
 	ExpectedTargetRevision string
 }
 
@@ -106,7 +106,7 @@ func validateFollowUpTransition(parentScope, childScope contextpack.Scope) error
 	}
 	allowed := map[contextpack.Scope]map[contextpack.Scope]struct{}{
 		contextpack.ScopeSelection:     {contextpack.ScopeScene: {}, contextpack.ScopeChapterReview: {}},
-		contextpack.ScopeScene:       {contextpack.ScopeChapterReview: {}},
+		contextpack.ScopeScene:         {contextpack.ScopeChapterReview: {}},
 		contextpack.ScopeChapterReview: {},
 	}
 	if next, ok := allowed[parentScope]; !ok {
@@ -217,6 +217,11 @@ func (s *InvitationStore) evictTerminalLocked() {
 			return
 		}
 	}
+}
+
+// ValidateInvitationID validates invitation identifier syntax.
+func ValidateInvitationID(id string) error {
+	return validateInvitationID(id)
 }
 
 func validateInvitationID(id string) error {
