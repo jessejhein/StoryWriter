@@ -24,6 +24,8 @@ type Service struct {
 	resolver ProfileResolver
 	runs     *RunStore
 	ids      RunIDGenerator
+	material ContextMaterialSource
+	builder  ContextBuilder
 }
 
 // NewService creates the action orchestration service.
