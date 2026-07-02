@@ -66,7 +66,7 @@ func TestPreviewBuildsSelectionSceneAndChapterManifests(t *testing.T) {
 	t.Parallel()
 
 	selectionSource := &fakeMaterialSource{result: story.ContextMaterialResult{
-		Material: contextpack.Material{Scope: contextpack.ScopeSelection, SelectionText: "Alpha beta"},
+		Material:       contextpack.Material{Scope: contextpack.ScopeSelection, SelectionText: "Alpha beta"},
 		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}}
 	service := newPreviewTestService(t, selectionSource, &fakeProvider{}, &countingIDGenerator{})
@@ -83,7 +83,7 @@ func TestPreviewBuildsSelectionSceneAndChapterManifests(t *testing.T) {
 	sceneSource := &fakeMaterialSource{result: story.ContextMaterialResult{
 		Material: contextpack.Material{
 			Scope: contextpack.ScopeScene, SceneMarkdown: "Ann arrives.\n",
-			SceneOrder: []contextpack.SceneOrderRef{{ID: "scn_0123456789abcdef0123"}},
+			SceneOrder:      []contextpack.SceneOrderRef{{ID: "scn_0123456789abcdef0123"}},
 			CodexCandidates: []contextpack.CodexEntryCandidate{{EntryID: "char_0123456789abcdef0123", EntryType: "character", Name: "Ann"}},
 		},
 		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -92,7 +92,7 @@ func TestPreviewBuildsSelectionSceneAndChapterManifests(t *testing.T) {
 	preview, err = service.PreviewContext(context.Background(), TaggedRunRequest{
 		AgentID: "scene_rewrite", StyleID: "precise_editor",
 		Target: TaggedTarget{Scope: contextpack.ScopeScene, Scene: &SceneTarget{
-			SceneID: "scn_0123456789abcdef0123",
+			SceneID:       "scn_0123456789abcdef0123",
 			SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}},
 	})
@@ -105,9 +105,9 @@ func TestPreviewBuildsSelectionSceneAndChapterManifests(t *testing.T) {
 
 	chapterSource := &fakeMaterialSource{result: story.ContextMaterialResult{
 		Material: contextpack.Material{
-			Scope: contextpack.ScopeChapterReview,
+			Scope:         contextpack.ScopeChapterReview,
 			ChapterScenes: []contextpack.ChapterSceneText{{SceneID: "scn_0123456789abcdef0123", Markdown: "Scene.\n"}},
-			SceneOrder: []contextpack.SceneOrderRef{{ID: "scn_0123456789abcdef0123"}},
+			SceneOrder:    []contextpack.SceneOrderRef{{ID: "scn_0123456789abcdef0123"}},
 		},
 		TargetRevision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}}
@@ -115,7 +115,7 @@ func TestPreviewBuildsSelectionSceneAndChapterManifests(t *testing.T) {
 	preview, err = service.PreviewContext(context.Background(), TaggedRunRequest{
 		AgentID: "chapter_review", StyleID: "precise_editor",
 		Target: TaggedTarget{Scope: contextpack.ScopeChapterReview, Chapter: &ChapterReviewTarget{
-			ChapterID: "ch_0123456789abcdef0123",
+			ChapterID:   "ch_0123456789abcdef0123",
 			Fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		}},
 	})
@@ -185,9 +185,9 @@ func selectionTargetFixture() TaggedTarget {
 	return TaggedTarget{
 		Scope: contextpack.ScopeSelection,
 		Selection: &SelectionTarget{
-			SceneID: "scn_0123456789abcdef0123",
+			SceneID:       "scn_0123456789abcdef0123",
 			SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-			StartByte: 0, EndByte: 10, SelectedText: "Alpha beta",
+			StartByte:     0, EndByte: 10, SelectedText: "Alpha beta",
 		},
 	}
 }
@@ -220,14 +220,14 @@ func testSceneRewriteAgent() agent.Agent {
 		Description: "Rewrite one scene.",
 		AppliesWhen: agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeScene}, MinWords: 1, MaxWords: 12000},
 		ContextPolicy: agent.ContextPolicy{
-			Required: []agent.ContextPack{agent.ContextCurrentScene, agent.ContextStyleSheet, agent.ContextActiveCodex},
-			Optional: []agent.ContextPack{agent.ContextOutlineNeighbor},
+			Required:  []agent.ContextPack{agent.ContextCurrentScene, agent.ContextStyleSheet, agent.ContextActiveCodex},
+			Optional:  []agent.ContextPack{agent.ContextOutlineNeighbor},
 			Forbidden: []agent.ContextPack{agent.ContextGlobalCodexRAG, agent.ContextRawImportNotes},
 		},
 		ContextBudget: agent.ContextBudget{MaxInputEstimatedTokens: 12000, ReservedOutputEstimatedTokens: 4000},
-		RAGPolicy: agent.RAGPolicy{Mode: agent.RAGModeTimelineAware},
-		Control: agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
-		Output: agent.Output{Type: agent.OutputTypeRevisedText, RequiresDiffPreview: true},
+		RAGPolicy:     agent.RAGPolicy{Mode: agent.RAGModeTimelineAware},
+		Control:       agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
+		Output:        agent.Output{Type: agent.OutputTypeRevisedText, RequiresDiffPreview: true},
 	}
 }
 
@@ -237,13 +237,16 @@ func testChapterReviewAgent() agent.Agent {
 		Description: "Review one chapter.",
 		AppliesWhen: agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceChapterView}, InputScopes: []agent.InputScope{agent.InputScopeChapterReview}, MinWords: 1, MaxWords: 12000},
 		ContextPolicy: agent.ContextPolicy{
-			Required: []agent.ContextPack{agent.ContextCurrentChapter, agent.ContextStyleSheet, agent.ContextActiveCodex},
-			Optional: []agent.ContextPack{agent.ContextOutlineNeighbor},
+			Required:  []agent.ContextPack{agent.ContextCurrentChapter, agent.ContextStyleSheet, agent.ContextActiveCodex},
+			Optional:  []agent.ContextPack{agent.ContextOutlineNeighbor},
 			Forbidden: []agent.ContextPack{agent.ContextGlobalCodexRAG, agent.ContextRawImportNotes},
 		},
 		ContextBudget: agent.ContextBudget{MaxInputEstimatedTokens: 16000, ReservedOutputEstimatedTokens: 2000},
-		RAGPolicy: agent.RAGPolicy{Mode: agent.RAGModeTimelineAware},
+		RAGPolicy:     agent.RAGPolicy{Mode: agent.RAGModeTimelineAware},
+		FollowUps: agent.FollowUpPolicy{OnAccept: []agent.FollowUpRule{{
+			AgentID: "scene_rewrite", Scope: agent.FollowUpScopeScene, Relationship: agent.FollowUpRelationshipTriggered,
+		}}},
 		Control: agent.Control{OutputMode: agent.OutputModeSuggestion, RequiresAcceptance: false},
-		Output: agent.Output{Type: agent.OutputTypeEditorialFindings},
+		Output:  agent.Output{Type: agent.OutputTypeEditorialFindings},
 	}
 }
