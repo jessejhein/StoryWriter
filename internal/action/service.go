@@ -118,7 +118,7 @@ func (s *Service) AvailableActions(ctx context.Context, input agent.Availability
 	return result, nil
 }
 
-// Run executes one legacy selection-scoped action run.
+// Run executes one legacy selection-scoped action run through the shared contextpack path.
 func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 	if err := ValidateRunRequest(request); err != nil {
 		return Run{}, err
@@ -134,77 +134,20 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 	if err := agent.ValidateExecutableSelectionAgent(agentDefinition); err != nil {
 		return Run{}, err
 	}
-	styleDefinition, err := findStyle(registry.Styles, request.StyleID)
+	target, err := NormalizeLegacyRunRequest(request)
 	if err != nil {
 		return Run{}, err
 	}
-	if compatible, err := s.styleCompatible(ctx, agentDefinition, styleDefinition); err != nil {
-		return Run{}, err
-	} else if !compatible {
-		return Run{}, fmt.Errorf("style %q is incompatible with agent %q: %w", styleDefinition.ID, agentDefinition.ID, ErrProviderInvalid)
+	surface := request.Surface
+	if surface == "" {
+		surface = agent.SurfaceEditor
 	}
-	scene, err := s.scenes.LoadScene(ctx, request.SceneID)
-	if err != nil {
-		return Run{}, err
-	}
-	if scene.Revision != request.SceneRevision {
-		return Run{}, fmt.Errorf("scene %q revision changed: %w", request.SceneID, story.ErrStaleRevision)
-	}
-	selected, err := story.ValidateMarkdownSelection(scene.Markdown, request.Selection.StartByte, request.Selection.EndByte, request.Selection.Text)
-	if err != nil {
-		return Run{}, err
-	}
-	selectionWords := agent.WordCount(selected)
-	decisions := agent.ApplicableAgents([]agent.Agent{agentDefinition}, agent.AvailabilityInput{
-		Surface:        request.Surface,
-		InputScope:     request.InputScope,
-		SceneID:        request.SceneID,
-		SelectionWords: selectionWords,
+	return s.RunTagged(ctx, TaggedRunRequest{
+		AgentID: request.AgentID,
+		StyleID: request.StyleID,
+		Surface: surface,
+		Target:  target,
 	})
-	if len(decisions) != 1 || !decisions[0].Applicable {
-		return Run{}, fmt.Errorf("%s: %w", decisions[0].ExcludedReason, agent.ErrInapplicable)
-	}
-	packet, summary, err := agent.BuildContext(agent.BuildContextRequest{
-		Agent:        agentDefinition,
-		Style:        styleDefinition,
-		SelectedText: selected,
-	})
-	if err != nil {
-		return Run{}, err
-	}
-	generated, err := s.provider.Generate(ctx, agent.GenerateRequest{
-		Agent:   agentDefinition,
-		Style:   styleDefinition,
-		Packet:  packet,
-		Summary: summary,
-	})
-	if err != nil {
-		return Run{}, mapProviderError(err)
-	}
-	replacement, err := validateGeneratedReplacement(generated.Replacement)
-	if err != nil {
-		return Run{}, err
-	}
-	if replacement == selected {
-		return Run{}, story.ErrNoSceneChanges
-	}
-	run := Run{
-		Status:        RunPending,
-		AgentID:       agentDefinition.ID,
-		StyleID:       styleDefinition.ID,
-		Scope:         contextpack.ScopeSelection,
-		SceneID:       request.SceneID,
-		SceneRevision: request.SceneRevision,
-		Selection: Selection{
-			StartByte: request.Selection.StartByte,
-			EndByte:   request.Selection.EndByte,
-		},
-		OriginalText:   selected,
-		Replacement:    replacement,
-		ContextSummary: summary,
-		Provider:       generated.Provider,
-	}
-	return s.insertRun(run)
 }
 
 // Reject discards one pending run without mutating canon.

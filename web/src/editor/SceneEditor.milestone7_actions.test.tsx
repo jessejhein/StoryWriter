@@ -166,6 +166,16 @@ function buildFetchMock(requests: Array<{ path: string; init?: RequestInit }>) {
               scene_ids: ['scn_0123456789abcdef0123'],
               follow_up_agent_ids: ['scene_rewrite'],
             }],
+            follow_up_invitations: [{
+              invitation_id: 'invite_0123456789abcdef0123',
+              parent_run_id: 'run_review0123456789abcde',
+              root_run_id: 'run_review0123456789abcde',
+              chain_depth: 2,
+              agent_id: 'scene_rewrite',
+              scope: 'scene',
+              scene_id: 'scn_0123456789abcdef0123',
+              relationship: 'triggered',
+            }],
             provider: { profile_id: 'mock_default', type: 'openai_compatible', model: 'mock' },
           }),
         }
@@ -183,6 +193,24 @@ function buildFetchMock(requests: Array<{ path: string; init?: RequestInit }>) {
           output_mode: 'patch',
           patch: { original: 'Alpha beta', replacement: 'Mock polished: Alpha beta' },
           context_summary: { packs_used: ['selected_text', 'style_sheet'], rag_mode: 'none' },
+          provider: { profile_id: 'mock_default', type: 'openai_compatible', model: 'mock' },
+        }),
+      }
+    }
+    if (path === '/api/action-invitations/invite_0123456789abcdef0123/run' && init?.method === 'POST') {
+      return {
+        ok: true,
+        json: async () => ({
+          run_id: 'run_invite0123456789abcde',
+          status: 'pending',
+          agent_id: 'scene_rewrite',
+          style_id: 'precise_editor',
+          scope: 'scene',
+          scene_id: 'scn_0123456789abcdef0123',
+          scene_revision: sceneRevision,
+          output_mode: 'patch',
+          patch: { original: sceneBody, replacement: 'Mock rewritten: ' + sceneBody.trim() + '\n' },
+          context_summary: { packs_used: ['current_scene', 'style_sheet'], rag_mode: 'timeline_aware' },
           provider: { profile_id: 'mock_default', type: 'openai_compatible', model: 'mock' },
         }),
       }
@@ -260,6 +288,30 @@ test('accepts Scene Rewrite without a second scene save', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Accept replacement' }))
   await waitFor(() => expect(screen.getByLabelText('Scene Markdown')).toHaveValue('Mock rewritten: ' + sceneBody))
   expect(requests.some((request) => request.path === '/api/scenes/scn_0123456789abcdef0123' && request.init?.method === 'PUT')).toBe(false)
+  vi.unstubAllGlobals()
+})
+
+// BDD Scenario: 7.3.2 - Return suggestions without canon mutation
+// Requirements: M7-R04, M7-R11
+// Test purpose: chapter review shows findings and follow-up cards without auto-running invited actions.
+
+// Test: shows chapter review findings and follow-up invitation with scope confirmation.
+// Requirements: M7-R04, M7-R11.
+test('shows chapter review findings and follow-up invitation with scope confirmation', async () => {
+  const requests: Array<{ path: string; init?: RequestInit }> = []
+  vi.stubGlobal('fetch', buildFetchMock(requests))
+  render(<SceneEditor project={project} sceneID="scn_0123456789abcdef0123" onBack={() => {}} onDirtyChange={() => {}} />)
+  await waitFor(() => expect(screen.getByDisplayValue('The Duel')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Review chapter' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Run chapter review' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Run chapter review' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Run broader action' }))
+  await waitFor(() => expect(screen.getByText('Transition loses urgency')).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByRole('region', { name: 'Follow-up invitations' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Run suggested action' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Run broader action' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Run broader action' }))
+  await waitFor(() => expect(requests.some((request) => request.path === '/api/action-invitations/invite_0123456789abcdef0123/run')).toBe(true))
   vi.unstubAllGlobals()
 })
 

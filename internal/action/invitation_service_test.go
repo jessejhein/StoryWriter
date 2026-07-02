@@ -211,15 +211,125 @@ func TestRunInvitationRejectsForgedStaleConsumedAndRecursiveInput(t *testing.T) 
 	}
 }
 
-func newInvitationTestService(t *testing.T, scene story.SceneDocument, acceptor *fakeAcceptor, invites *InvitationStore) *Service {
+// Test: consumed invitation cannot run again.
+// Requirements: M7-R12.
+func TestRunInvitationRejectsConsumedInvitation(t *testing.T) {
+	t.Parallel()
+
+	invites := NewInvitationStore(10)
+	service := newInvitationTestService(t, testActionScene(), &fakeAcceptor{}, invites)
+	id := "invite_0123456789abcdef0123"
+	if err := invites.Publish(Invitation{
+		ID: id, ParentRunID: "run_aaaaaaaaaaaaaaaaaaaa", RootRunID: "run_aaaaaaaaaaaaaaaaaaaa",
+		ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123",
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if _, err := invites.Claim(id); err != nil {
+		t.Fatalf("Claim() error = %v", err)
+	}
+	if err := invites.Consume(id); err != nil {
+		t.Fatalf("Consume() error = %v", err)
+	}
+	_, err := service.RunInvitation(context.Background(), id, InvitationRunRequest{
+		StyleID: "precise_editor", ExpectedTargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if !errors.Is(err, ErrInvitationConflict) {
+		t.Fatalf("RunInvitation(consumed) error = %v, want ErrInvitationConflict", err)
+	}
+}
+
+// Test: stale target revision is rejected before provider execution.
+// Requirements: M7-R12.
+func TestRunInvitationRejectsStaleTargetRevision(t *testing.T) {
+	t.Parallel()
+
+	parentRun := Run{
+		RunID: "run_aaaaaaaaaaaaaaaaaaaa", Status: RunAccepted, AgentID: "line_polish",
+		Scope: contextpack.ScopeSelection, SceneID: "scn_0123456789abcdef0123", ChainDepth: 1,
+	}
+	invites := NewInvitationStore(10)
+	store := NewRunStore()
+	if err := store.Insert(parentRun); err != nil {
+		t.Fatalf("Insert(parent) error = %v", err)
+	}
+	service := newSceneInvitationTestService(t, store, invites, &sceneRunMaterialSource{
+		result: story.ContextMaterialResult{
+			Material:       contextpack.Material{Scope: contextpack.ScopeScene, SceneMarkdown: "Scene.\n"},
+			TargetRevision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		},
+		expectedRevision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	})
+	id := "invite_0123456789abcdef0123"
+	if err := invites.Publish(Invitation{
+		ID: id, ParentRunID: parentRun.RunID, RootRunID: parentRun.RunID, ChainDepth: 2,
+		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123",
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	_, err := service.RunInvitation(context.Background(), id, InvitationRunRequest{
+		StyleID: "precise_editor", ExpectedTargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if !errors.Is(err, story.ErrStaleRevision) {
+		t.Fatalf("RunInvitation(stale) error = %v, want ErrStaleRevision", err)
+	}
+}
+
+// Test: maximum chain depth invitations are rejected before provider execution.
+// Requirements: M7-R12.
+func TestRunInvitationRejectsMaximumChainDepth(t *testing.T) {
+	t.Parallel()
+
+	parentRun := Run{
+		RunID: "run_aaaaaaaaaaaaaaaaaaaa", Status: RunAccepted, AgentID: "line_polish",
+		Scope: contextpack.ScopeSelection, SceneID: "scn_0123456789abcdef0123", ChainDepth: 1,
+	}
+	invites := NewInvitationStore(10)
+	store := NewRunStore()
+	if err := store.Insert(parentRun); err != nil {
+		t.Fatalf("Insert(parent) error = %v", err)
+	}
+	service := newSceneInvitationTestService(t, store, invites, &sceneRunMaterialSource{result: story.ContextMaterialResult{
+		Material:       contextpack.Material{Scope: contextpack.ScopeScene, SceneMarkdown: "Scene.\n"},
+		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}})
+	id := "invite_0123456789abcdef0123"
+	if err := invites.Publish(Invitation{
+		ID: id, ParentRunID: parentRun.RunID, RootRunID: parentRun.RunID, ChainDepth: 3,
+		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123",
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	_, err := service.RunInvitation(context.Background(), id, InvitationRunRequest{
+		StyleID: "precise_editor", ExpectedTargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	})
+	if !errors.Is(err, ErrInvitationForbidden) {
+		t.Fatalf("RunInvitation(depth) error = %v, want ErrInvitationForbidden", err)
+	}
+}
+
+func newSceneInvitationTestService(t *testing.T, runs *RunStore, invites *InvitationStore, material ContextMaterialSource) *Service {
 	t.Helper()
+	scene := testActionScene()
 	return NewService(
 		&fakeSession{project: project.Project{Path: "/tmp/test"}, ok: true},
-		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{testLinePolishAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{testSceneRewriteAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}},
 		&fakeSceneLoader{scene: scene},
-		acceptor,
-		&fakeProvider{response: agent.GenerateResponse{Replacement: "Mock polished: Alpha beta"}},
+		&fakeAcceptor{},
+		&fakeProvider{response: agent.GenerateResponse{Replacement: "Mock rewritten: Scene.\n"}},
 		nil,
+		runs,
+		&fakeRunIDGenerator{next: "run_bbbbbbbbbbbbbbbbbbbb"},
+	).WithMaterialSource(material).WithContextBuilder(contextpack.NewBuilder()).WithBodyAcceptor(&fakeBodyAcceptor{scene: scene}).
+		WithInvitationStore(invites)
+}
+
+func newInvitationTestService(t *testing.T, scene story.SceneDocument, acceptor *fakeAcceptor, invites *InvitationStore) *Service {
+	t.Helper()
+	return newActionTestService(
+		scene,
+		&fakeProvider{response: agent.GenerateResponse{Replacement: "Mock polished: Alpha beta"}},
+		acceptor,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
 	).WithInvitationStore(invites).WithInvitationIDGenerator(&fakeInvitationIDGenerator{next: "invite_0123456789abcdef0123"})

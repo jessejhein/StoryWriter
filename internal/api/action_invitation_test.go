@@ -100,6 +100,36 @@ func TestInvitationRunRouteMapsNotFoundConflictAndUnavailable(t *testing.T) {
 	}
 }
 
+// Test: invitation run route rejects chain depth before provider execution.
+// Requirements: M7-R12.
+func TestInvitationRunRouteRejectsChainDepthBeforeProvider(t *testing.T) {
+	t.Parallel()
+
+	stub := &storyServiceStub{actionRunErr: action.ErrInvitationForbidden}
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	request := httptest.NewRequest(http.MethodPost, "/api/action-invitations/invite_0123456789abcdef0123/run", strings.NewReader(`{"style_id":"precise_editor","expected_target_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", response.Code, response.Body.String())
+	}
+}
+
+// Test: invitation run route rejects consumed invitations.
+// Requirements: M7-R12.
+func TestInvitationRunRouteRejectsConsumedInvitation(t *testing.T) {
+	t.Parallel()
+
+	stub := &storyServiceStub{actionRunErr: action.ErrInvitationConflict}
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	request := httptest.NewRequest(http.MethodPost, "/api/action-invitations/invite_0123456789abcdef0123/run", strings.NewReader(`{"style_id":"precise_editor","expected_target_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409 body=%s", response.Code, response.Body.String())
+	}
+}
+
 // Test: invitation run route calls no provider before explicit POST.
 // Requirements: M7-R12.
 func TestInvitationRunRouteCallsNoProviderBeforeExplicitPOST(t *testing.T) {

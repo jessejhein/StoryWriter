@@ -285,7 +285,7 @@ index trailers for lookup but must not be the only copy of causal relationships.
 Implemented trailers:
 
 - `Storywork-Operation-ID`
-- `Storywork-Operation-Scope`
+- `Storywork-Scope`
 - `Storywork-Triggered-By` (causal parent)
 - `Storywork-Depends-On` (semantic dependency; omitted for trigger-only children)
 

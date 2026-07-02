@@ -16,6 +16,7 @@ import (
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 	"storywork/internal/gitstore"
 	"storywork/internal/index"
 	"storywork/internal/project"
@@ -133,7 +134,8 @@ func TestMilestone5RealProviderFlowWithRealAdapters(t *testing.T) {
 		t.Fatalf("git commit: %v: %s", err, output)
 	}
 
-	actions := action.NewService(session, agent.NewLoader(), stories, stories, agent.NewDispatcher(profileService, &http.Client{}), profileService, action.NewRunStore(), &staticRunIDGenerator{ids: []string{"run_00000000000000000001", "run_00000000000000000002"}})
+	actions := action.NewService(session, agent.NewLoader(), stories, stories, agent.NewDispatcher(profileService, &http.Client{}), profileService, action.NewRunStore(), &staticRunIDGenerator{ids: []string{"run_00000000000000000001", "run_00000000000000000002"}}).
+		WithMaterialSource(stories).WithContextBuilder(contextpack.NewBuilder())
 	available, err := actions.AvailableActions(ctx, agent.AvailabilityInput{Surface: agent.SurfaceEditor, InputScope: agent.InputScopeSelection, SceneID: saved.ID, SelectionWords: agent.WordCount(selected)})
 	if err != nil || len(available) != 1 || !containsString(available[0].StyleIDs, "real_provider") {
 		t.Fatalf("AvailableActions() = %#v, %v", available, err)

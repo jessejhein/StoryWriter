@@ -209,15 +209,42 @@ func TestMilestone7TimelineContextAndConditionalActions(t *testing.T) {
 	})
 
 	t.Run("dependent_child_writes_exact_trailers", func(t *testing.T) {
-		var child map[string]any
+		sceneBefore = loadScene(t, handler, sceneBeforeID)
+		markdown := sceneBefore["markdown"].(string)
+		selected, endByte := selectionPrefix(markdown, 20)
+		var parentRun map[string]any
 		putJSON(t, handler, http.MethodPost, "/api/actions/run", map[string]any{
-			"agent_id": "scene_rewrite", "style_id": "precise_editor", "scope": "scene",
-			"target": map[string]any{"scene_id": sceneBeforeID, "scene_revision": sceneBefore["revision"]},
+			"agent_id": "line_polish", "style_id": "precise_editor", "surface": "editor", "input_scope": "selection",
+			"scene_id": sceneBeforeID, "scene_revision": sceneBefore["revision"],
+			"selection": map[string]any{"start_byte": 0, "end_byte": endByte, "text": selected},
+		}, http.StatusCreated, &parentRun)
+		parentRunID := parentRun["run_id"].(string)
+		var accepted map[string]any
+		putJSON(t, handler, http.MethodPost, "/api/actions/"+parentRunID+"/accept", map[string]any{
+			"expected_revision": sceneBefore["revision"],
+		}, http.StatusOK, &accepted)
+		invites := accepted["follow_up_invitations"].([]any)
+		if len(invites) != 1 {
+			t.Fatalf("invitations = %#v", invites)
+		}
+		childInviteID := invites[0].(map[string]any)["invitation_id"].(string)
+		sceneBefore = loadScene(t, handler, sceneBeforeID)
+		var child map[string]any
+		putJSON(t, handler, http.MethodPost, "/api/action-invitations/"+childInviteID+"/run", map[string]any{
+			"style_id": "precise_editor", "expected_target_revision": sceneBefore["revision"],
 		}, http.StatusCreated, &child)
-		putJSON(t, handler, http.MethodPost, "/api/actions/"+child["run_id"].(string)+"/accept", map[string]any{"expected_revision": sceneBefore["revision"]}, http.StatusOK, nil)
+		putJSON(t, handler, http.MethodPost, "/api/actions/"+child["run_id"].(string)+"/accept", map[string]any{
+			"expected_revision": sceneBefore["revision"],
+		}, http.StatusOK, nil)
 		message := gitShowBody(t, projectPath)
 		if !strings.Contains(message, "Storywork-Operation-ID:") {
-			t.Fatalf("commit = %q", message)
+			t.Fatalf("commit missing operation trailer: %q", message)
+		}
+		if !strings.Contains(message, "Storywork-Triggered-By: "+parentRunID) {
+			t.Fatalf("commit missing trigger trailer for parent %q: %q", parentRunID, message)
+		}
+		if strings.Contains(message, "Storywork-Depends-On:") {
+			t.Fatalf("trigger-only child must not record dependency trailer: %q", message)
 		}
 	})
 

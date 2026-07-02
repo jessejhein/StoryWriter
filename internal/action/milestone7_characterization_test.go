@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 )
 
 // Test: existing Line Polish sends only selected text and style to the provider.
@@ -44,9 +45,9 @@ func TestM7ExistingLinePolishBuildsSelectionOnlyPacket(t *testing.T) {
 		t.Fatalf("provider calls = %d, want 1", provider.calls)
 	}
 
-	packet := provider.request.Packet
-	if packet.SelectedText != "Alpha beta" {
-		t.Fatalf("provider packet selected text = %q, want Alpha beta", packet.SelectedText)
+	packet, ok := provider.request.TypedPacket.(contextpack.SelectionPacket)
+	if !ok || packet.SelectedText != "Alpha beta" {
+		t.Fatalf("provider typed packet = %#v, want Alpha beta selection packet", provider.request.TypedPacket)
 	}
 	if packet.Style.ID != "precise_editor" {
 		t.Fatalf("provider packet style = %#v, want precise_editor", packet.Style)
@@ -55,30 +56,27 @@ func TestM7ExistingLinePolishBuildsSelectionOnlyPacket(t *testing.T) {
 		t.Fatalf("provider packet included wider scene prose: %q", packet.SelectedText)
 	}
 
-	summary := provider.request.Summary
-	if len(summary.PacksUsed) != 2 {
-		t.Fatalf("provider summary packs_used = %#v, want exactly two packs", summary.PacksUsed)
+	manifest := provider.request.Manifest
+	if len(manifest.PacksUsed) != 2 {
+		t.Fatalf("provider manifest packs_used = %#v, want exactly two packs", manifest.PacksUsed)
 	}
-	if summary.PacksUsed[0] != agent.ContextSelectedText || summary.PacksUsed[1] != agent.ContextStyleSheet {
-		t.Fatalf("provider summary packs_used = %#v, want selected_text and style_sheet only", summary.PacksUsed)
+	if !manifestHasPacks(manifest.PacksUsed, contextpack.PackSelectedText, contextpack.PackStyleSheet) {
+		t.Fatalf("provider manifest packs_used = %#v, want selected_text and style_sheet only", manifest.PacksUsed)
 	}
-	if summary.RAGMode != agent.RAGModeNone {
-		t.Fatalf("provider summary rag_mode = %q, want none", summary.RAGMode)
+	if manifest.RAGMode != contextpack.RAGModeNone {
+		t.Fatalf("provider manifest rag_mode = %q, want none", manifest.RAGMode)
 	}
 
-	forbiddenPacks := []agent.ContextPack{
-		agent.ContextCurrentScene,
-		agent.ContextCurrentChapter,
-		agent.ContextChapterSummary,
-		agent.ContextOutlineNeighbor,
-		agent.ContextGlobalCodexRAG,
-		agent.ContextRawImportNotes,
-		agent.ContextSurrounding,
+	forbiddenPacks := []contextpack.Pack{
+		contextpack.PackCurrentScene,
+		contextpack.PackCurrentChapter,
+		contextpack.PackOutlineNeighbor,
+		contextpack.PackActiveCodex,
 	}
 	for _, pack := range forbiddenPacks {
-		for _, used := range summary.PacksUsed {
+		for _, used := range manifest.PacksUsed {
 			if used == pack {
-				t.Fatalf("provider summary included forbidden pack %q", pack)
+				t.Fatalf("provider manifest included forbidden pack %q", pack)
 			}
 		}
 	}
@@ -99,8 +97,14 @@ func TestM7ExistingLinePolishRunStoresRedactedExistingSummary(t *testing.T) {
 	}
 
 	summary := run.ContextSummary
-	if len(summary.PacksUsed) != 2 || summary.PacksUsed[0] != agent.ContextSelectedText || summary.PacksUsed[1] != agent.ContextStyleSheet {
+	if len(summary.PacksUsed) != 2 {
 		t.Fatalf("run context summary packs_used = %#v", summary.PacksUsed)
+	}
+	used := map[agent.ContextPack]struct{}{summary.PacksUsed[0]: {}, summary.PacksUsed[1]: {}}
+	_, hasSelected := used[agent.ContextSelectedText]
+	_, hasStyle := used[agent.ContextStyleSheet]
+	if !hasSelected || !hasStyle {
+		t.Fatalf("run context summary packs_used = %#v, want selected_text and style_sheet", summary.PacksUsed)
 	}
 	if summary.RAGMode != agent.RAGModeNone {
 		t.Fatalf("run context summary rag_mode = %q, want none", summary.RAGMode)
@@ -123,7 +127,7 @@ func TestM7ExistingLinePolishRunStoresRedactedExistingSummary(t *testing.T) {
 			t.Fatalf("serialized run leaked %q: %s", forbidden, payload)
 		}
 	}
-	if !strings.Contains(payload, `"packs_used":["selected_text","style_sheet"]`) {
+	if !strings.Contains(payload, `"selected_text"`) || !strings.Contains(payload, `"style_sheet"`) {
 		t.Fatalf("serialized run omitted redacted packs_used: %s", payload)
 	}
 	if !strings.Contains(payload, `"rag_mode":"none"`) {

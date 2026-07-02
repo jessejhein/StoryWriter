@@ -14,6 +14,7 @@ import (
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 	"storywork/internal/gitstore"
 	"storywork/internal/index"
 	"storywork/internal/project"
@@ -131,7 +132,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 			"run_00000000000000000003",
 			"run_00000000000000000004",
 		}},
-	)
+	).WithMaterialSource(storyService).WithContextBuilder(contextpack.NewBuilder())
 
 	agents, err := actionService.Agents(ctx)
 	if err != nil {
@@ -265,16 +266,17 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if clean, err := git.IsClean(ctx, projectPath); err != nil || !clean {
 		t.Fatalf("IsClean() after accept = %v, %v", clean, err)
 	}
+	reloadedStories := story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator())
 	reloadedActionService := action.NewService(
 		session,
 		agent.NewLoader(),
-		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
-		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
+		reloadedStories,
+		reloadedStories,
 		agent.NewMockProvider(),
 		nil,
 		action.NewRunStore(),
 		&staticRunIDGenerator{ids: []string{"run_00000000000000000005"}},
-	)
+	).WithMaterialSource(reloadedStories).WithContextBuilder(contextpack.NewBuilder())
 	reloadedScene, err := storyfile.New().LoadScene(ctx, projectPath, savedScene.ID)
 	if err != nil {
 		t.Fatalf("LoadScene(reloaded) error = %v", err)
