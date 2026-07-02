@@ -23,7 +23,7 @@ func TestLoadSelectionMaterialReturnsExactCanonicalSelection(t *testing.T) {
 	scene := SceneDocument{
 		ID: "scn_00000000000000000001", ChapterID: "ch_00000000000000000001",
 		Title: "Opening", Markdown: "Alpha beta gamma.\n",
-		Revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	files := &fakeFileStore{loadOutline: outline, scenes: map[string]SceneDocument{scene.ID: scene}}
@@ -54,13 +54,13 @@ func TestLoadSceneMaterialReturnsSceneOutlineCodexAndProgressions(t *testing.T) 
 	scenes["scn_00000000000000000001"] = SceneDocument{
 		ID: "scn_00000000000000000001", ChapterID: "ch_00000000000000000001",
 		Title: "Opening", Markdown: "Ann arrives.\n",
-		Revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	scenes["scn_00000000000000000002"] = SceneDocument{
 		ID: "scn_00000000000000000002", ChapterID: "ch_00000000000000000001",
 		Title: "Departure", Markdown: "Ann leaves.\n",
-		Revision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Revision:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	files := &fakeFileStore{
@@ -72,8 +72,8 @@ func TestLoadSceneMaterialReturnsSceneOutlineCodexAndProgressions(t *testing.T) 
 		codexProgressions: codex.ProgressionDocument{
 			EntryID: "char_0123456789abcdef0123",
 			Progressions: []codex.Progression{{
-				ID: "prog_0123456789abcdef0123",
-				Anchor: codex.ProgressionAnchor{Type: "scene", ID: "scn_00000000000000000001", Timing: "after"},
+				ID:      "prog_0123456789abcdef0123",
+				Anchor:  codex.ProgressionAnchor{Type: "scene", ID: "scn_00000000000000000001", Timing: "after"},
 				Changes: codex.ProgressionChange{Description: strPtr("Veteran.")},
 			}},
 		},
@@ -110,7 +110,7 @@ func TestLoadSceneMaterialRejectsMissingMalformedAndExcludedScene(t *testing.T) 
 	excluded := SceneDocument{
 		ID: "scn_00000000000000000001", ChapterID: "ch_00000000000000000001",
 		Title: "Opening", Markdown: "Hidden.\n",
-		Revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		FrontMatter: SceneFrontMatter{Status: "draft", ExcludeFromAI: true},
 	}
 	service := newContextMaterialService(t, &fakeFileStore{loadOutline: outline, scenes: map[string]SceneDocument{excluded.ID: excluded}})
@@ -123,7 +123,7 @@ func TestLoadSceneMaterialRejectsMissingMalformedAndExcludedScene(t *testing.T) 
 	}
 
 	malformed := &fakeFileStore{
-		loadOutline: outline,
+		loadOutline:  outline,
 		loadSceneErr: errors.New("decode scenes/scn_00000000000000000001.md: invalid markdown"),
 	}
 	service = newContextMaterialService(t, malformed)
@@ -142,7 +142,7 @@ func TestLoadSceneMaterialReturnsCurrentRevision(t *testing.T) {
 	scenes["scn_00000000000000000001"] = SceneDocument{
 		ID: "scn_00000000000000000001", ChapterID: "ch_00000000000000000001",
 		Title: "Opening", Markdown: "Text.\n",
-		Revision: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		Revision:    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	service := newContextMaterialService(t, &fakeFileStore{loadOutline: outline, scenes: scenes})
@@ -197,8 +197,8 @@ func mustAllSceneDocuments(t *testing.T, outline Outline) map[string]SceneDocume
 	for _, position := range flattenOutlinePositions(outline) {
 		scenes[position.sceneID] = SceneDocument{
 			ID: position.sceneID, ChapterID: position.chapterID,
-			Markdown: "Placeholder.\n",
-			Revision: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+			Markdown:    "Placeholder.\n",
+			Revision:    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 			FrontMatter: SceneFrontMatter{Status: "draft"},
 		}
 	}

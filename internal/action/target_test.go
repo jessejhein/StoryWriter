@@ -19,9 +19,9 @@ func TestValidateSelectionTargetRequiresRevisionRangeAndText(t *testing.T) {
 	t.Parallel()
 
 	valid := SelectionTarget{
-		SceneID: "scn_0123456789abcdef0123",
+		SceneID:       "scn_0123456789abcdef0123",
 		SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		StartByte: 0, EndByte: 5, SelectedText: "Alpha",
+		StartByte:     0, EndByte: 5, SelectedText: "Alpha",
 	}
 	if err := ValidateSelectionTarget(valid); err != nil {
 		t.Fatalf("ValidateSelectionTarget() error = %v", err)
@@ -45,7 +45,7 @@ func TestValidateSceneTargetRequiresSceneAndRevision(t *testing.T) {
 	t.Parallel()
 
 	valid := SceneTarget{
-		SceneID: "scn_0123456789abcdef0123",
+		SceneID:       "scn_0123456789abcdef0123",
 		SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	if err := ValidateSceneTarget(valid); err != nil {
@@ -62,7 +62,7 @@ func TestValidateChapterTargetRequiresChapterAndFingerprint(t *testing.T) {
 	t.Parallel()
 
 	valid := ChapterReviewTarget{
-		ChapterID: "ch_0123456789abcdef0123",
+		ChapterID:   "ch_0123456789abcdef0123",
 		Fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}
 	if err := ValidateChapterReviewTarget(valid); err != nil {
@@ -79,14 +79,14 @@ func TestValidateTargetRejectsMixedOrMismatchedScopePayloads(t *testing.T) {
 	t.Parallel()
 
 	if err := ValidateTaggedTarget(TaggedTarget{
-		Scope: contextpack.ScopeSelection,
+		Scope:     contextpack.ScopeSelection,
 		Selection: &SelectionTarget{SceneID: "scn_0123456789abcdef0123", SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", StartByte: 0, EndByte: 1, SelectedText: "A"},
-		Scene: &SceneTarget{SceneID: "scn_0123456789abcdef0123", SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		Scene:     &SceneTarget{SceneID: "scn_0123456789abcdef0123", SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}); err == nil {
 		t.Fatal("mixed payloads should fail")
 	}
 	if err := ValidateTaggedTarget(TaggedTarget{
-		Scope: contextpack.ScopeScene,
+		Scope:     contextpack.ScopeScene,
 		Selection: &SelectionTarget{SceneID: "scn_0123456789abcdef0123", SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", StartByte: 0, EndByte: 1, SelectedText: "A"},
 	}); err == nil {
 		t.Fatal("scope/payload mismatch should fail")
@@ -101,9 +101,9 @@ func TestLegacySelectionRequestNormalizesToTaggedTarget(t *testing.T) {
 	target, err := NormalizeLegacyRunRequest(RunRequest{
 		AgentID: "line_polish", StyleID: "precise_editor",
 		Surface: agent.SurfaceEditor, InputScope: agent.InputScopeSelection,
-		SceneID: "scn_0123456789abcdef0123",
+		SceneID:       "scn_0123456789abcdef0123",
 		SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		Selection: Selection{StartByte: 0, EndByte: 5, Text: "Alpha"},
+		Selection:     Selection{StartByte: 0, EndByte: 5, Text: "Alpha"},
 	})
 	if err != nil {
 		t.Fatalf("NormalizeLegacyRunRequest() error = %v", err)
@@ -126,9 +126,9 @@ func TestValidateTaggedRunRequestRejectsInvalidIDs(t *testing.T) {
 		Target: TaggedTarget{
 			Scope: contextpack.ScopeSelection,
 			Selection: &SelectionTarget{
-				SceneID: "scn_0123456789abcdef0123",
+				SceneID:       "scn_0123456789abcdef0123",
 				SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-				StartByte: 0, EndByte: 5, SelectedText: "Alpha",
+				StartByte:     0, EndByte: 5, SelectedText: "Alpha",
 			},
 		},
 	}

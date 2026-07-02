@@ -75,8 +75,8 @@ func TestContextMaterialNeverObservesPartialMutation(t *testing.T) {
 		if loadCount.Add(1) == 1 {
 			files.scenes["scn_00000000000000000002"] = SceneDocument{
 				ID: "scn_00000000000000000002", ChapterID: "ch_00000000000000000001",
-				Markdown: "Mutated neighbor.\n",
-				Revision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				Markdown:    "Mutated neighbor.\n",
+				Revision:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 				FrontMatter: SceneFrontMatter{Status: "draft"},
 			}
 		}

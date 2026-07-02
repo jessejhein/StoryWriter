@@ -22,19 +22,19 @@ func TestLoadChapterMaterialReturnsOrderedScenesAndNeighbors(t *testing.T) {
 	scenes["scn_00000000000000000001"] = SceneDocument{
 		ID: "scn_00000000000000000001", ChapterID: "ch_00000000000000000001",
 		Title: "Opening", Markdown: "First.\n",
-		Revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	scenes["scn_00000000000000000002"] = SceneDocument{
 		ID: "scn_00000000000000000002", ChapterID: "ch_00000000000000000001",
 		Title: "Departure", Markdown: "Second.\n",
-		Revision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		Revision:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	scenes["scn_00000000000000000003"] = SceneDocument{
 		ID: "scn_00000000000000000003", ChapterID: "ch_00000000000000000002",
 		Title: "Closing", Markdown: "Third.\n",
-		Revision: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		Revision:    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 		FrontMatter: SceneFrontMatter{Status: "draft"},
 	}
 	files := &fakeFileStore{loadOutline: outline, scenes: scenes}

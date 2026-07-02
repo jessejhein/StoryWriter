@@ -57,9 +57,9 @@ func TestMessageBuilderFormatsChapterReviewExactly(t *testing.T) {
 
 	builder := NewMessageBuilder()
 	messages, err := builder.BuildMessages(chapterReviewAgent(), preciseEditorStyle(), contextpack.ChapterReviewPacket{
-		ChapterID: "ch_0123456789abcdef0123",
+		ChapterID:     "ch_0123456789abcdef0123",
 		ChapterScenes: []contextpack.ChapterSceneText{{SceneID: "scn_0123456789abcdef0123", Markdown: "Scene.\n"}},
-		Style: contextpack.StyleSheet{ID: "precise_editor", SystemPrompt: "Prompt"},
+		Style:         contextpack.StyleSheet{ID: "precise_editor", SystemPrompt: "Prompt"},
 	})
 	if err != nil {
 		t.Fatalf("BuildMessages() error = %v", err)
