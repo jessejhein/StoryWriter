@@ -14,6 +14,7 @@ import (
 	"storywork/internal/action"
 	"storywork/internal/agent"
 	"storywork/internal/api"
+	"storywork/internal/contextpack"
 	"storywork/internal/extract"
 	"storywork/internal/gitstore"
 	"storywork/internal/importer"
@@ -144,7 +145,7 @@ func NewHandler(version string) http.Handler {
 		providerService,
 		action.NewRunStore(),
 		action.NewRandomIDGenerator(),
-	)
+	).WithMaterialSource(stories).WithContextBuilder(contextpack.NewBuilder())
 	return api.NewHandler(api.HandlerDependencies{
 		Projects:  projects,
 		Session:   session,

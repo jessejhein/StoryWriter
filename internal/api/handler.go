@@ -17,6 +17,7 @@ import (
 	"storywork/internal/action"
 	"storywork/internal/agent"
 	"storywork/internal/codex"
+	"storywork/internal/contextpack"
 	"storywork/internal/extract"
 	"storywork/internal/importer"
 	"storywork/internal/project"
@@ -199,6 +200,8 @@ type ActionStore interface {
 	Accept(ctx context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error)
 	// Reject discards one pending run without mutating canon.
 	Reject(ctx context.Context, runID string) (action.Run, error)
+	// PreviewContext returns a redacted manifest without provider or run side effects.
+	PreviewContext(ctx context.Context, request action.TaggedRunRequest) (action.ContextPreviewResult, error)
 }
 
 // ProviderStore serves application-level provider profile configuration.
@@ -1065,6 +1068,21 @@ func NewHandler(deps HandlerDependencies) http.Handler {
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"actions": availableActions})
 	})
+	mux.HandleFunc("POST /api/actions/context-preview", func(writer http.ResponseWriter, request *http.Request) {
+		previewRequest, err := decodeTaggedRunRequest(writer, request)
+		if err != nil {
+			return
+		}
+		preview, err := actionStore.PreviewContext(request.Context(), previewRequest)
+		if err != nil {
+			writeStoryError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"manifest":        preview.Manifest,
+			"target_revision": preview.TargetRevision,
+		})
+	})
 	mux.HandleFunc("POST /api/actions/run", func(writer http.ResponseWriter, request *http.Request) {
 		var runRequest struct {
 			AgentID       string `json:"agent_id"`
@@ -1177,6 +1195,7 @@ func NewHandler(deps HandlerDependencies) http.Handler {
 		})
 	})
 	mux.HandleFunc("/api/actions/available", methodNotAllowed("GET"))
+	mux.HandleFunc("/api/actions/context-preview", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/run", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/accept", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/actions/{run_id}/reject", methodNotAllowed("POST"))
@@ -1593,6 +1612,93 @@ func statusForStoryError(err error) int {
 	default:
 		return http.StatusInternalServerError
 	}
+}
+
+func decodeTaggedRunRequest(writer http.ResponseWriter, request *http.Request) (action.TaggedRunRequest, error) {
+	var payload struct {
+		AgentID string `json:"agent_id"`
+		StyleID string `json:"style_id"`
+		Scope   string `json:"scope"`
+		Target  *struct {
+			SceneID       *string `json:"scene_id"`
+			SceneRevision *string `json:"scene_revision"`
+			ChapterID     *string `json:"chapter_id"`
+			Fingerprint   *string `json:"fingerprint"`
+			StartByte     *int    `json:"start_byte"`
+			EndByte       *int    `json:"end_byte"`
+			Text          *string `json:"text"`
+		} `json:"target"`
+		Surface       string `json:"surface"`
+		InputScope    string `json:"input_scope"`
+		SceneID       string `json:"scene_id"`
+		SceneRevision string `json:"scene_revision"`
+		Selection     *struct {
+			StartByte *int    `json:"start_byte"`
+			EndByte   *int    `json:"end_byte"`
+			Text      *string `json:"text"`
+		} `json:"selection"`
+	}
+	if err := decodeJSONWithRequiredFields(writer, request, &payload, 1<<20,
+		requiredJSONField{name: "agent_id"},
+		requiredJSONField{name: "style_id"},
+	); err != nil {
+		writeBodyLimitError(writer, err)
+		return action.TaggedRunRequest{}, err
+	}
+	if payload.Scope != "" {
+		if payload.Target == nil {
+			writeError(writer, http.StatusBadRequest, errors.New("target is required"))
+			return action.TaggedRunRequest{}, errors.New("target is required")
+		}
+		target := action.TaggedTarget{Scope: contextpack.Scope(payload.Scope)}
+		switch target.Scope {
+		case contextpack.ScopeSelection:
+			if payload.Target.SceneID == nil || payload.Target.SceneRevision == nil || payload.Target.StartByte == nil || payload.Target.EndByte == nil || payload.Target.Text == nil {
+				writeError(writer, http.StatusBadRequest, errors.New("target scene_id, scene_revision, start_byte, end_byte, and text are required"))
+				return action.TaggedRunRequest{}, errors.New("invalid selection target")
+			}
+			target.Selection = &action.SelectionTarget{
+				SceneID: *payload.Target.SceneID, SceneRevision: *payload.Target.SceneRevision,
+				StartByte: *payload.Target.StartByte, EndByte: *payload.Target.EndByte, SelectedText: *payload.Target.Text,
+			}
+		case contextpack.ScopeScene:
+			if payload.Target.SceneID == nil || payload.Target.SceneRevision == nil {
+				writeError(writer, http.StatusBadRequest, errors.New("target scene_id and scene_revision are required"))
+				return action.TaggedRunRequest{}, errors.New("invalid scene target")
+			}
+			target.Scene = &action.SceneTarget{SceneID: *payload.Target.SceneID, SceneRevision: *payload.Target.SceneRevision}
+		case contextpack.ScopeChapterReview:
+			if payload.Target.ChapterID == nil || payload.Target.Fingerprint == nil {
+				writeError(writer, http.StatusBadRequest, errors.New("target chapter_id and fingerprint are required"))
+				return action.TaggedRunRequest{}, errors.New("invalid chapter target")
+			}
+			target.Chapter = &action.ChapterReviewTarget{ChapterID: *payload.Target.ChapterID, Fingerprint: *payload.Target.Fingerprint}
+		default:
+			writeError(writer, http.StatusBadRequest, fmt.Errorf("scope %q is unsupported", payload.Scope))
+			return action.TaggedRunRequest{}, action.ErrInvalidRunRequest
+		}
+		request := action.TaggedRunRequest{AgentID: payload.AgentID, StyleID: payload.StyleID, Target: target}
+		if err := action.ValidateTaggedRunRequest(request); err != nil {
+			writeStoryError(writer, err)
+			return action.TaggedRunRequest{}, err
+		}
+		return request, nil
+	}
+	if payload.Surface == "" || payload.InputScope == "" || payload.SceneID == "" || payload.SceneRevision == "" || payload.Selection == nil || payload.Selection.StartByte == nil || payload.Selection.EndByte == nil || payload.Selection.Text == nil {
+		writeError(writer, http.StatusBadRequest, errors.New("scope or legacy selection fields are required"))
+		return action.TaggedRunRequest{}, action.ErrInvalidRunRequest
+	}
+	legacy, err := action.NormalizeLegacyRunRequest(action.RunRequest{
+		AgentID: payload.AgentID, StyleID: payload.StyleID,
+		Surface: agent.Surface(payload.Surface), InputScope: agent.InputScope(payload.InputScope),
+		SceneID: payload.SceneID, SceneRevision: payload.SceneRevision,
+		Selection: action.Selection{StartByte: *payload.Selection.StartByte, EndByte: *payload.Selection.EndByte, Text: *payload.Selection.Text},
+	})
+	if err != nil {
+		writeStoryError(writer, err)
+		return action.TaggedRunRequest{}, err
+	}
+	return action.TaggedRunRequest{AgentID: payload.AgentID, StyleID: payload.StyleID, Target: legacy}, nil
 }
 
 func writeError(writer http.ResponseWriter, status int, err error) {

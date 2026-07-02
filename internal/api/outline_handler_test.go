@@ -83,6 +83,9 @@ type storyServiceStub struct {
 	actionRejectRun      action.Run
 	actionAcceptScene    story.SceneDocument
 	actionRunRequest     action.RunRequest
+	previewRequest       action.TaggedRunRequest
+	previewResult        action.ContextPreviewResult
+	previewErr           error
 	actionAcceptRunID    string
 	actionAcceptRevision string
 	actionRejectRunID    string
@@ -211,6 +214,11 @@ func (s *storyServiceStub) Accept(_ context.Context, runID, expectedRevision str
 	s.actionAcceptRunID = runID
 	s.actionAcceptRevision = expectedRevision
 	return s.actionAcceptRun, s.actionAcceptScene, s.actionAcceptErr
+}
+
+func (s *storyServiceStub) PreviewContext(_ context.Context, request action.TaggedRunRequest) (action.ContextPreviewResult, error) {
+	s.previewRequest = request
+	return s.previewResult, s.previewErr
 }
 
 func (s *storyServiceStub) Reject(_ context.Context, runID string) (action.Run, error) {
