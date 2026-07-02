@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"bytes"
 )
 
 // Store runs Git operations without changing user-global configuration.
@@ -28,19 +29,40 @@ func (s *Store) Init(ctx context.Context, path string) error {
 	return nil
 }
 
-// CommitAll stages all non-ignored files and records a commit.
+// CommitAll stages all non-ignored files and records a subject-only commit.
 func (s *Store) CommitAll(ctx context.Context, path, message string) error {
+	formatted, err := FormatCommitMessage(CommitMessage{Subject: message})
+	if err != nil {
+		return fmt.Errorf("format commit message: %w", err)
+	}
+	return s.commitFormatted(ctx, path, formatted)
+}
+
+// CommitAllMessage stages all non-ignored files and records one validated commit body.
+func (s *Store) CommitAllMessage(ctx context.Context, path string, message CommitMessage) error {
+	formatted, err := FormatCommitMessage(message)
+	if err != nil {
+		return fmt.Errorf("format commit message: %w", err)
+	}
+	return s.commitFormatted(ctx, path, formatted)
+}
+
+func (s *Store) commitFormatted(ctx context.Context, path, message string) error {
 	if _, err := s.run(ctx, "-C", path, "add", "--all"); err != nil {
 		return fmt.Errorf("stage project files: %w", err)
 	}
-	if _, err := s.run(ctx,
+	command := exec.CommandContext(ctx, s.executable,
 		"-C", path,
 		"-c", "user.name=AI Story Workshop",
 		"-c", "user.email=storywork@localhost",
-		"commit", "-m", message,
-	); err != nil {
-		return fmt.Errorf("commit project files: %w", err)
+		"commit", "-F", "-",
+	)
+	command.Stdin = strings.NewReader(message)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", strings.Join(command.Args, " "), err, strings.TrimSpace(string(output)))
 	}
+	_ = bytes.TrimSpace(output)
 	return nil
 }
 
