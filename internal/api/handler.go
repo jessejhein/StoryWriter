@@ -10,12 +10,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
 	"storywork/internal/codex"
+	"storywork/internal/extract"
+	"storywork/internal/importer"
 	"storywork/internal/project"
 	"storywork/internal/provider"
 	"storywork/internal/story"
@@ -89,6 +92,35 @@ func newCodexActiveEntryResponse(entry codex.Entry) codexActiveEntryResponse {
 	}
 }
 
+func newImportCandidateResponse(candidate importer.Candidate) importCandidateResponse {
+	return importCandidateResponse{
+		ID:                     candidate.ID,
+		Kind:                   candidate.Kind,
+		ProposalVersion:        candidate.ProposalVersion,
+		Status:                 candidate.Status,
+		Revision:               candidate.Revision,
+		Provenance:             candidate.Provenance,
+		Proposal:               candidateProposalResponse(candidate),
+		ReplacementCandidateID: candidate.Decision.ReplacementCandidateID,
+		CanonicalRefs:          candidate.Decision.CanonicalRefs,
+	}
+}
+
+func candidateProposalResponse(candidate importer.Candidate) any {
+	switch candidate.Kind {
+	case importer.CandidateKindCodex:
+		return candidate.Proposal.Codex
+	case importer.CandidateKindArc:
+		return candidate.Proposal.Arc
+	case importer.CandidateKindChapter:
+		return candidate.Proposal.Chapter
+	case importer.CandidateKindScene:
+		return candidate.Proposal.Scene
+	default:
+		return struct{}{}
+	}
+}
+
 // methodNotAllowed returns a handler that responds with 405 in the project JSON
 // error shape and sets the Allow header, for known routes with an unsupported
 // method. The spec requires JSON errors and an Allow header on 405.
@@ -110,6 +142,15 @@ func writeBodyLimitError(writer http.ResponseWriter, err error) {
 		return
 	}
 	writeError(writer, status, err)
+}
+
+func writeImportBodyError(writer http.ResponseWriter, err error) {
+	var maxBytesErr *http.MaxBytesError
+	if errors.As(err, &maxBytesErr) {
+		writeError(writer, http.StatusRequestEntityTooLarge, errors.New("request body exceeds the 1 MiB limit"))
+		return
+	}
+	writeError(writer, http.StatusBadRequest, err)
 }
 
 // StoryStore serves and mutates the active project's outline, scenes, and Codex state.
@@ -158,6 +199,40 @@ type StoryStore interface {
 	ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error)
 	// SaveProviderProfiles replaces the application-level provider profiles.
 	SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error)
+	// ImportDirectory snapshots a source directory into the active project.
+	ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error)
+	// ListImports returns imported snapshot summaries.
+	ListImports(ctx context.Context) ([]importer.ImportSummary, error)
+	// LoadImport returns one imported snapshot and its file manifest.
+	LoadImport(ctx context.Context, importID string) (importer.ImportResponse, error)
+	// ListImportChunks returns one import's deterministic chunks.
+	ListImportChunks(ctx context.Context, importID string) ([]importer.Chunk, error)
+	// ExtractImport runs provider-neutral extraction against selected chunks.
+	ExtractImport(ctx context.Context, request importer.ExtractRequest) (importer.ExtractResponse, error)
+	// ListImportCandidates lists durable review candidates with optional filters.
+	ListImportCandidates(ctx context.Context, status *importer.CandidateStatus, kind *importer.CandidateKind) ([]importer.Candidate, error)
+	// LoadImportCandidate loads one durable review candidate.
+	LoadImportCandidate(ctx context.Context, candidateID string) (importer.Candidate, error)
+	// UpdateImportCandidate edits one pending candidate.
+	UpdateImportCandidate(ctx context.Context, candidateID, expectedRevision string, proposal importer.CandidateProposal) (importer.Candidate, error)
+	// MergeImportCandidates merges two compatible pending candidates.
+	MergeImportCandidates(ctx context.Context, candidateID string, request importer.MergeRequest) (importer.Candidate, []string, error)
+	// DiscardImportCandidate marks one pending candidate as discarded.
+	DiscardImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, error)
+	// AcceptImportCandidate writes one candidate into canon atomically.
+	AcceptImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, []importer.CanonicalRef, error)
+}
+
+type importCandidateResponse struct {
+	ID                     string                   `json:"id"`
+	Kind                   importer.CandidateKind   `json:"kind"`
+	ProposalVersion        int                      `json:"proposal_version"`
+	Status                 importer.CandidateStatus `json:"status"`
+	Revision               string                   `json:"revision"`
+	Provenance             importer.Provenance      `json:"provenance"`
+	Proposal               any                      `json:"proposal"`
+	ReplacementCandidateID *string                  `json:"replacement_candidate_id"`
+	CanonicalRefs          []importer.CanonicalRef  `json:"canonical_refs"`
 }
 
 type requiredJSONField struct {
@@ -278,6 +353,298 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			"revision": revision,
 		})
 	})
+	mux.HandleFunc("POST /api/imports", func(writer http.ResponseWriter, request *http.Request) {
+		var importRequest struct {
+			SourceDirectory string `json:"source_directory"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &importRequest, 1<<20, requiredJSONField{name: "source_directory"}); err != nil {
+			writeImportBodyError(writer, err)
+			return
+		}
+		response, err := stories.ImportDirectory(request.Context(), importRequest.SourceDirectory)
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, response)
+	})
+	mux.HandleFunc("GET /api/imports", func(writer http.ResponseWriter, request *http.Request) {
+		if err := validateExactQuery(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		imports, err := stories.ListImports(request.Context())
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if imports == nil {
+			imports = []importer.ImportSummary{}
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"imports": imports})
+	})
+	mux.HandleFunc("GET /api/imports/{import_id}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := validateExactQuery(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		response, err := stories.LoadImport(request.Context(), request.PathValue("import_id"))
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, response)
+	})
+	mux.HandleFunc("GET /api/imports/{import_id}/chunks", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := validateExactQuery(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		chunks, err := stories.ListImportChunks(request.Context(), request.PathValue("import_id"))
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if chunks == nil {
+			chunks = []importer.Chunk{}
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"chunks": chunks})
+	})
+	mux.HandleFunc("POST /api/imports/{import_id}/extractions", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		var extractionRequest struct {
+			ChunkIDs  []string     `json:"chunk_ids"`
+			Mode      extract.Mode `json:"mode"`
+			ProfileID string       `json:"profile_id"`
+			Model     string       `json:"model"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &extractionRequest, 1<<20,
+			requiredJSONField{name: "chunk_ids"},
+			requiredJSONField{name: "mode"},
+			requiredJSONField{name: "profile_id"},
+			requiredJSONField{name: "model"},
+		); err != nil {
+			writeImportBodyError(writer, err)
+			return
+		}
+		extraction, err := stories.ExtractImport(request.Context(), importer.ExtractRequest{
+			ImportID:  request.PathValue("import_id"),
+			ChunkIDs:  extractionRequest.ChunkIDs,
+			Mode:      extractionRequest.Mode,
+			ProfileID: extractionRequest.ProfileID,
+			Model:     extractionRequest.Model,
+		})
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		response := make([]importCandidateResponse, 0, len(extraction.Candidates))
+		for _, candidate := range extraction.Candidates {
+			response = append(response, newImportCandidateResponse(candidate))
+		}
+		writeJSON(writer, http.StatusCreated, map[string]any{"candidates": response, "provider": extraction.Provider})
+	})
+	mux.HandleFunc("GET /api/import-candidates", func(writer http.ResponseWriter, request *http.Request) {
+		status, kind, err := parseCandidateFilters(request.URL.Query())
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		candidates, err := stories.ListImportCandidates(request.Context(), status, kind)
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		response := make([]importCandidateResponse, 0, len(candidates))
+		for _, candidate := range candidates {
+			response = append(response, newImportCandidateResponse(candidate))
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"candidates": response})
+	})
+	mux.HandleFunc("GET /api/import-candidates/{candidate_id}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		candidate, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, newImportCandidateResponse(candidate))
+	})
+	mux.HandleFunc("PUT /api/import-candidates/{candidate_id}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		body, err := readJSONBodyWithLimit(writer, request, 1<<20)
+		if err != nil {
+			writeImportBodyError(writer, err)
+			return
+		}
+		var editEnvelope struct {
+			Proposal         json.RawMessage `json:"proposal"`
+			ExpectedRevision string          `json:"expected_revision"`
+		}
+		if err := requireJSONFields(body, requiredJSONField{name: "proposal"}, requiredJSONField{name: "expected_revision"}); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := decodeJSONBytes(body, &editEnvelope); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(editEnvelope.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		proposal, err := decodeCandidateProposalJSON(current.Kind, editEnvelope.Proposal)
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		candidate, err := stories.UpdateImportCandidate(request.Context(), current.ID, editEnvelope.ExpectedRevision, proposal)
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, newImportCandidateResponse(candidate))
+	})
+	mux.HandleFunc("POST /api/import-candidates/{candidate_id}/merge", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		body, err := readJSONBodyWithLimit(writer, request, 1<<20)
+		if err != nil {
+			writeImportBodyError(writer, err)
+			return
+		}
+		var mergeEnvelope struct {
+			OtherCandidateID      string          `json:"other_candidate_id"`
+			ExpectedRevision      string          `json:"expected_revision"`
+			OtherExpectedRevision string          `json:"other_expected_revision"`
+			Proposal              json.RawMessage `json:"proposal"`
+		}
+		if err := requireJSONFields(body,
+			requiredJSONField{name: "other_candidate_id"},
+			requiredJSONField{name: "expected_revision"},
+			requiredJSONField{name: "other_expected_revision"},
+			requiredJSONField{name: "proposal"},
+		); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := decodeJSONBytes(body, &mergeEnvelope); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		if err := importer.ValidateCandidateID(mergeEnvelope.OtherCandidateID); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(mergeEnvelope.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(mergeEnvelope.OtherExpectedRevision); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		proposal, err := decodeCandidateProposalJSON(current.Kind, mergeEnvelope.Proposal)
+		if err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		candidate, mergedIDs, err := stories.MergeImportCandidates(request.Context(), current.ID, importer.MergeRequest{
+			OtherCandidateID:      mergeEnvelope.OtherCandidateID,
+			ExpectedRevision:      mergeEnvelope.ExpectedRevision,
+			OtherExpectedRevision: mergeEnvelope.OtherExpectedRevision,
+			Proposal:              proposal,
+		})
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusCreated, map[string]any{"candidate": newImportCandidateResponse(candidate), "merged_candidate_ids": mergedIDs})
+	})
+	mux.HandleFunc("POST /api/import-candidates/{candidate_id}/discard", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		var discardRequest struct {
+			ExpectedRevision string `json:"expected_revision"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &discardRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
+			writeImportBodyError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(discardRequest.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		candidate, err := stories.DiscardImportCandidate(request.Context(), request.PathValue("candidate_id"), discardRequest.ExpectedRevision)
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, newImportCandidateResponse(candidate))
+	})
+	mux.HandleFunc("POST /api/import-candidates/{candidate_id}/accept", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateCandidateID(request.PathValue("candidate_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		var acceptRequest struct {
+			ExpectedRevision string `json:"expected_revision"`
+		}
+		if err := decodeJSONWithRequiredFields(writer, request, &acceptRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
+			writeImportBodyError(writer, err)
+			return
+		}
+		if err := importer.ValidateCandidateRevision(acceptRequest.ExpectedRevision); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		candidate, canonicalRefs, err := stories.AcceptImportCandidate(request.Context(), request.PathValue("candidate_id"), acceptRequest.ExpectedRevision)
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"candidate": newImportCandidateResponse(candidate), "canonical_refs": canonicalRefs})
+	})
+	mux.HandleFunc("/api/imports", methodNotAllowed("GET, POST"))
+	mux.HandleFunc("/api/imports/{import_id}", methodNotAllowed("GET"))
+	mux.HandleFunc("/api/imports/{import_id}/chunks", methodNotAllowed("GET"))
+	mux.HandleFunc("/api/imports/{import_id}/extractions", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/import-candidates", methodNotAllowed("GET"))
+	mux.HandleFunc("/api/import-candidates/{candidate_id}", methodNotAllowed("GET, PUT"))
+	mux.HandleFunc("/api/import-candidates/{candidate_id}/merge", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/import-candidates/{candidate_id}/discard", methodNotAllowed("POST"))
+	mux.HandleFunc("/api/import-candidates/{candidate_id}/accept", methodNotAllowed("POST"))
 	mux.HandleFunc("GET /api/outline", func(writer http.ResponseWriter, request *http.Request) {
 		outline, err := stories.Outline(request.Context())
 		if err != nil {
@@ -987,6 +1354,86 @@ func validateProgressionUpdateJSON(body []byte) error {
 	return nil
 }
 
+func parseCandidateFilters(values map[string][]string) (*importer.CandidateStatus, *importer.CandidateKind, error) {
+	var status *importer.CandidateStatus
+	if raw, ok := values["status"]; ok {
+		if len(raw) != 1 || strings.TrimSpace(raw[0]) == "" {
+			return nil, nil, errors.New("invalid candidate status filter")
+		}
+		parsed, err := importer.ValidateCandidateStatus(raw[0])
+		if err != nil {
+			return nil, nil, errors.New("invalid candidate status filter")
+		}
+		status = &parsed
+	}
+	var kind *importer.CandidateKind
+	if raw, ok := values["kind"]; ok {
+		if len(raw) != 1 || strings.TrimSpace(raw[0]) == "" {
+			return nil, nil, errors.New("invalid candidate kind filter")
+		}
+		parsed, err := importer.ValidateCandidateKind(raw[0])
+		if err != nil {
+			return nil, nil, errors.New("invalid candidate kind filter")
+		}
+		kind = &parsed
+	}
+	for key := range values {
+		if key != "status" && key != "kind" {
+			return nil, nil, errors.New("invalid candidate filter")
+		}
+	}
+	return status, kind, nil
+}
+
+func decodeCandidateProposalJSON(kind importer.CandidateKind, raw json.RawMessage) (importer.CandidateProposal, error) {
+	switch kind {
+	case importer.CandidateKindCodex:
+		if err := requireJSONFields(raw,
+			requiredJSONField{name: "type"},
+			requiredJSONField{name: "name"},
+			requiredJSONField{name: "aliases"},
+			requiredJSONField{name: "tags"},
+			requiredJSONField{name: "description"},
+		); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		var proposal importer.CodexProposal
+		if err := decodeJSONBytes(raw, &proposal); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		return importer.CandidateProposal{Codex: &proposal}, nil
+	case importer.CandidateKindArc:
+		if err := requireJSONFields(raw, requiredJSONField{name: "title"}); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		var proposal importer.ArcProposal
+		if err := decodeJSONBytes(raw, &proposal); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		return importer.CandidateProposal{Arc: &proposal}, nil
+	case importer.CandidateKindChapter:
+		if err := requireJSONFields(raw, requiredJSONField{name: "title"}, requiredJSONField{name: "parent_candidate_id"}); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		var proposal importer.ChapterProposal
+		if err := decodeJSONBytes(raw, &proposal); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		return importer.CandidateProposal{Chapter: &proposal}, nil
+	case importer.CandidateKindScene:
+		if err := requireJSONFields(raw, requiredJSONField{name: "title"}, requiredJSONField{name: "parent_candidate_id"}); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		var proposal importer.SceneProposal
+		if err := decodeJSONBytes(raw, &proposal); err != nil {
+			return importer.CandidateProposal{}, err
+		}
+		return importer.CandidateProposal{Scene: &proposal}, nil
+	default:
+		return importer.CandidateProposal{}, errors.New("unsupported candidate kind")
+	}
+}
+
 // decodeRawJSONObject preserves field presence while validating a nested JSON object.
 func decodeRawJSONObject(raw json.RawMessage, context string) (map[string]json.RawMessage, error) {
 	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
@@ -1043,6 +1490,23 @@ func requireNonEmptyJSONString(raw json.RawMessage, context string) error {
 
 func writeStoryError(writer http.ResponseWriter, err error) {
 	writeError(writer, statusForStoryError(err), err)
+}
+
+func writeImportError(writer http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree), errors.Is(err, importer.ErrCandidateConflict), errors.Is(err, importer.ErrCandidateTerminal), errors.Is(err, importer.ErrParentNotAccepted):
+		writeError(writer, http.StatusConflict, errors.New("import operation conflicts with current project state"))
+	case errors.Is(err, importer.ErrInvalidSourceDirectory), errors.Is(err, importer.ErrNoEligibleFiles), errors.Is(err, importer.ErrSymlinkRefused), errors.Is(err, importer.ErrSourceChanged), errors.Is(err, importer.ErrInvalidContent), errors.Is(err, importer.ErrInvalidCandidate), errors.Is(err, importer.ErrInvalidID), errors.Is(err, importer.ErrInvalidPath), errors.Is(err, importer.ErrNoCandidateChanges), errors.Is(err, extract.ErrInvalidRequest):
+		writeError(writer, http.StatusBadRequest, errors.New("invalid import request"))
+	case errors.Is(err, extract.ErrInvalidResponse), errors.Is(err, agent.ErrProviderRejected):
+		writeError(writer, http.StatusBadGateway, errors.New("extraction provider returned an invalid response"))
+	case errors.Is(err, agent.ErrProviderOffline), errors.Is(err, agent.ErrProviderInvalid):
+		writeError(writer, http.StatusServiceUnavailable, errors.New("extraction provider is unavailable"))
+	case errors.Is(err, os.ErrNotExist):
+		writeError(writer, http.StatusNotFound, errors.New("import resource not found"))
+	default:
+		writeError(writer, http.StatusInternalServerError, errors.New("import operation failed"))
+	}
 }
 
 func writeProviderError(writer http.ResponseWriter, err error) {

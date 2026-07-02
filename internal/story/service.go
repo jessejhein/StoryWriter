@@ -8,9 +8,9 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"sync"
 
 	"storywork/internal/codex"
+	"storywork/internal/mutation"
 	"storywork/internal/project"
 )
 
@@ -102,31 +102,67 @@ type MutationResult struct {
 	Outline   Outline `json:"outline"`
 }
 
+// ImportMutationKind identifies the canonical artifact an importer acceptance creates.
+type ImportMutationKind string
+
+const (
+	ImportMutationArc     ImportMutationKind = "arc"
+	ImportMutationChapter ImportMutationKind = "chapter"
+	ImportMutationScene   ImportMutationKind = "scene"
+	ImportMutationCodex   ImportMutationKind = "codex"
+)
+
+// ImportMutationRequest describes one no-checkpoint canonical creation used by
+// Milestone 6 candidate acceptance.
+type ImportMutationRequest struct {
+	Kind     ImportMutationKind
+	ParentID string
+	Title    string
+	Codex    codex.SaveEntryRequest
+}
+
+// ImportMutationResult reports the new canonical artifact and a rollback handle.
+type ImportMutationResult struct {
+	Kind     ImportMutationKind
+	ID       string
+	Rollback func() error
+}
+
 // Service coordinates outline reads and structural mutations.
 type Service struct {
-	session Session
-	files   FileStore
-	git     GitStore
-	index   IndexStore
-	ids     IDGenerator
-	mu      sync.RWMutex
+	session   Session
+	files     FileStore
+	git       GitStore
+	index     IndexStore
+	ids       IDGenerator
+	mutations *mutation.Coordinator
 }
 
 // NewService creates the active-project story service with the supplied boundaries.
 func NewService(session Session, files FileStore, git GitStore, index IndexStore, ids IDGenerator) *Service {
 	return &Service{
-		session: session,
-		files:   files,
-		git:     git,
-		index:   index,
-		ids:     ids,
+		session:   session,
+		files:     files,
+		git:       git,
+		index:     index,
+		ids:       ids,
+		mutations: mutation.NewCoordinator(),
 	}
+}
+
+// WithMutationCoordinator replaces the service-local lock with the shared
+// application mutation boundary. It must be called before serving requests.
+func (s *Service) WithMutationCoordinator(coordinator *mutation.Coordinator) *Service {
+	if coordinator != nil {
+		s.mutations = coordinator
+	}
+	return s
 }
 
 // Outline returns the current active project's outline.
 func (s *Service) Outline(ctx context.Context) (Outline, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -137,8 +173,8 @@ func (s *Service) Outline(ctx context.Context) (Outline, error) {
 
 // LoadScene returns one existing canonical scene for editor use.
 func (s *Service) LoadScene(ctx context.Context, sceneID string) (SceneDocument, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -162,8 +198,8 @@ func (s *Service) LoadScene(ctx context.Context, sceneID string) (SceneDocument,
 
 // CreateArc appends a new arc and checkpoints the mutation.
 func (s *Service) CreateArc(ctx context.Context, title string) (MutationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -198,8 +234,8 @@ func (s *Service) CreateArc(ctx context.Context, title string) (MutationResult, 
 
 // CreateChapter appends a chapter inside an existing arc.
 func (s *Service) CreateChapter(ctx context.Context, arcID, title string) (MutationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -237,8 +273,8 @@ func (s *Service) CreateChapter(ctx context.Context, arcID, title string) (Mutat
 
 // CreateScene appends a scene inside an existing chapter.
 func (s *Service) CreateScene(ctx context.Context, chapterID, title string) (MutationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -276,8 +312,8 @@ func (s *Service) CreateScene(ctx context.Context, chapterID, title string) (Mut
 
 // Reorder updates chapter or scene order and checkpoints the change.
 func (s *Service) Reorder(ctx context.Context, request ReorderRequest) (MutationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -312,8 +348,8 @@ func (s *Service) Reorder(ctx context.Context, request ReorderRequest) (Mutation
 
 // SaveScene validates and persists one canonical scene edit.
 func (s *Service) SaveScene(ctx context.Context, sceneID string, request SaveSceneRequest) (SceneDocument, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -405,8 +441,8 @@ func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatch
 	if request.RunID == "" {
 		return SceneDocument{}, fmt.Errorf("run_id is required: %w", ErrInvalidSelection)
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
@@ -468,8 +504,8 @@ func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatch
 
 // CodexEntries returns the current active project's validated Codex list.
 func (s *Service) CodexEntries(ctx context.Context) ([]codex.Entry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -480,8 +516,8 @@ func (s *Service) CodexEntries(ctx context.Context) ([]codex.Entry, error) {
 
 // LoadCodexEntry returns one validated canonical Codex entry.
 func (s *Service) LoadCodexEntry(ctx context.Context, entryID string) (codex.Entry, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -500,8 +536,8 @@ func (s *Service) CreateCodexEntry(ctx context.Context, request codex.SaveEntryR
 	if err != nil {
 		return codex.Entry{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	// Step 3: verify the worktree is clean before loading canonical state.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
@@ -563,8 +599,8 @@ func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request 
 	if err := codex.ValidateRevision(request.ExpectedRevision); err != nil {
 		return codex.Entry{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	// Step 3: verify the worktree is clean.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
@@ -611,8 +647,8 @@ func (s *Service) UpdateCodexEntry(ctx context.Context, entryID string, request 
 
 // LoadProgressions returns one entry's canonical progression document or an empty logical document.
 func (s *Service) LoadProgressions(ctx context.Context, entryID string) (codex.ProgressionDocument, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -652,8 +688,8 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 	if err := validateProgressionExpectedRevision(request.ExpectedRevision); err != nil {
 		return codex.ProgressionDocument{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	// Step 3: verify the worktree is clean.
 	clean, err := s.git.IsClean(ctx, current.Path)
 	if err != nil {
@@ -735,8 +771,8 @@ func (s *Service) SaveProgressions(ctx context.Context, entryID string, request 
 
 // ResolveActiveCodexState reads one entry and resolves its active state for a target scene.
 func (s *Service) ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 
 	current, err := s.currentProject()
 	if err != nil {
@@ -761,6 +797,36 @@ func (s *Service) ResolveActiveCodexState(ctx context.Context, entryID, sceneID 
 		return codex.ActiveState{}, err
 	}
 	return codex.ResolveActiveState(entry, progressions.Progressions, flattenOutlineScenes(outline), sceneID)
+}
+
+// ApplyImportMutation creates one canonical artifact without rebuilding the
+// index or creating a checkpoint. The caller owns any surrounding transaction.
+func (s *Service) ApplyImportMutation(ctx context.Context, request ImportMutationRequest) (ImportMutationResult, error) {
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
+	return s.ApplyImportMutationInTransaction(ctx, request)
+}
+
+// ApplyImportMutationInTransaction creates one canonical artifact while the
+// caller holds the shared application mutation coordinator.
+func (s *Service) ApplyImportMutationInTransaction(ctx context.Context, request ImportMutationRequest) (ImportMutationResult, error) {
+	current, err := s.currentProject()
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+
+	switch request.Kind {
+	case ImportMutationArc:
+		return s.applyImportArc(ctx, current.Path, request.Title)
+	case ImportMutationChapter:
+		return s.applyImportChapter(ctx, current.Path, request.ParentID, request.Title)
+	case ImportMutationScene:
+		return s.applyImportScene(ctx, current.Path, request.ParentID, request.Title)
+	case ImportMutationCodex:
+		return s.applyImportCodex(ctx, current.Path, request.Codex)
+	default:
+		return ImportMutationResult{}, fmt.Errorf("unknown import mutation kind %q", request.Kind)
+	}
 }
 
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
@@ -821,6 +887,144 @@ func (s *Service) rollbackMutation(ctx context.Context, projectPath string, roll
 		joined = append(joined, err)
 	}
 	return errors.Join(joined...)
+}
+
+func (s *Service) applyImportArc(ctx context.Context, projectPath, title string) (ImportMutationResult, error) {
+	outline, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	arcID, err := s.nextUnusedID(ctx, projectPath, NodeKindArc)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	next, err := AddArc(outline, arcID, title)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	arc := next.Arcs[len(next.Arcs)-1]
+	outlineBytes, err := s.files.MarshalOutline(next)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	arcBytes, err := s.files.MarshalArc(arc)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{
+		"outline.yaml": outlineBytes,
+		filepath.ToSlash(filepath.Join("arcs", arcID+".yaml")): arcBytes,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationArc, ID: arcID, Rollback: rollback}, nil
+}
+
+func (s *Service) applyImportChapter(ctx context.Context, projectPath, arcID, title string) (ImportMutationResult, error) {
+	outline, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	chapterID, err := s.nextUnusedID(ctx, projectPath, NodeKindChapter)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	next, err := AddChapter(outline, arcID, chapterID, title)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	chapter, err := findChapter(next, chapterID)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	outlineBytes, err := s.files.MarshalOutline(next)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	chapterBytes, err := s.files.MarshalChapter(chapter)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{
+		"outline.yaml": outlineBytes,
+		filepath.ToSlash(filepath.Join("chapters", chapterID+".yaml")): chapterBytes,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationChapter, ID: chapterID, Rollback: rollback}, nil
+}
+
+func (s *Service) applyImportScene(ctx context.Context, projectPath, chapterID, title string) (ImportMutationResult, error) {
+	outline, err := s.files.Load(ctx, projectPath)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	sceneID, err := s.nextUnusedID(ctx, projectPath, NodeKindScene)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	next, err := AddScene(outline, chapterID, sceneID, title)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	scene, err := findScene(next, sceneID)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	outlineBytes, err := s.files.MarshalOutline(next)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	sceneBytes, err := s.files.MarshalScene(scene)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{
+		"outline.yaml": outlineBytes,
+		filepath.ToSlash(filepath.Join("scenes", sceneID+".md")): sceneBytes,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationScene, ID: sceneID, Rollback: rollback}, nil
+}
+
+func (s *Service) applyImportCodex(ctx context.Context, projectPath string, request codex.SaveEntryRequest) (ImportMutationResult, error) {
+	request, err := codex.NormalizeCreateRequest(request)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	entryID, err := s.nextUnusedID(ctx, projectPath, codexNodeKind(request.Type))
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	nextEntry, err := codex.NormalizeEntry(codex.Entry{
+		ID:          entryID,
+		Type:        request.Type,
+		Name:        request.Name,
+		Aliases:     request.Aliases,
+		Tags:        request.Tags,
+		Description: request.Description,
+		Metadata:    request.Metadata,
+	})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	entryBytes, err := s.files.MarshalCodexEntry(nextEntry)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	relativePath, err := codexEntryPath(nextEntry)
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	rollback, err := s.files.WriteFiles(ctx, projectPath, map[string][]byte{relativePath: entryBytes})
+	if err != nil {
+		return ImportMutationResult{}, err
+	}
+	return ImportMutationResult{Kind: ImportMutationCodex, ID: entryID, Rollback: rollback}, nil
 }
 
 func (s *Service) currentProject() (project.Project, error) {

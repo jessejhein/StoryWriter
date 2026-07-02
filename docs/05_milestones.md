@@ -8,9 +8,9 @@ Each milestone is a sprint. Each sprint must leave the app working.
 
 ## Current status
 
-- Milestones 0 through 5: implemented; `make check` green on June 30, 2026.
-- Milestone 6: next incomplete phase.
-- Milestones 6 through 9: roadmap only.
+- Milestones 0 through 6: implemented; `make check` green on July 1, 2026.
+- Milestone 7: next incomplete phase.
+- Milestones 7 through 9: roadmap only.
 
 The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
 
@@ -198,7 +198,7 @@ Selection -> applicable agents -> mock patch -> diff preview -> accept/reject wo
 
 ## Milestone 5 — Real provider adapters and credential broker v1
 
-Status: complete June 30, 2026. Milestone 6 is the next incomplete phase.
+Status: complete June 30, 2026.
 
 ### Goal
 
@@ -230,6 +230,10 @@ At least one local endpoint and one API-key provider path can run a simple text 
 
 ## Milestone 6 — Markdown import and extraction review queue
 
+Status: complete July 1, 2026. The durable implementation contract is
+`docs/15_milestone_6_task_prompt.md`; the implementation sequence and evidence
+live in `.plans/milestone_6_*`. Milestone 7 is the next incomplete phase.
+
 ### Goal
 
 Import messy notes and create reviewable candidates.
@@ -237,10 +241,10 @@ Import messy notes and create reviewable candidates.
 ### Stories
 
 - As an author, I can import a folder of Markdown files.
-- As the app, imported files are copied or referenced according to project settings.
-- As the app, notes are chunked and indexed.
-- As an author, I can run Codex/outline extraction.
-- As an author, I can approve, edit, merge, or discard candidates.
+- As the app, imported files are copied into tracked project-local snapshots.
+- As the app, notes are deterministically chunked with source-line provenance.
+- As an author, I can run provider-neutral structure extraction.
+- As an author, I can review, edit, merge, discard, or explicitly accept candidates.
 
 ### TDD focus
 
@@ -252,7 +256,9 @@ Import messy notes and create reviewable candidates.
 
 ### Done when
 
-Drop Markdown notes -> run extraction -> candidates appear -> author accepts entries into Codex/outline.
+Drop Markdown notes -> inspect chunks -> run extraction -> review candidates
+appear -> author accepts one into Codex/outline through the existing mutation
+boundaries with exactly one checkpoint.
 
 ---
 

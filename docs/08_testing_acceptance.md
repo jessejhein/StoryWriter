@@ -171,11 +171,66 @@ focus placement, and the no-second-save editor acceptance flow.
 
 ### Milestone 6
 
-- Markdown folder import finds `.md` files.
-- Imported notes are chunked.
-- Extraction produces candidates.
-- Candidates do not mutate canon until accepted.
-- Merge candidate combines aliases/tags correctly.
+- `internal/importer/model_test.go`:
+  `TestManifestValidateEnforcesCanonicalForm`,
+  `TestManifestValidateRejectsInvalidMetadataAndLimits`,
+  `TestNormalizePortableRelativePathRejectsUnsafeComponents`,
+  `TestDetectCaseFoldedCollisionRejectsPortableConflicts`,
+  `TestDiscoveryPolicyFiltersAndOrdersEligibleMarkdownPaths`,
+  `TestManifestSummaryOmitsExternalSourcePath`
+- `internal/importer/source_store_test.go`:
+  `TestSourceStorePrepareSnapshotCopiesEligibleMarkdownFiles`,
+  `TestSourceStorePrepareSnapshotRejectsInvalidSourceDirectory`,
+  `TestSourceStorePrepareSnapshotRejectsSymlinkAndInvalidUTF8`,
+  `TestPreparedSnapshotPublishNeverOverwritesExistingImport`
+- `internal/importer/chunk_test.go`:
+  `TestChunkMarkdownSplitsDeterministicallyAtHeadingAndBlankBoundaries`,
+  `TestChunkMarkdownHandlesOversizedLinesWithoutSplittingRunesOrLines`,
+  `TestChunkStoreRebuildsStructurallyValidButCorruptCache`,
+  `TestChunkStoreRejectsCanonicalSnapshotDigestMismatch`
+- `internal/extract/model_test.go`:
+  `TestValidateRequestRejectsUnknownModeAndOversizedPayload`,
+  `TestValidateRequestRejectsMalformedChunkMetadata`,
+  `TestParseResponseRequiresStrictSingleObject`
+- `internal/importer/candidate_model_test.go`:
+  `TestNormalizeCandidateValidatesKindsProvenanceAndDecisionState`,
+  `TestNormalizeCandidateRejectsUnsupportedProposalVersionAndMismatchedRevision`,
+  `TestCandidateStoreRejectsUnknownYAMLFields`,
+  `TestNormalizeCandidateRejectsMalformedAcceptedCanonicalReference`
+- `internal/importer/import_service_test.go`:
+  `TestImportServiceRequiresActiveCleanProject`,
+  `TestImportServicePublishesSnapshotRebuildsIndexAndCommits`,
+  `TestExtractPublishesValidatedCandidatesWithoutCanonMutation`,
+  `TestReviewOperationsEditDiscardMergeAndAccept`,
+  `TestImportServiceRollsBackPublishedSnapshotWhenCheckpointFails`,
+  `TestExtractionCheckpointFailureLeavesNoPartialCandidateBatch`,
+  `TestAcceptCandidateCheckpointFailureRestoresCandidateAndCanonicalMutation`,
+  `TestConcurrentCandidateDecisionsHaveExactlyOneWinner`
+- `internal/app/milestone6_integration_test.go`:
+  `TestMilestone6EndToEndWithRealAdapters`
+- `internal/story/import_mutation_service_test.go`:
+  `TestApplyImportMutationCreatesCanonicalFilesWithoutCheckpoint`
+- `internal/api/import_handler_test.go`:
+  `TestImportRoutesReturnExactJSONShapes`,
+  `TestImportRouteStatusMapping`,
+  `TestImportMutationRoutesRejectMalformedBodiesAndOversizeWithContractStatuses`,
+  `TestImportErrorsDoNotDiscloseSensitiveAdapterDetails`
+- `web/src/api.imports.test.ts`:
+  `uses the documented import-review routes and JSON bodies`
+- `web/src/imports/ImportReviewWorkbench.test.tsx`:
+  `imports notes, extracts candidates, and accepts one candidate`,
+  `confirms candidate navigation when a draft is dirty`,
+  `preserves a dirty draft on conflict and offers an explicit reload`,
+  `ignores a stale chunk response after import selection changes`
+- `web/src/App.imports_navigation.test.tsx`:
+  `opens import review after project creation`
+
+The real-adapter test covers project creation, normalized recursive import,
+derived chunks, local HTTP provider extraction, edit/merge/discard, dependency-
+ordered arc/chapter/scene acceptance, Codex acceptance, one commit per mutation,
+clean worktrees, index coverage, non-disclosure, and queue reload after complete
+service reconstruction. Focused tests cover rollback, concurrent decisions,
+strict negative API contracts, corrupt cache rebuild, and UI race/conflict states.
 
 ### Milestone 7
 

@@ -9,6 +9,7 @@
 .storywork/tmp/
 .storywork/cache/
 .storywork/embeddings/
+.storywork/import/
 
 # Credentials must never live in project folders
 .env

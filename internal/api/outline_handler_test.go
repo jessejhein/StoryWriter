@@ -15,6 +15,7 @@ import (
 	"storywork/internal/agent"
 	"storywork/internal/api"
 	"storywork/internal/codex"
+	"storywork/internal/importer"
 	"storywork/internal/project"
 	"storywork/internal/provider"
 	"storywork/internal/story"
@@ -88,6 +89,30 @@ type storyServiceStub struct {
 	availableInput       agent.AvailabilityInput
 	saveProviderInput    []provider.Profile
 	saveProviderExpected *string
+	importResponse       importer.ImportResponse
+	importErr            error
+	importList           []importer.ImportSummary
+	importListErr        error
+	loadImportResponse   importer.ImportResponse
+	loadImportErr        error
+	importChunks         []importer.Chunk
+	importChunksErr      error
+	extractResponse      importer.ExtractResponse
+	extractErr           error
+	candidates           []importer.Candidate
+	candidatesErr        error
+	candidate            importer.Candidate
+	candidateErr         error
+	updateCandidate      importer.Candidate
+	updateCandidateErr   error
+	mergeCandidate       importer.Candidate
+	mergeCandidateIDs    []string
+	mergeCandidateErr    error
+	discardCandidate     importer.Candidate
+	discardCandidateErr  error
+	acceptCandidate      importer.Candidate
+	acceptRefs           []importer.CanonicalRef
+	acceptCandidateErr   error
 }
 
 func (s *storyServiceStub) Outline(context.Context) (story.Outline, error) {
@@ -201,6 +226,50 @@ func (s *storyServiceStub) SaveProviderProfiles(_ context.Context, profiles []pr
 	s.saveProviderInput = profiles
 	s.saveProviderExpected = expectedRevision
 	return s.providerProfiles, s.providerRevision, s.saveProviderErr
+}
+
+func (s *storyServiceStub) ImportDirectory(context.Context, string) (importer.ImportResponse, error) {
+	return s.importResponse, s.importErr
+}
+
+func (s *storyServiceStub) ListImports(context.Context) ([]importer.ImportSummary, error) {
+	return s.importList, s.importListErr
+}
+
+func (s *storyServiceStub) LoadImport(context.Context, string) (importer.ImportResponse, error) {
+	return s.loadImportResponse, s.loadImportErr
+}
+
+func (s *storyServiceStub) ListImportChunks(context.Context, string) ([]importer.Chunk, error) {
+	return s.importChunks, s.importChunksErr
+}
+
+func (s *storyServiceStub) ExtractImport(context.Context, importer.ExtractRequest) (importer.ExtractResponse, error) {
+	return s.extractResponse, s.extractErr
+}
+
+func (s *storyServiceStub) ListImportCandidates(context.Context, *importer.CandidateStatus, *importer.CandidateKind) ([]importer.Candidate, error) {
+	return s.candidates, s.candidatesErr
+}
+
+func (s *storyServiceStub) LoadImportCandidate(context.Context, string) (importer.Candidate, error) {
+	return s.candidate, s.candidateErr
+}
+
+func (s *storyServiceStub) UpdateImportCandidate(context.Context, string, string, importer.CandidateProposal) (importer.Candidate, error) {
+	return s.updateCandidate, s.updateCandidateErr
+}
+
+func (s *storyServiceStub) MergeImportCandidates(context.Context, string, importer.MergeRequest) (importer.Candidate, []string, error) {
+	return s.mergeCandidate, s.mergeCandidateIDs, s.mergeCandidateErr
+}
+
+func (s *storyServiceStub) DiscardImportCandidate(context.Context, string, string) (importer.Candidate, error) {
+	return s.discardCandidate, s.discardCandidateErr
+}
+
+func (s *storyServiceStub) AcceptImportCandidate(context.Context, string, string) (importer.Candidate, []importer.CanonicalRef, error) {
+	return s.acceptCandidate, s.acceptRefs, s.acceptCandidateErr
 }
 
 // BDD trace:

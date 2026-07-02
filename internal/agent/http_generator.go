@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
 	"path"
@@ -15,63 +14,26 @@ import (
 )
 
 type HTTPGenerator struct {
-	client  *http.Client
-	path    string
-	decoder func([]byte) (string, error)
-	body    func(GenerateRequest) ([]byte, error)
+	client   *http.Client
+	messages func(GenerateRequest) ([]ChatMessage, *float64)
 }
 
 func (g *HTTPGenerator) Generate(ctx context.Context, request GenerateRequest, resolved provider.ResolvedProfile) (GenerateResponse, error) {
-	body, err := g.body(request)
+	messages, temperature := g.messages(request)
+	chatResponse, err := CompleteChat(ctx, g.client, ChatRequest{
+		Profile:     resolved,
+		Model:       request.Style.Model,
+		Messages:    messages,
+		Temperature: temperature,
+	})
 	if err != nil {
-		return GenerateResponse{}, ErrProviderInvalid
+		return GenerateResponse{}, err
 	}
-	if len(body) > 6<<20 {
-		return GenerateResponse{}, ErrProviderRejected
-	}
-	targetURL, err := joinProviderURL(resolved.BaseURL, g.path)
-	if err != nil {
-		return GenerateResponse{}, ErrProviderInvalid
-	}
-	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
-	if err != nil {
-		return GenerateResponse{}, ErrProviderInvalid
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-	if resolved.Auth.Type == provider.AuthTypeBearerEnv {
-		httpRequest.Header.Set("Authorization", "Bearer "+resolved.Credential.Value)
-	}
-	response, err := g.client.Do(httpRequest)
-	if err != nil {
-		return GenerateResponse{}, ErrProviderOffline
-	}
-	defer response.Body.Close()
-	if response.StatusCode == http.StatusTooManyRequests || response.StatusCode == http.StatusServiceUnavailable {
-		return GenerateResponse{}, ErrProviderOffline
-	}
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return GenerateResponse{}, ErrProviderRejected
-	}
-	contentType := strings.TrimSpace(response.Header.Get("Content-Type"))
-	if contentType != "" {
-		mediaType, _, err := mime.ParseMediaType(contentType)
-		if err != nil || mediaType != "application/json" {
-			return GenerateResponse{}, ErrProviderRejected
-		}
-	}
-	responseBody, err := readBoundedBody(response.Body, 2<<20)
+	content, err := NormalizeGeneratedReplacement(chatResponse.Content)
 	if err != nil {
 		return GenerateResponse{}, ErrProviderRejected
 	}
-	content, err := g.decoder(responseBody)
-	if err != nil {
-		return GenerateResponse{}, ErrProviderRejected
-	}
-	content, err = NormalizeGeneratedReplacement(content)
-	if err != nil {
-		return GenerateResponse{}, ErrProviderRejected
-	}
-	return GenerateResponse{Replacement: content, Provider: ProviderIdentity{ProfileID: resolved.ID, Type: resolved.Type, Model: request.Style.Model}}, nil
+	return GenerateResponse{Replacement: content, Provider: chatResponse.Provider}, nil
 }
 
 func userPrompt(request GenerateRequest) string {

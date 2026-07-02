@@ -37,6 +37,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 15. `docs/12_milestone_3_task_prompt.md`
 16. `docs/13_milestone_4_task_prompt.md`
 17. `docs/14_milestone_5_task_prompt.md`
+18. `docs/15_milestone_6_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -76,14 +77,14 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 5 are implemented and `make check` is green as of
-June 30, 2026. The app includes the local project foundation, canonical outline
+Milestones 0 through 6 are implemented and `make check` is green as of
+July 1, 2026. The app includes the local project foundation, canonical outline
 editing, the Vim-friendly scene editor with revision conflict protection and
 one Git checkpoint per explicit save, the Codex workbench with strict
 progression validation and active-state resolution, the agent/style registry
-and reviewable AI patch workflow, plus application-level provider profiles,
-credential-readiness reporting, real OpenAI-compatible and Ollama adapters, and
-the provider settings workbench.
+and reviewable AI patch workflow, application-level provider profiles with real
+OpenAI-compatible and Ollama adapters, plus the Milestone 6 Markdown import and
+review queue.
 
 Milestone 4 adds:
 
@@ -93,8 +94,21 @@ Milestone 4 adds:
 - transient reviewable runs with explicit reject/accept,
 - revision-safe patch acceptance using the existing scene lock, rollback, index rebuild, and exactly one Git commit.
 
-Milestone 5 is complete. Its durable contract and working artifacts are
-`docs/14_milestone_5_task_prompt.md` and `.plans/milestone_5_*`. Milestone 6 is
+Milestone 6 adds:
+
+- tracked `imports/raw/<import_id>/` Markdown snapshots with strict path and
+  content validation,
+- rebuildable deterministic chunk data under `.storywork/import/`,
+- provider-neutral structure extraction into durable
+  `imports/review/<candidate_id>.yaml` proposals,
+- explicit edit, merge, discard, and accept review operations with exactly one
+  checkpoint per successful mutation,
+- acceptance through story-owned mutation ports so extraction never mutates
+  canon until the author accepts a candidate,
+- the Import Review workbench and strict HTTP routes for the full flow.
+
+Milestone 6 is complete. Its durable contract and working artifacts are
+`docs/15_milestone_6_task_prompt.md` and `.plans/milestone_6_*`. Milestone 7 is
 the next incomplete phase.
 
 ## Development
@@ -131,8 +145,12 @@ The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 - `internal/index`: rebuildable SQLite index adapter.
 - `internal/agent`: strict agent/style registry, applicability, context policy, and mock provider boundaries.
 - `internal/action`: transient AI action orchestration and accept/reject run lifecycle.
+- `internal/extract`: provider-neutral extraction request, prompt, and response validation.
+- `internal/importer`: Markdown snapshot import, chunking, review queue, and acceptance orchestration.
+- `internal/mutation`: shared transaction coordination for story and durable review mutations.
 - `internal/story`: canonical outline, scene, and Codex mutation orchestration.
 - `internal/codex`: pure Codex validation and active-state decisions.
+- `internal/provider`: application-level provider profile storage and readiness resolution.
 - `internal/storyfile`: strict canonical story-file adapters.
 - `templates`: embedded canonical starter files.
 - `web`: React/Vite local UI.

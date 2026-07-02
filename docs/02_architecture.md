@@ -77,6 +77,13 @@ boundaries. OpenAI-compatible and Ollama HTTP shapes are adapter details and do
 not enter action runs or API request models. Credentials are resolved for each
 availability/run decision and are passed only to the outbound adapter.
 
+Milestone 6 adds a second provider-neutral AI consumer beside scene actions:
+`internal/extract`. Import snapshotting, chunk persistence, review queue state,
+and candidate acceptance live in `internal/importer`; prompt assembly and model
+output validation live in `internal/extract`. This keeps import/review rules
+separate from scene-patch orchestration and preserves a narrow seam for future
+extraction modes or candidate kinds.
+
 ## Suggested source repository layout
 
 ```text
@@ -93,10 +100,11 @@ availability/run decision and are passed only to the outbound adapter.
 │   ├── agent/
 │   ├── api/
 │   ├── codex/
-│   ├── config/
+│   ├── extract/
 │   ├── gitstore/
+│   ├── importer/
 │   ├── index/
-│   ├── llm/
+│   ├── provider/
 │   ├── project/
 │   ├── story/
 │   └── testutil/
@@ -118,6 +126,19 @@ Pure rules. No filesystem, HTTP, Git, or network calls.
 ### Application/services layer
 
 Coordinates domain decisions and adapters.
+
+Milestone 6 uses two bounded service paths:
+
+- `internal/importer.Service` owns import manifests, chunk rebuild triggers,
+  durable review state, and revision-safe review transactions.
+- `internal/story.Service` remains the only owner of canonical story writes.
+  Import candidate acceptance delegates through narrow story mutation ports so a
+  successful acceptance still lands as one logical checkpointed mutation.
+- `internal/mutation.Coordinator` is the application-scoped read/write boundary
+  shared by both services. It prevents import/review writes, canonical story
+  writes, index rebuilds, checkpoints, and rollback from interleaving across one
+  logical mutation. Import acceptance calls the story-owned no-checkpoint port
+  only while this coordinator is already held.
 
 ### Adapter layer
 

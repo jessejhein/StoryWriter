@@ -33,8 +33,9 @@ my-novel/
 │   └── dry_modern_fantasy.yaml
 ├── imports/
 │   ├── raw/
-│   └── processed/
+│   └── review/
 └── .storywork/
+    ├── import/
     ├── index.sqlite
     ├── embeddings.sqlite
     └── tmp/
@@ -53,12 +54,14 @@ Tracked:
 - `progressions/`
 - `agents/`
 - `styles/`
-- `imports/raw/` when the user chooses to preserve source notes
+- `imports/raw/` for tracked copy-only Markdown snapshots and manifests
+- `imports/review/` for durable extraction proposals and author decisions
 
 Ignored:
 
 - `.storywork/*.sqlite`
 - `.storywork/tmp/`
+- `.storywork/import/`
 - credentials
 - local app settings
 - generated exports unless user chooses to track them
@@ -210,12 +213,31 @@ SQLite stores derived/query state:
 - Codex search index,
 - mention index,
 - active progression cache,
-- import chunks,
-- extraction candidates,
+- import chunks and transient extraction-attempt data,
 - agent run logs,
 - embeddings/vector data if implemented.
 
-SQLite must not be the only copy of canonical prose, Codex, outline, agents, or styles.
+SQLite must not be the only copy of canonical prose, Codex, outline, agents, or
+styles.
+It must also not be the only copy of a review candidate or author review
+decision. Milestone 6 stores those durable proposals under `imports/review/`;
+only reproducible chunks and transient attempt data belong in `.storywork/`.
+
+## Milestone 6 import storage
+
+Milestone 6 uses three distinct storage areas:
+
+- `imports/raw/<import_id>/manifest.yaml` plus `files/` contain the canonical
+  imported Markdown snapshot. The stored paths are normalized import-relative
+  paths only; no external source directory is retained.
+- `.storywork/import/<import_id>/` contains rebuildable derived chunk data and
+  successful extraction-attempt metadata. Attempt records contain only mode,
+  selected chunk IDs, resulting candidate IDs, and non-secret provider identity;
+  raw provider output is never retained. Deleting this tree is safe because it
+  is ignored by Git and does not contain canonical author work.
+- `imports/review/<candidate_id>.yaml` contains durable review candidates,
+  revisions, provenance, and terminal decisions. These are tracked because they
+  are author work product, but they are still proposals and not canon.
 
 ## Application provider configuration
 

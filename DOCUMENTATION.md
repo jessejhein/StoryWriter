@@ -1,7 +1,7 @@
 # Storywork Documentation Standards
 
-**Last Updated:** June 2026
-**Version:** Milestone 5
+**Last Updated:** July 2026
+**Version:** Milestone 6
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
 
@@ -208,7 +208,7 @@ All HTTP endpoints are self-documenting via the handler code. When adding a new 
 2. Document request/response types
 3. Update this `DOCUMENTATION.md` under the API section (if major)
 
-Implemented through Milestone 4:
+Implemented through Milestone 6:
 
 ```text
 GET  /api/codex
@@ -226,6 +226,17 @@ POST /api/actions/{run_id}/accept
 POST /api/actions/{run_id}/reject
 GET  /api/provider-profiles
 PUT  /api/provider-profiles
+POST /api/imports
+GET  /api/imports
+GET  /api/imports/{import_id}
+GET  /api/imports/{import_id}/chunks
+POST /api/imports/{import_id}/extractions
+GET  /api/import-candidates
+GET  /api/import-candidates/{candidate_id}
+PUT  /api/import-candidates/{candidate_id}
+POST /api/import-candidates/{candidate_id}/merge
+POST /api/import-candidates/{candidate_id}/discard
+POST /api/import-candidates/{candidate_id}/accept
 ```
 
 Mutation requests use strict JSON: unknown, missing, null, trailing, and
@@ -241,6 +252,12 @@ Milestone 5 adds strict application-level provider profile replacement,
 credential-readiness reporting, provider-aware style availability, and
 provider identity on transient action previews. Its durable contract is
 `docs/14_milestone_5_task_prompt.md`; no route accepts or returns credentials.
+
+Milestone 6 adds tracked Markdown import snapshots, rebuildable import chunks,
+provider-neutral structure extraction, a durable candidate review queue, and
+explicit accept/edit/merge/discard routes. Canon still changes only through the
+story-owned mutation services after explicit acceptance. Its durable contract is
+`docs/15_milestone_6_task_prompt.md`.
 
 Example:
 
