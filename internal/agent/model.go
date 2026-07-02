@@ -40,8 +40,10 @@ const (
 type InputScope string
 
 const (
-	InputScopeSelection InputScope = "selection"
-	InputScopeChapter   InputScope = "chapter"
+	InputScopeSelection     InputScope = "selection"
+	InputScopeScene         InputScope = "scene"
+	InputScopeChapter       InputScope = "chapter"
+	InputScopeChapterReview InputScope = "chapter_review"
 )
 
 type ContextPack string
@@ -84,18 +86,58 @@ var allowedContextPacks = map[ContextPack]struct{}{
 
 type OutputMode string
 
-const OutputModePatch OutputMode = "patch"
+const (
+	OutputModePatch      OutputMode = "patch"
+	OutputModeSuggestion OutputMode = "suggestion"
+)
 
 type OutputType string
 
 const (
-	OutputTypeReplacementText OutputType = "replacement_text"
-	OutputTypeRevisedText     OutputType = "revised_text"
+	OutputTypeReplacementText   OutputType = "replacement_text"
+	OutputTypeRevisedText       OutputType = "revised_text"
+	OutputTypeEditorialFindings OutputType = "editorial_findings"
 )
 
 type RAGMode string
 
-const RAGModeNone RAGMode = "none"
+const (
+	RAGModeNone          RAGMode = "none"
+	RAGModeTimelineAware RAGMode = "timeline_aware"
+)
+
+type FollowUpScope string
+
+const (
+	FollowUpScopeSelection     FollowUpScope = "selection"
+	FollowUpScopeScene         FollowUpScope = "scene"
+	FollowUpScopeChapterReview FollowUpScope = "chapter_review"
+)
+
+type FollowUpRelationship string
+
+const (
+	FollowUpRelationshipTriggered FollowUpRelationship = "triggered"
+	FollowUpRelationshipDependsOn FollowUpRelationship = "depends_on"
+)
+
+// ContextBudget stores conservative estimated-token limits for version-3 agents.
+type ContextBudget struct {
+	MaxInputEstimatedTokens       int
+	ReservedOutputEstimatedTokens int
+}
+
+// FollowUpRule names one deterministic follow-up invitation.
+type FollowUpRule struct {
+	AgentID      string
+	Scope        FollowUpScope
+	Relationship FollowUpRelationship
+}
+
+// FollowUpPolicy stores version-3 follow-up invitations keyed by lifecycle state.
+type FollowUpPolicy struct {
+	OnAccept []FollowUpRule
+}
 
 type Agent struct {
 	Version           int
@@ -105,7 +147,9 @@ type Agent struct {
 	AppliesWhen       ApplicabilityRule
 	ModelRequirements ModelRequirements
 	ContextPolicy     ContextPolicy
+	ContextBudget     ContextBudget
 	RAGPolicy         RAGPolicy
+	FollowUps         FollowUpPolicy
 	Control           Control
 	Output            Output
 }
@@ -185,11 +229,17 @@ type BuildContextRequest struct {
 }
 
 func ValidateAgent(agent Agent) (Agent, error) {
+	if agent.Version == 3 {
+		return ValidateAgentV3(agent)
+	}
 	agent.ID = strings.TrimSpace(agent.ID)
 	agent.Name = strings.TrimSpace(agent.Name)
 	agent.Description = strings.TrimSpace(agent.Description)
 	if agent.Version != 1 && agent.Version != 2 {
 		return Agent{}, fmt.Errorf("agent %q version %d is unsupported: %w", agent.ID, agent.Version, ErrInvalidAgent)
+	}
+	if !agent.ContextBudget.isZero() || !agent.FollowUps.isZero() {
+		return Agent{}, fmt.Errorf("agent %q version %d cannot include version-3 fields: %w", agent.ID, agent.Version, ErrInvalidAgent)
 	}
 	if err := validateRegistryID(agent.ID); err != nil {
 		return Agent{}, fmt.Errorf("agent id: %w", err)
@@ -537,6 +587,270 @@ func validateContextPolicy(policy ContextPolicy) error {
 func validateContextPack(pack ContextPack) error {
 	if _, ok := allowedContextPacks[pack]; !ok {
 		return fmt.Errorf("context pack %q is unsupported: %w", pack, ErrInvalidAgent)
+	}
+	return nil
+}
+
+// ValidateAgentV3 validates version-3 agent definitions with budgets and follow-up policy.
+func ValidateAgentV3(agent Agent) (Agent, error) {
+	agent.ID = strings.TrimSpace(agent.ID)
+	agent.Name = strings.TrimSpace(agent.Name)
+	agent.Description = strings.TrimSpace(agent.Description)
+	if agent.Version != 3 {
+		return Agent{}, fmt.Errorf("agent %q version %d is unsupported: %w", agent.ID, agent.Version, ErrInvalidAgent)
+	}
+	if err := validateRegistryID(agent.ID); err != nil {
+		return Agent{}, fmt.Errorf("agent id: %w", err)
+	}
+	if err := validateRunes("agent name", agent.Name, maxNameRunes); err != nil {
+		return Agent{}, fmt.Errorf("%w: %w", ErrInvalidAgent, err)
+	}
+	if err := validateRunes("agent description", agent.Description, maxDescriptionRunes); err != nil {
+		return Agent{}, fmt.Errorf("%w: %w", ErrInvalidAgent, err)
+	}
+	if agent.ModelRequirements.MinContextTokens < 1 || agent.ModelRequirements.MinContextTokens > 10_000_000 {
+		return Agent{}, fmt.Errorf("agent %q min_context_tokens %d is invalid: %w", agent.ID, agent.ModelRequirements.MinContextTokens, ErrInvalidAgent)
+	}
+	if err := validateApplicabilityV3(agent.AppliesWhen); err != nil {
+		return Agent{}, err
+	}
+	if err := validateContextPolicy(agent.ContextPolicy); err != nil {
+		return Agent{}, err
+	}
+	if err := validateContextBudget(agent.ContextBudget, agent.ModelRequirements.MinContextTokens); err != nil {
+		return Agent{}, err
+	}
+	if err := validateRAGPolicyV3(agent.RAGPolicy); err != nil {
+		return Agent{}, err
+	}
+	if err := validateControlV3(agent.Control, agent.Output); err != nil {
+		return Agent{}, err
+	}
+	if err := validateOutputV3(agent.Output, agent.Control); err != nil {
+		return Agent{}, err
+	}
+	if err := validateScopeContextPolicy(agent); err != nil {
+		return Agent{}, err
+	}
+	if err := validateFollowUpPolicy(agent); err != nil {
+		return Agent{}, err
+	}
+	return agent, nil
+}
+
+func validateApplicabilityV3(rule ApplicabilityRule) error {
+	if len(rule.Surfaces) == 0 || len(rule.InputScopes) == 0 {
+		return fmt.Errorf("agent applicability must include surfaces and input scopes: %w", ErrInvalidAgent)
+	}
+	if err := validateDistinctSurfaces(rule.Surfaces); err != nil {
+		return err
+	}
+	if err := validateDistinctScopesV3(rule.InputScopes); err != nil {
+		return err
+	}
+	if rule.MinWords < 0 || rule.MaxWords < 0 || rule.MinWords > rule.MaxWords {
+		return fmt.Errorf("agent word bounds are invalid: %w", ErrInvalidAgent)
+	}
+	return nil
+}
+
+func validateDistinctScopesV3(values []InputScope) error {
+	seen := map[InputScope]struct{}{}
+	for _, value := range values {
+		switch value {
+		case InputScopeSelection, InputScopeScene, InputScopeChapter, InputScopeChapterReview:
+		default:
+			return fmt.Errorf("input scope %q is unsupported: %w", value, ErrInvalidAgent)
+		}
+		if _, ok := seen[value]; ok {
+			return fmt.Errorf("input scope %q is duplicated: %w", value, ErrInvalidAgent)
+		}
+		seen[value] = struct{}{}
+	}
+	return nil
+}
+
+func validateContextBudget(budget ContextBudget, minContextTokens int) error {
+	if budget.MaxInputEstimatedTokens < 1 || budget.MaxInputEstimatedTokens > 10_000_000 {
+		return fmt.Errorf("max_input_estimated_tokens %d is invalid: %w", budget.MaxInputEstimatedTokens, ErrInvalidAgent)
+	}
+	if budget.ReservedOutputEstimatedTokens < 0 || budget.ReservedOutputEstimatedTokens >= budget.MaxInputEstimatedTokens {
+		return fmt.Errorf("reserved_output_estimated_tokens %d is invalid: %w", budget.ReservedOutputEstimatedTokens, ErrInvalidAgent)
+	}
+	if budget.MaxInputEstimatedTokens < minContextTokens {
+		return fmt.Errorf("max_input_estimated_tokens %d is smaller than min_context_tokens %d: %w", budget.MaxInputEstimatedTokens, minContextTokens, ErrInvalidAgent)
+	}
+	return nil
+}
+
+func validateRAGPolicyV3(policy RAGPolicy) error {
+	switch policy.Mode {
+	case RAGModeNone, RAGModeTimelineAware:
+		return nil
+	default:
+		return fmt.Errorf("rag mode %q is unsupported: %w", policy.Mode, ErrInvalidAgent)
+	}
+}
+
+func validateControlV3(control Control, output Output) error {
+	switch control.OutputMode {
+	case OutputModePatch:
+		if !control.RequiresAcceptance || control.CanModifyCanon {
+			return fmt.Errorf("patch control is unsupported: %w", ErrInvalidAgent)
+		}
+	case OutputModeSuggestion:
+		if control.RequiresAcceptance || control.CanModifyCanon {
+			return fmt.Errorf("suggestion control is unsupported: %w", ErrInvalidAgent)
+		}
+	default:
+		return fmt.Errorf("output mode %q is unsupported: %w", control.OutputMode, ErrInvalidAgent)
+	}
+	_ = output
+	return nil
+}
+
+func validateOutputV3(output Output, control Control) error {
+	switch output.Type {
+	case OutputTypeReplacementText, OutputTypeRevisedText:
+		if control.OutputMode != OutputModePatch || !output.RequiresDiffPreview {
+			return fmt.Errorf("output type %q is incompatible with control: %w", output.Type, ErrInvalidAgent)
+		}
+	case OutputTypeEditorialFindings:
+		if control.OutputMode != OutputModeSuggestion || output.RequiresDiffPreview {
+			return fmt.Errorf("output type %q is incompatible with control: %w", output.Type, ErrInvalidAgent)
+		}
+	default:
+		return fmt.Errorf("output type %q is unsupported: %w", output.Type, ErrInvalidAgent)
+	}
+	return nil
+}
+
+func validateScopeContextPolicy(agent Agent) error {
+	scopes := agent.AppliesWhen.InputScopes
+	if slices.Contains(scopes, InputScopeSelection) {
+		if !slices.Contains(agent.ContextPolicy.Required, ContextSelectedText) || !slices.Contains(agent.ContextPolicy.Required, ContextStyleSheet) {
+			return fmt.Errorf("agent %q selection execution requires selected_text and style_sheet: %w", agent.ID, ErrInvalidAgent)
+		}
+		for _, forbidden := range []ContextPack{ContextGlobalCodexRAG, ContextRawImportNotes, ContextPriorChat} {
+			if !slices.Contains(agent.ContextPolicy.Forbidden, forbidden) {
+				return fmt.Errorf("agent %q selection execution must forbid %q: %w", agent.ID, forbidden, ErrInvalidAgent)
+			}
+		}
+		if agent.RAGPolicy.Mode != RAGModeNone {
+			return fmt.Errorf("agent %q selection execution requires rag mode none: %w", agent.ID, ErrInvalidAgent)
+		}
+	}
+	if slices.Contains(scopes, InputScopeScene) {
+		for _, required := range []ContextPack{ContextCurrentScene, ContextStyleSheet} {
+			if !slices.Contains(agent.ContextPolicy.Required, required) {
+				return fmt.Errorf("agent %q scene execution requires %q: %w", agent.ID, required, ErrInvalidAgent)
+			}
+		}
+		if agent.RAGPolicy.Mode == RAGModeTimelineAware && !slices.Contains(agent.ContextPolicy.Required, ContextActiveCodex) {
+			return fmt.Errorf("agent %q scene execution requires %q: %w", agent.ID, ContextActiveCodex, ErrInvalidAgent)
+		}
+	}
+	if slices.Contains(scopes, InputScopeChapterReview) {
+		for _, required := range []ContextPack{ContextCurrentChapter, ContextStyleSheet, ContextActiveCodex} {
+			if !slices.Contains(agent.ContextPolicy.Required, required) {
+				return fmt.Errorf("agent %q chapter review requires %q: %w", agent.ID, required, ErrInvalidAgent)
+			}
+		}
+		if agent.Control.OutputMode != OutputModeSuggestion || agent.Output.Type != OutputTypeEditorialFindings {
+			return fmt.Errorf("agent %q chapter review must return editorial findings: %w", agent.ID, ErrInvalidAgent)
+		}
+		if !agent.ModelRequirements.SupportsStructuredOutput {
+			return fmt.Errorf("agent %q chapter review requires structured output: %w", agent.ID, ErrInvalidAgent)
+		}
+	}
+	return nil
+}
+
+var allowedFollowUpTargets = map[string]map[FollowUpScope]string{
+	"line_polish": {
+		FollowUpScopeScene: "scene_rewrite",
+	},
+	"scene_rewrite": {
+		FollowUpScopeChapterReview: "chapter_review",
+	},
+}
+
+func inputScopeRank(scope InputScope) int {
+	switch scope {
+	case InputScopeSelection:
+		return 0
+	case InputScopeScene:
+		return 1
+	case InputScopeChapter, InputScopeChapterReview:
+		return 2
+	default:
+		return -1
+	}
+}
+
+func followUpScopeRank(scope FollowUpScope) int {
+	switch scope {
+	case FollowUpScopeSelection:
+		return 0
+	case FollowUpScopeScene:
+		return 1
+	case FollowUpScopeChapterReview:
+		return 2
+	default:
+		return -1
+	}
+}
+
+func (budget ContextBudget) isZero() bool {
+	return budget.MaxInputEstimatedTokens == 0 && budget.ReservedOutputEstimatedTokens == 0
+}
+
+func (policy FollowUpPolicy) isZero() bool {
+	return len(policy.OnAccept) == 0
+}
+
+func validateFollowUpPolicy(agent Agent) error {
+	if len(agent.FollowUps.OnAccept) == 0 {
+		return nil
+	}
+	if agent.Control.OutputMode != OutputModePatch {
+		return fmt.Errorf("agent %q follow-ups are only supported for patch actions: %w", agent.ID, ErrInvalidAgent)
+	}
+	primaryScope := agent.AppliesWhen.InputScopes[0]
+	seen := map[string]struct{}{}
+	for _, rule := range agent.FollowUps.OnAccept {
+		if err := validateRegistryID(rule.AgentID); err != nil {
+			return fmt.Errorf("follow-up agent id: %w", err)
+		}
+		key := rule.AgentID + ":" + string(rule.Scope)
+		if _, ok := seen[key]; ok {
+			return fmt.Errorf("follow-up %q is duplicated: %w", key, ErrInvalidAgent)
+		}
+		seen[key] = struct{}{}
+		switch rule.Relationship {
+		case FollowUpRelationshipTriggered:
+		case FollowUpRelationshipDependsOn:
+			return fmt.Errorf("follow-up relationship %q is unsupported on accept: %w", rule.Relationship, ErrInvalidAgent)
+		default:
+			return fmt.Errorf("follow-up relationship %q is unsupported: %w", rule.Relationship, ErrInvalidAgent)
+		}
+		if rule.AgentID == agent.ID {
+			return fmt.Errorf("follow-up cannot target the same agent %q: %w", agent.ID, ErrInvalidAgent)
+		}
+		allowedTargets, ok := allowedFollowUpTargets[agent.ID]
+		if !ok {
+			return fmt.Errorf("agent %q does not support follow-ups: %w", agent.ID, ErrInvalidAgent)
+		}
+		expectedAgentID, ok := allowedTargets[rule.Scope]
+		if !ok {
+			return fmt.Errorf("follow-up scope %q is not allowed for agent %q: %w", rule.Scope, agent.ID, ErrInvalidAgent)
+		}
+		if rule.AgentID != expectedAgentID {
+			return fmt.Errorf("follow-up agent %q does not match scope %q: %w", rule.AgentID, rule.Scope, ErrInvalidAgent)
+		}
+		if followUpScopeRank(rule.Scope) <= inputScopeRank(primaryScope) {
+			return fmt.Errorf("follow-up scope %q must broaden beyond %q: %w", rule.Scope, primaryScope, ErrInvalidAgent)
+		}
 	}
 	return nil
 }

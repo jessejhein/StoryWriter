@@ -137,7 +137,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Agents() error = %v", err)
 	}
-	if len(agents) != 2 || agents[0].ID != "chapter_refiner" || agents[1].ID != "line_polish" {
+	if len(agents) != 3 || agents[0].ID != "chapter_review" || agents[1].ID != "line_polish" || agents[2].ID != "scene_rewrite" {
 		t.Fatalf("agents = %#v", agents)
 	}
 	styles, err := actionService.Styles(ctx)

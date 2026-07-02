@@ -177,12 +177,13 @@ func writeStarters(root, id, name string, createdAt time.Time) error {
 	projectContents = strings.ReplaceAll(projectContents, "Example Novel", yamlScalar(name))
 	projectContents = strings.ReplaceAll(projectContents, "REPLACE_ME", createdAt.Format(time.RFC3339))
 	files := map[string][]byte{
-		"project.yaml":                []byte(projectContents),
-		"outline.yaml":                mustReadTemplate("outline.yaml"),
-		".gitignore":                  mustReadTemplate("story_project.gitignore"),
-		"agents/line_polish.yaml":     mustReadTemplate("builtin_agent_line_polish.yaml"),
-		"agents/chapter_refiner.yaml": mustReadTemplate("builtin_agent_chapter_refiner.yaml"),
-		"styles/precise_editor.yaml":  mustReadTemplate("builtin_style_precise_editor.yaml"),
+		"project.yaml":               []byte(projectContents),
+		"outline.yaml":               mustReadTemplate("outline.yaml"),
+		".gitignore":                 mustReadTemplate("story_project.gitignore"),
+		"agents/line_polish.yaml":    mustReadTemplate("builtin_agent_line_polish.yaml"),
+		"agents/scene_rewrite.yaml":  mustReadTemplate("builtin_agent_scene_rewrite.yaml"),
+		"agents/chapter_review.yaml": mustReadTemplate("builtin_agent_chapter_review.yaml"),
+		"styles/precise_editor.yaml": mustReadTemplate("builtin_style_precise_editor.yaml"),
 	}
 	for path, contents := range files {
 		if contents == nil {

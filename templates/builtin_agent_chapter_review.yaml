@@ -1,0 +1,38 @@
+version: 3
+id: chapter_review
+name: Chapter Review
+description: Return editorial findings for one chapter without rewriting canon.
+applies_when:
+  surfaces:
+    - chapter_view
+  input_scopes:
+    - chapter_review
+  min_words: 1
+  max_words: 12000
+model_requirements:
+  min_context_tokens: 4096
+  supports_streaming: false
+  supports_structured_output: true
+context_policy:
+  required:
+    - current_chapter
+    - style_sheet
+    - active_codex_at_position
+  optional:
+    - outline_neighborhood
+  forbidden:
+    - global_codex_rag
+    - raw_import_notes
+    - prior_chat
+context_budget:
+  max_input_estimated_tokens: 16000
+  reserved_output_estimated_tokens: 2000
+rag_policy:
+  mode: timeline_aware
+control:
+  output_mode: suggestion
+  requires_acceptance: false
+  can_modify_canon: false
+output:
+  type: editorial_findings
+  requires_diff_preview: false
