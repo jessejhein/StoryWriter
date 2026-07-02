@@ -58,9 +58,9 @@ func TestM7ExtractionStillUsesProviderNeutralChat(t *testing.T) {
 		profile: provider.ResolvedProfile{
 			Profile: provider.Profile{
 				ID: "hosted", Type: provider.TypeOpenAICompatible, BaseURL: "https://api.example.test/v1",
-				Auth: provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "KEY"},
+				Auth:         provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "KEY"},
 				Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192},
-				Readiness: provider.ReadinessReady,
+				Readiness:    provider.ReadinessReady,
 			},
 			Credential: provider.Credential{Value: "test-key"},
 		},

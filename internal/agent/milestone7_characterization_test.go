@@ -30,11 +30,11 @@ func TestM7ExistingProviderMessagesRemainSelectionScoped(t *testing.T) {
 		SystemPrompt:      "Careful editor system prompt",
 	}
 	agentDefinition := Agent{
-		Version:     2,
-		ID:          "line_polish",
-		Name:        "Line Polish",
-		Description: "Rewrite selected prose.",
-		AppliesWhen: ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 1500},
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 1500},
 		ModelRequirements: ModelRequirements{MinContextTokens: 2048},
 		ContextPolicy: ContextPolicy{
 			Required:  []ContextPack{ContextSelectedText, ContextStyleSheet},
@@ -99,11 +99,11 @@ func TestM7MockOpenAIAndOllamaDispatchRemainCompatible(t *testing.T) {
 	t.Parallel()
 
 	linePolish := Agent{
-		Version:     2,
-		ID:          "line_polish",
-		Name:        "Line Polish",
-		Description: "Rewrite selected prose.",
-		AppliesWhen: ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 1500},
+		Version:           2,
+		ID:                "line_polish",
+		Name:              "Line Polish",
+		Description:       "Rewrite selected prose.",
+		AppliesWhen:       ApplicabilityRule{Surfaces: []Surface{SurfaceEditor}, InputScopes: []InputScope{InputScopeSelection}, MinWords: 1, MaxWords: 1500},
 		ModelRequirements: ModelRequirements{MinContextTokens: 2048},
 		ContextPolicy: ContextPolicy{
 			Required:  []ContextPack{ContextSelectedText, ContextStyleSheet},
@@ -154,9 +154,9 @@ func TestM7MockOpenAIAndOllamaDispatchRemainCompatible(t *testing.T) {
 		profile: provider.ResolvedProfile{
 			Profile: provider.Profile{
 				ID: "openai", Type: provider.TypeOpenAICompatible, BaseURL: "https://api.example.test/v1",
-				Auth: provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "KEY"},
+				Auth:         provider.AuthConfig{Type: provider.AuthTypeBearerEnv, CredentialEnv: "KEY"},
 				Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192},
-				Readiness: provider.ReadinessReady,
+				Readiness:    provider.ReadinessReady,
 			},
 			Credential: provider.Credential{Value: "test-key"},
 		},
@@ -183,9 +183,9 @@ func TestM7MockOpenAIAndOllamaDispatchRemainCompatible(t *testing.T) {
 		profile: provider.ResolvedProfile{
 			Profile: provider.Profile{
 				ID: "ollama", Type: provider.TypeOllama, BaseURL: "http://127.0.0.1:11434",
-				Auth: provider.AuthConfig{Type: provider.AuthTypeNone},
+				Auth:         provider.AuthConfig{Type: provider.AuthTypeNone},
 				Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 8192},
-				Readiness: provider.ReadinessReady,
+				Readiness:    provider.ReadinessReady,
 			},
 		},
 		found: true,

@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
 )
 
 // Test: malformed nested progression JSON returns a JSON 400 response without invoking the story service.

@@ -54,11 +54,11 @@ func TestCommitMessageFormatsTriggeredAndDependentTrailers(t *testing.T) {
 	t.Parallel()
 
 	got, err := FormatCommitMessage(CommitMessage{
-		Subject:      "Accept AI patch run_bbbbbbbbbbbbbbbbbbbb",
-		OperationID:  "run_bbbbbbbbbbbbbbbbbbbb",
-		TriggeredBy:  "run_aaaaaaaaaaaaaaaaaaaa",
-		DependsOn:    "run_aaaaaaaaaaaaaaaaaaaa",
-		Scope:        "scene:scn_0123456789abcdef0123",
+		Subject:     "Accept AI patch run_bbbbbbbbbbbbbbbbbbbb",
+		OperationID: "run_bbbbbbbbbbbbbbbbbbbb",
+		TriggeredBy: "run_aaaaaaaaaaaaaaaaaaaa",
+		DependsOn:   "run_aaaaaaaaaaaaaaaaaaaa",
+		Scope:       "scene:scn_0123456789abcdef0123",
 	})
 	if err != nil {
 		t.Fatalf("FormatCommitMessage() error = %v", err)
