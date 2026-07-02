@@ -3,12 +3,12 @@ package gitstore
 // store.go implements the Git adapter used for project integrity checks and checkpoints.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
-	"bytes"
 )
 
 // Store runs Git operations without changing user-global configuration.
