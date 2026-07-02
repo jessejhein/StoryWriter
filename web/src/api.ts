@@ -6,6 +6,11 @@
  * between the React workbenches and the Go HTTP API.
  */
 
+import type {
+  ContextPreviewResponse,
+  RunActionResponse as ScopedRunActionResponse,
+} from './editor/actionTypes'
+
 /** Health is the backend status payload returned by `/api/health`. */
 export type Health = { status: string; version: string }
 
@@ -90,14 +95,14 @@ export type AgentDefinition = {
   name: string
   description: string
   surfaces: Array<'editor' | 'chapter_view'>
-  input_scopes: Array<'selection' | 'chapter'>
+  input_scopes: Array<'selection' | 'scene' | 'chapter' | 'chapter_review'>
   min_words: number
   max_words: number
   required_context: string[]
   optional_context: string[]
   forbidden_context: string[]
-  rag_mode: 'none'
-  output_mode: 'patch'
+  rag_mode: 'none' | 'timeline_aware'
+  output_mode: 'patch' | 'suggestion'
   requires_acceptance: boolean
 }
 
@@ -116,7 +121,7 @@ export type AvailableAction = {
   agent_id: string
   name: string
   description: string
-  output_mode: 'patch'
+  output_mode: 'patch' | 'suggestion'
   requires_acceptance: boolean
   style_ids: string[]
 }
@@ -281,8 +286,21 @@ export type ActionDecisionResponse = {
   status: 'accepted' | 'rejected'
 }
 
+export type FollowUpInvitation = {
+  invitation_id: string
+  parent_run_id: string
+  root_run_id: string
+  chain_depth: number
+  agent_id: string
+  scope: 'selection' | 'scene' | 'chapter_review'
+  scene_id?: string
+  chapter_id?: string
+  relationship: 'triggered' | 'depends_on'
+}
+
 export type AcceptActionResponse = ActionDecisionResponse & {
-  scene: SceneDocument
+  scene?: SceneDocument
+  follow_up_invitations: FollowUpInvitation[]
 }
 
 /** CodexEntryType enumerates the supported Codex entry categories. */
@@ -441,7 +459,7 @@ export function getStyles(): Promise<{ styles: StyleDefinition[] }> {
 
 export function getAvailableActions(params: {
   surface: 'editor' | 'chapter_view'
-  input_scope: 'selection' | 'chapter'
+  input_scope: 'selection' | 'scene' | 'chapter' | 'chapter_review'
   scene_id: string
   selection_words: number
 }): Promise<AvailableActionsResponse> {
@@ -456,6 +474,36 @@ export function getAvailableActions(params: {
 
 export function runAction(requestBody: RunActionRequest): Promise<RunActionResponse> {
   return postJSON('/api/actions/run', requestBody)
+}
+
+export type TaggedRunActionRequest = {
+  agent_id: string
+  style_id: string
+  scope: 'selection' | 'scene' | 'chapter_review'
+  target: {
+    scene_id?: string
+    scene_revision?: string
+    chapter_id?: string
+    fingerprint?: string
+    start_byte?: number
+    end_byte?: number
+    text?: string
+  }
+}
+
+export function previewActionContext(requestBody: RunActionRequest | TaggedRunActionRequest): Promise<ContextPreviewResponse> {
+  return postJSON('/api/actions/context-preview', requestBody)
+}
+
+export function runTaggedAction(requestBody: TaggedRunActionRequest): Promise<ScopedRunActionResponse> {
+  return postJSON('/api/actions/run', requestBody)
+}
+
+export function runInvitation(
+  invitationID: string,
+  requestBody: { style_id: string; expected_target_revision: string },
+): Promise<ScopedRunActionResponse> {
+  return postJSON(`/api/action-invitations/${invitationID}/run`, requestBody)
 }
 
 export function acceptAction(runID: string, expectedRevision: string): Promise<AcceptActionResponse> {
