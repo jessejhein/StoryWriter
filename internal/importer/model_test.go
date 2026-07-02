@@ -145,7 +145,7 @@ func TestNormalizePortableRelativePathRejectsUnsafeComponents(t *testing.T) {
 		wantErr error
 	}{
 		{name: "portable path", input: "notes/characters.md", want: "notes/characters.md"},
-		{name: "normalize separators and nfc", input: "notes\\Cafe\u0301.md", want: "notes/Caf\u00e9.md"},
+		{name: "reject backslash separator", input: "notes\\Cafe\u0301.md", wantErr: ErrInvalidPath},
 		{name: "reject absolute", input: "/notes.md", wantErr: ErrInvalidPath},
 		{name: "reject traversal", input: "notes/../secret.md", wantErr: ErrInvalidPath},
 		{name: "reject hidden", input: ".hidden/notes.md", wantErr: ErrInvalidPath},
@@ -193,6 +193,15 @@ func TestDetectCaseFoldedCollisionRejectsPortableConflicts(t *testing.T) {
 	err := ValidatePortablePathSet([]string{"Notes/Characters.md", "notes/characters.md"})
 	if !errors.Is(err, ErrCaseFoldedCollision) {
 		t.Fatalf("ValidatePortablePathSet(collision) error = %v, want %v", err, ErrCaseFoldedCollision)
+	}
+}
+
+func TestDetectCaseFoldedCollisionUsesUnicodeCaseFolding(t *testing.T) {
+	t.Parallel()
+
+	err := ValidatePortablePathSet([]string{"notes/Straße.md", "notes/STRASSE.md"})
+	if !errors.Is(err, ErrCaseFoldedCollision) {
+		t.Fatalf("ValidatePortablePathSet(unicode collision) error = %v, want %v", err, ErrCaseFoldedCollision)
 	}
 }
 

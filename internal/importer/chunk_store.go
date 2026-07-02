@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -142,11 +144,14 @@ func (s *ChunkStore) writeChunks(path string, chunks []Chunk) error {
 		return fmt.Errorf("marshal chunk cache: %w", err)
 	}
 	temporaryPath := path + ".tmp"
-	if err := os.WriteFile(temporaryPath, body, 0o644); err != nil {
+	if err := writeFileSynced(temporaryPath, body, 0o644); err != nil {
 		return fmt.Errorf("write chunk cache: %w", err)
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
 		return fmt.Errorf("replace chunk cache: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("sync chunk cache directory: %w", err)
 	}
 	return nil
 }
@@ -174,18 +179,22 @@ func (s *ChunkStore) RecordExtractionAttempt(projectPath string, attempt Extract
 		return nil, fmt.Errorf("marshal extraction attempt: %w", err)
 	}
 	temporaryPath := path + ".tmp"
-	if err := os.WriteFile(temporaryPath, body, 0o600); err != nil {
+	if err := writeFileSynced(temporaryPath, body, 0o600); err != nil {
 		return nil, fmt.Errorf("write extraction attempt: %w", err)
 	}
 	if err := os.Rename(temporaryPath, path); err != nil {
 		_ = os.Remove(temporaryPath)
 		return nil, fmt.Errorf("replace extraction attempt: %w", err)
 	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("sync extraction attempt directory: %w", err)
+	}
 	return func() error {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return err
 		}
-		return nil
+		return syncDirectory(filepath.Dir(path))
 	}, nil
 }
 
@@ -204,6 +213,9 @@ func loadManifest(path string) (ImportManifest, error) {
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&decoded); err != nil {
 		return ImportManifest{}, fmt.Errorf("decode import manifest: %w", err)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return ImportManifest{}, fmt.Errorf("import manifest must contain exactly one YAML document: %w", ErrInvalidManifest)
 	}
 	createdAt, err := time.Parse(time.RFC3339, decoded.CreatedAt)
 	if err != nil {

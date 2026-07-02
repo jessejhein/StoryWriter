@@ -1,11 +1,12 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import {
   APIError,
   acceptImportCandidate,
   createImport,
   discardImportCandidate,
   extractImport,
-  getImportCandidates,
+	getImportCandidates,
+	getImport,
   getImportChunks,
   getImports,
   getProviderProfiles,
@@ -43,10 +44,12 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
   const [error, setError] = useState('')
   const [busy, setBusy] = useState<'import' | 'extract' | 'save' | 'merge' | 'discard' | 'accept' | null>(null)
   const [mergeTargetID, setMergeTargetID] = useState('')
-  const [pendingDecision, setPendingDecision] = useState<'accept' | 'discard' | null>(null)
+	const [pendingDecision, setPendingDecision] = useState<'accept' | 'discard' | null>(null)
+	const [pendingConflictReload, setPendingConflictReload] = useState(false)
   const [conflict, setConflict] = useState(false)
   const [kindFilter, setKindFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
+	const [statusFilter, setStatusFilter] = useState('all')
+	const reviewHeadingRef = useRef<HTMLHeadingElement>(null)
 
   useEffect(() => {
     onDirtyChange?.(dirty)
@@ -87,9 +90,10 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
       return
     }
     let current = true
-    void getImportChunks(selectedImportID)
-      .then((response) => {
-        if (!current) return
+	void Promise.all([getImport(selectedImportID), getImportChunks(selectedImportID)])
+	  .then(([importResponse, response]) => {
+		if (!current) return
+		setFilesByImport((files) => ({ ...files, [selectedImportID]: importResponse.files }))
         setChunks(response.chunks)
         setSelectedChunkIDs([])
       })
@@ -100,10 +104,14 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
     return () => { current = false }
   }, [selectedImportID])
 
-  const selectedCandidate = useMemo(
+	const selectedCandidate = useMemo(
     () => candidates.find((candidate) => candidate.id === selectedCandidateID) ?? null,
     [candidates, selectedCandidateID],
-  )
+	)
+
+	useEffect(() => {
+	  if (selectedCandidateID) reviewHeadingRef.current?.focus()
+	}, [selectedCandidateID])
 
   const mergeOptions = useMemo(() => {
     if (!selectedCandidate || selectedCandidate.kind !== 'codex') return []
@@ -161,7 +169,10 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
         profile_id: profileID,
         model,
       })
-      setCandidates(response.candidates)
+	  setCandidates((current) => {
+		const extractedIDs = new Set(response.candidates.map((candidate) => candidate.id))
+		return [...response.candidates, ...current.filter((candidate) => !extractedIDs.has(candidate.id))]
+	  })
       applyCandidateSelection(response.candidates[0]?.id ?? '', response.candidates)
       setStatus(`Extracted ${response.candidates.length} candidates with ${response.provider.model}.`)
     } catch (requestError) {
@@ -183,9 +194,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
       setError(requestError instanceof Error ? requestError.message : 'Save failed.')
 	  if (requestError instanceof APIError && requestError.status === 409) {
 		setConflict(true)
-	  } else {
-        setDirty(false)
-      }
+	  }
     } finally {
       setBusy(null)
     }
@@ -293,7 +302,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
           <input aria-label="Source directory" value={sourceDirectory} onChange={(event) => setSourceDirectory(event.target.value)} placeholder="/absolute/path/to/notes" />
         </label>
         <div className="actions">
-          <button type="submit" disabled={busy !== null || !sourceDirectory.startsWith('/')}>Import</button>
+		  <button type="submit" disabled={busy !== null || dirty || !sourceDirectory.startsWith('/')}>Import</button>
         </div>
       </form>
 
@@ -360,7 +369,7 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
             <input aria-label="Model" value={model} onChange={(event) => setModel(event.target.value)} placeholder="qwen2.5:7b" />
           </label>
           <div className="actions">
-            <button type="button" onClick={() => void handleExtract()} disabled={busy !== null || selectedChunkIDs.length === 0 || !profileID || !model}>Extract</button>
+			<button type="button" onClick={() => void handleExtract()} disabled={busy !== null || dirty || selectedChunkIDs.length === 0 || !profileID || !model}>Extract</button>
           </div>
         </section>
       )}
@@ -403,32 +412,61 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
 
       {selectedCandidate && draft && (
         <section>
-          <h3>{selectedCandidate.id}</h3>
+		  <h3 ref={reviewHeadingRef} tabIndex={-1}>{selectedCandidate.id}</h3>
           <p>Status: {selectedCandidate.status}</p>
           <p>Provenance: {selectedCandidate.provenance.chunk_ids.join(', ')}</p>
           {conflict && (
             <div role="alert">
               The candidate changed on disk. Your draft is preserved.
-              <button type="button" className="secondary" onClick={() => void reloadConflictedCandidate()}>Reload server version</button>
+			  <button type="button" className="secondary" onClick={() => setPendingConflictReload(true)}>Reload server version</button>
             </div>
           )}
-          {selectedCandidate.kind === 'codex' && (
-            <>
-              <label>
+		  {selectedCandidate.kind === 'codex' && (
+			<>
+			  <label>
+				Type
+				<select aria-label="Candidate type" value={codexDraftType(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as CodexCandidateDraft), type: event.target.value as CodexEntryType }))}>
+				  <option value="character">Character</option>
+				  <option value="location">Location</option>
+				  <option value="lore">Lore</option>
+				  <option value="custom">Custom</option>
+				</select>
+			  </label>
+			  <label>
                 Name
                 <input aria-label="Candidate name" value={codexDraftName(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as CodexCandidateDraft), name: event.target.value }))} />
               </label>
-              <label>
-                Description
-                <textarea aria-label="Candidate description" value={codexDraftDescription(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as CodexCandidateDraft), description: event.target.value }))} />
-              </label>
-            </>
+			  <label>
+				Description
+				<textarea aria-label="Candidate description" value={codexDraftDescription(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as CodexCandidateDraft), description: event.target.value }))} />
+			  </label>
+			  <label>
+				Aliases
+				<input aria-label="Candidate aliases" value={codexDraftAliases(draft).join(', ')} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as CodexCandidateDraft), aliases: splitList(event.target.value) }))} />
+			  </label>
+			  <label>
+				Tags
+				<input aria-label="Candidate tags" value={codexDraftTags(draft).join(', ')} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as CodexCandidateDraft), tags: splitList(event.target.value) }))} />
+			  </label>
+			</>
           )}
-          {selectedCandidate.kind !== 'codex' && (
-            <label>
-              Title
-              <input aria-label="Candidate title" value={structuredDraftTitle(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as StructuredCandidateDraft), title: event.target.value }))} />
-            </label>
+		  {selectedCandidate.kind !== 'codex' && (
+			<>
+			  <label>
+				Title
+				<input aria-label="Candidate title" value={structuredDraftTitle(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as StructuredCandidateDraft), title: event.target.value }))} />
+			  </label>
+			  {(selectedCandidate.kind === 'chapter' || selectedCandidate.kind === 'scene') && (
+				<label>
+				  Parent candidate
+				  <select aria-label="Parent candidate" value={structuredDraftParent(draft)} disabled={selectedCandidate.status !== 'pending'} onChange={(event) => updateDraft((current) => ({ ...(current as StructuredCandidateDraft), parent_candidate_id: event.target.value }))}>
+					{candidates.filter((candidate) => candidate.kind === (selectedCandidate.kind === 'chapter' ? 'arc' : 'chapter')).map((candidate) => (
+					  <option key={candidate.id} value={candidate.id}>{candidate.id}</option>
+					))}
+				  </select>
+				</label>
+			  )}
+			</>
           )}
           {selectedCandidate.canonical_refs.length > 0 && (
             <p>Canonical refs: {selectedCandidate.canonical_refs.map((item) => `${item.kind}:${item.id}`).join(', ')}</p>
@@ -454,7 +492,15 @@ export default function ImportReviewWorkbench({ onDirtyChange }: Props) {
         </section>
       )}
 
-      <ConfirmDialog
+	  <ConfirmDialog
+		open={pendingConflictReload}
+		title="Discard draft and reload?"
+		message="Reloading the server version discards your unsaved candidate edits."
+		confirmLabel="Reload server version"
+		onConfirm={() => { setPendingConflictReload(false); void reloadConflictedCandidate() }}
+		onCancel={() => setPendingConflictReload(false)}
+	  />
+	  <ConfirmDialog
         open={pendingCandidateID !== null}
         title="Discard current draft?"
         message="You have unsaved candidate edits. Discard them and switch candidates?"
@@ -495,12 +541,32 @@ function codexDraftName(proposal: ImportCandidateProposal): string {
   return 'name' in proposal ? proposal.name : ''
 }
 
+function codexDraftType(proposal: ImportCandidateProposal): CodexEntryType {
+  return 'type' in proposal ? proposal.type : 'character'
+}
+
+function codexDraftAliases(proposal: ImportCandidateProposal): string[] {
+  return 'aliases' in proposal ? proposal.aliases : []
+}
+
+function codexDraftTags(proposal: ImportCandidateProposal): string[] {
+  return 'tags' in proposal ? proposal.tags : []
+}
+
 function codexDraftDescription(proposal: ImportCandidateProposal): string {
   return 'description' in proposal ? proposal.description : ''
 }
 
 function structuredDraftTitle(proposal: ImportCandidateProposal): string {
   return 'title' in proposal ? proposal.title : ''
+}
+
+function structuredDraftParent(proposal: ImportCandidateProposal): string {
+  return 'parent_candidate_id' in proposal ? proposal.parent_candidate_id : ''
+}
+
+function splitList(value: string): string[] {
+  return value.split(',').map((item) => item.trim()).filter(Boolean)
 }
 
 function isProposalValid(proposal: ImportCandidateProposal): boolean {

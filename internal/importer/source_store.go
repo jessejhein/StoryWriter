@@ -2,7 +2,9 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -25,10 +27,9 @@ type osFS struct{}
 
 func (osFS) Lstat(path string) (fs.FileInfo, error)       { return os.Lstat(path) }
 func (osFS) ReadDir(path string) ([]fs.DirEntry, error)   { return os.ReadDir(path) }
-func (osFS) ReadFile(path string) ([]byte, error)         { return os.ReadFile(path) }
 func (osFS) MkdirAll(path string, perm fs.FileMode) error { return os.MkdirAll(path, perm) }
 func (osFS) WriteFile(path string, data []byte, perm fs.FileMode) error {
-	return os.WriteFile(path, data, perm)
+	return writeFileSynced(path, data, perm)
 }
 func (osFS) RemoveAll(path string) error          { return os.RemoveAll(path) }
 func (osFS) Rename(oldPath, newPath string) error { return os.Rename(oldPath, newPath) }
@@ -39,7 +40,6 @@ func (osFS) OpenFile(name string, flag int, perm fs.FileMode) (*os.File, error) 
 type sourceFileSystem interface {
 	Lstat(path string) (fs.FileInfo, error)
 	ReadDir(path string) ([]fs.DirEntry, error)
-	ReadFile(path string) ([]byte, error)
 	MkdirAll(path string, perm fs.FileMode) error
 	WriteFile(path string, data []byte, perm fs.FileMode) error
 	RemoveAll(path string) error
@@ -185,11 +185,15 @@ func (snapshot *PreparedSnapshot) Publish() (func() error, error) {
 	if err := snapshot.fs.Rename(snapshot.stagePath, snapshot.finalPath); err != nil {
 		return nil, fmt.Errorf("publish import snapshot: %w", err)
 	}
+	if err := syncDirectory(filepath.Dir(snapshot.finalPath)); err != nil {
+		_ = snapshot.fs.RemoveAll(snapshot.finalPath)
+		return nil, fmt.Errorf("sync published import parent: %w", err)
+	}
 	return func() error {
 		if err := snapshot.fs.RemoveAll(snapshot.finalPath); err != nil {
 			return fmt.Errorf("rollback import snapshot: %w", err)
 		}
-		return nil
+		return syncDirectory(filepath.Dir(snapshot.finalPath))
 	}, nil
 }
 
@@ -253,7 +257,16 @@ func (s *SourceStore) readEligibleFile(sourcePath, normalizedPath string) (Impor
 	if !beforeInfo.Mode().IsRegular() {
 		return ImportFile{}, nil, fmt.Errorf("source file %q is not regular: %w", sourcePath, ErrInvalidSourceDirectory)
 	}
-	raw, err := s.fs.ReadFile(sourcePath)
+	file, err := s.fs.OpenFile(sourcePath, os.O_RDONLY, 0)
+	if err != nil {
+		return ImportFile{}, nil, fmt.Errorf("open source file %q: %w", sourcePath, err)
+	}
+	defer file.Close()
+	openedInfo, err := file.Stat()
+	if err != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(beforeInfo, openedInfo) {
+		return ImportFile{}, nil, fmt.Errorf("source file %q changed before reading: %w", sourcePath, ErrSourceChanged)
+	}
+	raw, err := io.ReadAll(io.LimitReader(file, 2*maxImportFileBytes+1))
 	if err != nil {
 		return ImportFile{}, nil, fmt.Errorf("read source file %q: %w", sourcePath, err)
 	}
@@ -265,12 +278,20 @@ func (s *SourceStore) readEligibleFile(sourcePath, normalizedPath string) (Impor
 	if len(normalizedBytes) > maxImportFileBytes {
 		return ImportFile{}, nil, fmt.Errorf("source file %q exceeds %d bytes after normalization: %w", sourcePath, maxImportFileBytes, ErrInvalidContent)
 	}
+	openedAfterInfo, err := file.Stat()
+	if err != nil {
+		return ImportFile{}, nil, fmt.Errorf("restat open source file %q: %w", sourcePath, err)
+	}
 	afterInfo, err := s.fs.Lstat(sourcePath)
 	if err != nil {
 		return ImportFile{}, nil, fmt.Errorf("restat source file %q: %w", sourcePath, err)
 	}
-	if beforeInfo.Size() != afterInfo.Size() || beforeInfo.ModTime() != afterInfo.ModTime() || beforeInfo.Mode() != afterInfo.Mode() {
+	if !os.SameFile(beforeInfo, openedAfterInfo) || !os.SameFile(openedAfterInfo, afterInfo) ||
+		beforeInfo.Size() != openedAfterInfo.Size() || beforeInfo.ModTime() != openedAfterInfo.ModTime() || beforeInfo.Mode() != openedAfterInfo.Mode() {
 		return ImportFile{}, nil, fmt.Errorf("source file %q changed while reading: %w", sourcePath, ErrSourceChanged)
+	}
+	if err := file.Close(); err != nil {
+		return ImportFile{}, nil, fmt.Errorf("close source file %q: %w", sourcePath, err)
 	}
 	return ImportFile{
 		Path:   normalizedPath,
@@ -335,4 +356,18 @@ func syncDirectory(path string) error {
 		return fmt.Errorf("sync directory %q: %w", path, err)
 	}
 	return nil
+}
+
+func writeFileSynced(path string, data []byte, perm fs.FileMode) error {
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(data); err != nil {
+		return errors.Join(err, file.Close())
+	}
+	if err := file.Sync(); err != nil {
+		return errors.Join(err, file.Close())
+	}
+	return file.Close()
 }

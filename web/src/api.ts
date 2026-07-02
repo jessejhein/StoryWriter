@@ -529,7 +529,12 @@ export function createImport(sourceDirectory: string): Promise<ImportResponse> {
 }
 
 export function getImports(): Promise<{ imports: ImportSummary[] }> {
-  return request('/api/imports')
+	return request('/api/imports')
+}
+
+/** getImport loads one durable import manifest and its file records. */
+export function getImport(importID: string): Promise<ImportResponse> {
+  return request(`/api/imports/${importID}`)
 }
 
 export function getImportChunks(importID: string): Promise<{ chunks: ImportChunk[] }> {

@@ -212,6 +212,18 @@ func TestExtractReturnsOnlyTheNewCandidateBatch(t *testing.T) {
 	if err != nil || len(all) != 2 {
 		t.Fatalf("ListCandidates() = %+v, err=%v", all, err)
 	}
+
+	requestCount := len(service.extractor.(*fakeExtractor).requests)
+	_, err = service.Extract(context.Background(), ExtractRequest{
+		ImportID: imported.Import.ID, ChunkIDs: []string{chunks[0].ID, chunks[0].ID}, Mode: extract.ModeStructure,
+		ProfileID: "profile", Model: "model",
+	})
+	if !errors.Is(err, extract.ErrInvalidRequest) {
+		t.Fatalf("Extract() duplicate chunk error = %v, want %v", err, extract.ErrInvalidRequest)
+	}
+	if got := len(service.extractor.(*fakeExtractor).requests); got != requestCount {
+		t.Fatalf("extractor request count = %d, want %d after duplicate input", got, requestCount)
+	}
 }
 
 func TestExtractionCheckpointFailureLeavesNoPartialCandidateBatch(t *testing.T) {
@@ -452,6 +464,32 @@ func TestConcurrentCandidateDecisionsHaveExactlyOneWinner(t *testing.T) {
 	}
 }
 
+func TestCandidateIDReservationRetriesCollisionsAndFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	store := NewCandidateStore()
+	existing := mustCreateArcCandidate(t, store, projectPath, "cand_0123456789abcdef0001", "Existing")
+	service := NewService(
+		fakeImporterSession{current: project.Project{Path: projectPath}, ok: true},
+		&importerGitStub{clean: true}, &importerIndexStub{}, NewSourceStore(),
+		&fakeImporterIDs{candidateIDs: []string{existing.ID, "cand_0123456789abcdef0002"}}, time.Now,
+	)
+	reserved := map[string]struct{}{}
+	got, err := service.reserveCandidateID(projectPath, reserved)
+	if err != nil {
+		t.Fatalf("reserveCandidateID() error = %v", err)
+	}
+	if got != "cand_0123456789abcdef0002" {
+		t.Fatalf("reserveCandidateID() = %q", got)
+	}
+
+	service.ids = &fakeImporterIDs{candidateIDs: []string{existing.ID, existing.ID, existing.ID, existing.ID, existing.ID}}
+	if _, err := service.reserveCandidateID(projectPath, map[string]struct{}{}); err == nil {
+		t.Fatal("reserveCandidateID() collision error = nil")
+	}
+}
+
 type fakeImporterSession struct {
 	current project.Project
 	ok      bool
@@ -537,7 +575,7 @@ type fakeStoryMutator struct {
 	err    error
 }
 
-func (f *fakeStoryMutator) ApplyImportMutation(context.Context, story.ImportMutationRequest) (story.ImportMutationResult, error) {
+func (f *fakeStoryMutator) ApplyImportMutationInTransaction(context.Context, story.ImportMutationRequest) (story.ImportMutationResult, error) {
 	if f.err != nil {
 		return story.ImportMutationResult{}, f.err
 	}

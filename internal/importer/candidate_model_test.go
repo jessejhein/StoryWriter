@@ -76,6 +76,65 @@ func TestCandidateStoreRejectsUnknownYAMLFields(t *testing.T) {
 	}
 }
 
+func TestCandidateStoreRejectsTrailingYAMLDocument(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	store := NewCandidateStore()
+	created, err := store.Create(projectPath, Candidate{
+		Version: CandidateVersion, ID: "cand_0123456789abcdef0123", Kind: CandidateKindArc,
+		ProposalVersion: 1, Status: CandidateStatusPending,
+		Provenance: Provenance{ChunkIDs: []string{"chk_0123456789abcdef0123"}},
+		Proposal:   CandidateProposal{Arc: &ArcProposal{Title: "Act One"}},
+		Decision:   CandidateDecision{CanonicalRefs: []CanonicalRef{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := candidatePath(projectPath, created.ID)
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = append(body, []byte("---\nversion: 1\n")...)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.Load(projectPath, created.ID); !errors.Is(err, ErrInvalidCandidate) {
+		t.Fatalf("Load() error = %v, want %v", err, ErrInvalidCandidate)
+	}
+}
+
+func TestCandidateStoreCreateNeverOverwritesExistingCandidate(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	store := NewCandidateStore()
+	first := Candidate{
+		Version: CandidateVersion, ID: "cand_0123456789abcdef0123", Kind: CandidateKindArc,
+		ProposalVersion: 1, Status: CandidateStatusPending,
+		Provenance: Provenance{ChunkIDs: []string{"chk_0123456789abcdef0123"}},
+		Proposal:   CandidateProposal{Arc: &ArcProposal{Title: "Original"}},
+		Decision:   CandidateDecision{CanonicalRefs: []CanonicalRef{}},
+	}
+	if _, err := store.Create(projectPath, first); err != nil {
+		t.Fatal(err)
+	}
+	second := first
+	second.Proposal = CandidateProposal{Arc: &ArcProposal{Title: "Replacement"}}
+	if _, err := store.Create(projectPath, second); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("Create() error = %v, want %v", err, os.ErrExist)
+	}
+	loaded, err := store.Load(projectPath, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Proposal.Arc.Title != "Original" {
+		t.Fatalf("stored title = %q, want Original", loaded.Proposal.Arc.Title)
+	}
+}
+
 func TestNormalizeCandidateRejectsUnsupportedProposalVersionAndMismatchedRevision(t *testing.T) {
 	t.Parallel()
 

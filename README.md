@@ -147,6 +147,7 @@ The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 - `internal/action`: transient AI action orchestration and accept/reject run lifecycle.
 - `internal/extract`: provider-neutral extraction request, prompt, and response validation.
 - `internal/importer`: Markdown snapshot import, chunking, review queue, and acceptance orchestration.
+- `internal/mutation`: shared transaction coordination for story and durable review mutations.
 - `internal/story`: canonical outline, scene, and Codex mutation orchestration.
 - `internal/codex`: pure Codex validation and active-state decisions.
 - `internal/provider`: application-level provider profile storage and readiness resolution.

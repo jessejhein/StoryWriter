@@ -73,6 +73,15 @@ func TestMilestone6EndToEndWithRealAdapters(t *testing.T) {
 	assertCommitCount(t, projectPath, 2)
 	assertClean(t, projectPath)
 	assertTreeDoesNotContain(t, projectPath, sourcePath)
+	var reloadedImport struct {
+		Files []struct {
+			Path string `json:"path"`
+		} `json:"files"`
+	}
+	getJSON(t, handler, "/api/imports/"+imported.Import.ID, http.StatusOK, &reloadedImport)
+	if len(reloadedImport.Files) != 2 || reloadedImport.Files[0].Path != "nested/a.markdown" {
+		t.Fatalf("reloaded import files = %+v", reloadedImport.Files)
+	}
 	normalized, err := os.ReadFile(filepath.Join(projectPath, "imports", "raw", imported.Import.ID, "files", "z.md"))
 	if err != nil || string(normalized) != "# Later\nText\n" {
 		t.Fatalf("normalized snapshot = %q, err=%v", normalized, err)

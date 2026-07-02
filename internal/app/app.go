@@ -19,6 +19,7 @@ import (
 	"storywork/internal/gitstore"
 	"storywork/internal/importer"
 	"storywork/internal/index"
+	"storywork/internal/mutation"
 	"storywork/internal/project"
 	"storywork/internal/provider"
 	"storywork/internal/story"
@@ -144,6 +145,9 @@ func (s *compositeStore) ImportDirectory(ctx context.Context, sourceDirectory st
 func (s *compositeStore) ListImports(ctx context.Context) ([]importer.ImportSummary, error) {
 	return s.imports.ListImports(ctx)
 }
+func (s *compositeStore) LoadImport(ctx context.Context, importID string) (importer.ImportResponse, error) {
+	return s.imports.LoadImport(ctx, importID)
+}
 func (s *compositeStore) ListImportChunks(ctx context.Context, importID string) ([]importer.Chunk, error) {
 	return s.imports.ListChunks(ctx, importID)
 }
@@ -176,9 +180,11 @@ func NewHandler(version string) http.Handler {
 	session := workspace.NewSession()
 	projects := project.NewService(git, disposableIndex, time.Now)
 	files := storyfile.New()
-	stories := story.NewService(session, files, git, disposableIndex, story.NewRandomIDGenerator())
+	mutations := mutation.NewCoordinator()
+	stories := story.NewService(session, files, git, disposableIndex, story.NewRandomIDGenerator()).WithMutationCoordinator(mutations)
 	providerService := newProviderDependencies(os.Getenv("STORYWORK_CONFIG_DIR"), os.UserConfigDir)
 	importService := importer.NewService(session, git, disposableIndex, importer.NewSourceStore(), importer.NewRandomIDGenerator(), time.Now).
+		WithMutationCoordinator(mutations).
 		WithExtractor(extract.NewRemoteExtractor(providerService, nil)).
 		WithStoryMutator(stories)
 	actions := action.NewService(

@@ -13,6 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/text/cases"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -161,7 +162,9 @@ func NormalizePortableRelativePath(value string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("portable path is empty: %w", ErrInvalidPath)
 	}
-	value = strings.ReplaceAll(value, "\\", "/")
+	if strings.Contains(value, "\\") {
+		return "", fmt.Errorf("portable path %q contains a backslash: %w", value, ErrInvalidPath)
+	}
 	if !utf8.ValidString(value) {
 		return "", fmt.Errorf("portable path is not valid UTF-8: %w", ErrInvalidPath)
 	}
@@ -203,7 +206,7 @@ func ValidatePortablePathSet(paths []string) error {
 		if err != nil {
 			return err
 		}
-		key := strings.ToLower(normalized)
+		key := cases.Fold().String(normalized)
 		if existing, ok := seen[key]; ok && existing != normalized {
 			return fmt.Errorf("portable paths %q and %q collide after case-folding: %w", existing, normalized, ErrCaseFoldedCollision)
 		}

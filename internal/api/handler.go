@@ -100,30 +100,24 @@ func newImportCandidateResponse(candidate importer.Candidate) importCandidateRes
 		Status:                 candidate.Status,
 		Revision:               candidate.Revision,
 		Provenance:             candidate.Provenance,
-		Proposal:               candidateProposalMap(candidate),
+		Proposal:               candidateProposalResponse(candidate),
 		ReplacementCandidateID: candidate.Decision.ReplacementCandidateID,
 		CanonicalRefs:          candidate.Decision.CanonicalRefs,
 	}
 }
 
-func candidateProposalMap(candidate importer.Candidate) map[string]any {
+func candidateProposalResponse(candidate importer.Candidate) any {
 	switch candidate.Kind {
 	case importer.CandidateKindCodex:
-		return map[string]any{
-			"type":        candidate.Proposal.Codex.Type,
-			"name":        candidate.Proposal.Codex.Name,
-			"aliases":     candidate.Proposal.Codex.Aliases,
-			"tags":        candidate.Proposal.Codex.Tags,
-			"description": candidate.Proposal.Codex.Description,
-		}
+		return candidate.Proposal.Codex
 	case importer.CandidateKindArc:
-		return map[string]any{"title": candidate.Proposal.Arc.Title}
+		return candidate.Proposal.Arc
 	case importer.CandidateKindChapter:
-		return map[string]any{"title": candidate.Proposal.Chapter.Title, "parent_candidate_id": candidate.Proposal.Chapter.ParentCandidateID}
+		return candidate.Proposal.Chapter
 	case importer.CandidateKindScene:
-		return map[string]any{"title": candidate.Proposal.Scene.Title, "parent_candidate_id": candidate.Proposal.Scene.ParentCandidateID}
+		return candidate.Proposal.Scene
 	default:
-		return map[string]any{}
+		return struct{}{}
 	}
 }
 
@@ -209,6 +203,8 @@ type StoryStore interface {
 	ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error)
 	// ListImports returns imported snapshot summaries.
 	ListImports(ctx context.Context) ([]importer.ImportSummary, error)
+	// LoadImport returns one imported snapshot and its file manifest.
+	LoadImport(ctx context.Context, importID string) (importer.ImportResponse, error)
 	// ListImportChunks returns one import's deterministic chunks.
 	ListImportChunks(ctx context.Context, importID string) ([]importer.Chunk, error)
 	// ExtractImport runs provider-neutral extraction against selected chunks.
@@ -234,7 +230,7 @@ type importCandidateResponse struct {
 	Status                 importer.CandidateStatus `json:"status"`
 	Revision               string                   `json:"revision"`
 	Provenance             importer.Provenance      `json:"provenance"`
-	Proposal               map[string]any           `json:"proposal"`
+	Proposal               any                      `json:"proposal"`
 	ReplacementCandidateID *string                  `json:"replacement_candidate_id"`
 	CanonicalRefs          []importer.CanonicalRef  `json:"canonical_refs"`
 }
@@ -386,6 +382,22 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			imports = []importer.ImportSummary{}
 		}
 		writeJSON(writer, http.StatusOK, map[string]any{"imports": imports})
+	})
+	mux.HandleFunc("GET /api/imports/{import_id}", func(writer http.ResponseWriter, request *http.Request) {
+		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		if err := validateExactQuery(request); err != nil {
+			writeError(writer, http.StatusBadRequest, err)
+			return
+		}
+		response, err := stories.LoadImport(request.Context(), request.PathValue("import_id"))
+		if err != nil {
+			writeImportError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, response)
 	})
 	mux.HandleFunc("GET /api/imports/{import_id}/chunks", func(writer http.ResponseWriter, request *http.Request) {
 		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
@@ -625,6 +637,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, map[string]any{"candidate": newImportCandidateResponse(candidate), "canonical_refs": canonicalRefs})
 	})
 	mux.HandleFunc("/api/imports", methodNotAllowed("GET, POST"))
+	mux.HandleFunc("/api/imports/{import_id}", methodNotAllowed("GET"))
 	mux.HandleFunc("/api/imports/{import_id}/chunks", methodNotAllowed("GET"))
 	mux.HandleFunc("/api/imports/{import_id}/extractions", methodNotAllowed("POST"))
 	mux.HandleFunc("/api/import-candidates", methodNotAllowed("GET"))
@@ -1375,24 +1388,42 @@ func parseCandidateFilters(values map[string][]string) (*importer.CandidateStatu
 func decodeCandidateProposalJSON(kind importer.CandidateKind, raw json.RawMessage) (importer.CandidateProposal, error) {
 	switch kind {
 	case importer.CandidateKindCodex:
+		if err := requireJSONFields(raw,
+			requiredJSONField{name: "type"},
+			requiredJSONField{name: "name"},
+			requiredJSONField{name: "aliases"},
+			requiredJSONField{name: "tags"},
+			requiredJSONField{name: "description"},
+		); err != nil {
+			return importer.CandidateProposal{}, err
+		}
 		var proposal importer.CodexProposal
 		if err := decodeJSONBytes(raw, &proposal); err != nil {
 			return importer.CandidateProposal{}, err
 		}
 		return importer.CandidateProposal{Codex: &proposal}, nil
 	case importer.CandidateKindArc:
+		if err := requireJSONFields(raw, requiredJSONField{name: "title"}); err != nil {
+			return importer.CandidateProposal{}, err
+		}
 		var proposal importer.ArcProposal
 		if err := decodeJSONBytes(raw, &proposal); err != nil {
 			return importer.CandidateProposal{}, err
 		}
 		return importer.CandidateProposal{Arc: &proposal}, nil
 	case importer.CandidateKindChapter:
+		if err := requireJSONFields(raw, requiredJSONField{name: "title"}, requiredJSONField{name: "parent_candidate_id"}); err != nil {
+			return importer.CandidateProposal{}, err
+		}
 		var proposal importer.ChapterProposal
 		if err := decodeJSONBytes(raw, &proposal); err != nil {
 			return importer.CandidateProposal{}, err
 		}
 		return importer.CandidateProposal{Chapter: &proposal}, nil
 	case importer.CandidateKindScene:
+		if err := requireJSONFields(raw, requiredJSONField{name: "title"}, requiredJSONField{name: "parent_candidate_id"}); err != nil {
+			return importer.CandidateProposal{}, err
+		}
 		var proposal importer.SceneProposal
 		if err := decodeJSONBytes(raw, &proposal); err != nil {
 			return importer.CandidateProposal{}, err
@@ -1463,9 +1494,9 @@ func writeStoryError(writer http.ResponseWriter, err error) {
 
 func writeImportError(writer http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree), errors.Is(err, importer.ErrCandidateConflict), errors.Is(err, importer.ErrCandidateTerminal), errors.Is(err, importer.ErrParentNotAccepted), errors.Is(err, importer.ErrNoCandidateChanges):
+	case errors.Is(err, story.ErrNoActiveProject), errors.Is(err, story.ErrDirtyWorktree), errors.Is(err, importer.ErrCandidateConflict), errors.Is(err, importer.ErrCandidateTerminal), errors.Is(err, importer.ErrParentNotAccepted):
 		writeError(writer, http.StatusConflict, errors.New("import operation conflicts with current project state"))
-	case errors.Is(err, importer.ErrInvalidSourceDirectory), errors.Is(err, importer.ErrNoEligibleFiles), errors.Is(err, importer.ErrSymlinkRefused), errors.Is(err, importer.ErrSourceChanged), errors.Is(err, importer.ErrInvalidContent), errors.Is(err, importer.ErrInvalidCandidate), errors.Is(err, importer.ErrInvalidID), errors.Is(err, importer.ErrInvalidPath), errors.Is(err, extract.ErrInvalidRequest):
+	case errors.Is(err, importer.ErrInvalidSourceDirectory), errors.Is(err, importer.ErrNoEligibleFiles), errors.Is(err, importer.ErrSymlinkRefused), errors.Is(err, importer.ErrSourceChanged), errors.Is(err, importer.ErrInvalidContent), errors.Is(err, importer.ErrInvalidCandidate), errors.Is(err, importer.ErrInvalidID), errors.Is(err, importer.ErrInvalidPath), errors.Is(err, importer.ErrNoCandidateChanges), errors.Is(err, extract.ErrInvalidRequest):
 		writeError(writer, http.StatusBadRequest, errors.New("invalid import request"))
 	case errors.Is(err, extract.ErrInvalidResponse), errors.Is(err, agent.ErrProviderRejected):
 		writeError(writer, http.StatusBadGateway, errors.New("extraction provider returned an invalid response"))

@@ -4,9 +4,10 @@ import {
   createImport,
   discardImportCandidate,
   extractImport,
-  getImportCandidate,
-  getImportCandidates,
-  getImportChunks,
+	getImportCandidate,
+	getImportCandidates,
+	getImportChunks,
+	getImport,
   getImports,
   mergeImportCandidate,
   updateImportCandidate,
@@ -24,8 +25,9 @@ beforeEach(() => {
 
 test('uses the documented import-review routes and JSON bodies', async () => {
   await createImport('/tmp/notes')
-  await getImports()
-  await getImportChunks('imp_0123456789abcdef0123')
+	await getImports()
+	await getImport('imp_0123456789abcdef0123')
+	await getImportChunks('imp_0123456789abcdef0123')
   await extractImport('imp_0123456789abcdef0123', {
     chunk_ids: ['chk_0123456789abcdef0123'],
     mode: 'structure',
@@ -58,8 +60,9 @@ test('uses the documented import-review routes and JSON bodies', async () => {
 
   expect(fetchMock.mock.calls.map(([path]) => String(path))).toEqual([
     '/api/imports',
-    '/api/imports',
-    '/api/imports/imp_0123456789abcdef0123/chunks',
+	'/api/imports',
+	'/api/imports/imp_0123456789abcdef0123',
+	'/api/imports/imp_0123456789abcdef0123/chunks',
     '/api/imports/imp_0123456789abcdef0123/extractions',
     '/api/import-candidates?status=pending&kind=codex',
     '/api/import-candidates/cand_0123456789abcdef0123',

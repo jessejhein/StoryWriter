@@ -98,6 +98,36 @@ func TestChunkStoreRejectsCanonicalSnapshotDigestMismatch(t *testing.T) {
 	}
 }
 
+func TestChunkStoreRejectsManifestWithTrailingYAMLDocument(t *testing.T) {
+	t.Parallel()
+
+	projectPath := t.TempDir()
+	sourcePath := t.TempDir()
+	writeTestFile(t, filepath.Join(sourcePath, "notes.md"), "Alpha\n")
+	prepared, err := NewSourceStore().PrepareSnapshot(context.Background(), PrepareSnapshotRequest{
+		ProjectPath: projectPath, SourceDirectory: sourcePath,
+		ImportID: "imp_0123456789abcdef0123", CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := prepared.Publish(); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(projectPath, "imports", "raw", "imp_0123456789abcdef0123", "manifest.yaml")
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(body, []byte("---\nversion: 1\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := NewChunkStore().ListOrRebuild(context.Background(), projectPath, "imp_0123456789abcdef0123"); !errors.Is(err, ErrInvalidManifest) {
+		t.Fatalf("ListOrRebuild() error = %v, want %v", err, ErrInvalidManifest)
+	}
+}
+
 func TestChunkMarkdownHandlesOversizedLinesWithoutSplittingRunesOrLines(t *testing.T) {
 	t.Parallel()
 

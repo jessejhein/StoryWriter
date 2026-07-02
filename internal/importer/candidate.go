@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -223,11 +224,17 @@ func (s *CandidateStore) Create(projectPath string, candidate Candidate) (Candid
 		return Candidate{}, fmt.Errorf("marshal candidate: %w", err)
 	}
 	temporaryPath := path + ".tmp"
-	if err := os.WriteFile(temporaryPath, body, 0o644); err != nil {
+	defer os.Remove(temporaryPath)
+	if err := writeFileSynced(temporaryPath, body, 0o644); err != nil {
 		return Candidate{}, fmt.Errorf("write candidate: %w", err)
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		return Candidate{}, fmt.Errorf("replace candidate: %w", err)
+	if err := os.Link(temporaryPath, path); err != nil {
+		return Candidate{}, fmt.Errorf("create candidate: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		_ = os.Remove(path)
+		_ = syncDirectory(filepath.Dir(path))
+		return Candidate{}, fmt.Errorf("sync candidate directory: %w", err)
 	}
 	return normalized, nil
 }
@@ -245,6 +252,9 @@ func (s *CandidateStore) Load(projectPath, candidateID string) (Candidate, error
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&candidate); err != nil {
 		return Candidate{}, fmt.Errorf("decode candidate: %v: %w", err, ErrInvalidCandidate)
+	}
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return Candidate{}, fmt.Errorf("candidate must contain exactly one YAML document: %w", ErrInvalidCandidate)
 	}
 	return NormalizeCandidate(candidate)
 }
@@ -291,7 +301,27 @@ func (s *CandidateStore) Replace(projectPath string, candidate Candidate, expect
 	if current.Revision != expectedRevision {
 		return Candidate{}, ErrCandidateConflict
 	}
-	return s.Create(projectPath, candidate)
+	normalized, err := NormalizeCandidate(candidate)
+	if err != nil {
+		return Candidate{}, err
+	}
+	body, err := yaml.Marshal(normalized)
+	if err != nil {
+		return Candidate{}, fmt.Errorf("marshal candidate: %w", err)
+	}
+	path := candidatePath(projectPath, normalized.ID)
+	temporaryPath := path + ".tmp"
+	defer os.Remove(temporaryPath)
+	if err := writeFileSynced(temporaryPath, body, 0o644); err != nil {
+		return Candidate{}, fmt.Errorf("write candidate: %w", err)
+	}
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return Candidate{}, fmt.Errorf("replace candidate: %w", err)
+	}
+	if err := syncDirectory(filepath.Dir(path)); err != nil {
+		return Candidate{}, fmt.Errorf("sync candidate directory: %w", err)
+	}
+	return normalized, nil
 }
 
 func candidatePath(projectPath, candidateID string) string {

@@ -134,6 +134,11 @@ Milestone 6 uses two bounded service paths:
 - `internal/story.Service` remains the only owner of canonical story writes.
   Import candidate acceptance delegates through narrow story mutation ports so a
   successful acceptance still lands as one logical checkpointed mutation.
+- `internal/mutation.Coordinator` is the application-scoped read/write boundary
+  shared by both services. It prevents import/review writes, canonical story
+  writes, index rebuilds, checkpoints, and rollback from interleaving across one
+  logical mutation. Import acceptance calls the story-owned no-checkpoint port
+  only while this coordinator is already held.
 
 ### Adapter layer
 

@@ -259,6 +259,7 @@ JSON errors with the existing `{"error":"..."}` shape. Other methods return
 ```http
 POST /api/imports
 GET  /api/imports
+GET  /api/imports/{import_id}
 GET  /api/imports/{import_id}/chunks
 POST /api/imports/{import_id}/extractions
 GET  /api/import-candidates?status=pending&kind=codex

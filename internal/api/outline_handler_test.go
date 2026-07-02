@@ -93,6 +93,8 @@ type storyServiceStub struct {
 	importErr            error
 	importList           []importer.ImportSummary
 	importListErr        error
+	loadImportResponse   importer.ImportResponse
+	loadImportErr        error
 	importChunks         []importer.Chunk
 	importChunksErr      error
 	extractResponse      importer.ExtractResponse
@@ -232,6 +234,10 @@ func (s *storyServiceStub) ImportDirectory(context.Context, string) (importer.Im
 
 func (s *storyServiceStub) ListImports(context.Context) ([]importer.ImportSummary, error) {
 	return s.importList, s.importListErr
+}
+
+func (s *storyServiceStub) LoadImport(context.Context, string) (importer.ImportResponse, error) {
+	return s.loadImportResponse, s.loadImportErr
 }
 
 func (s *storyServiceStub) ListImportChunks(context.Context, string) ([]importer.Chunk, error) {

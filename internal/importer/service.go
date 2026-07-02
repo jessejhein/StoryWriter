@@ -14,6 +14,7 @@ import (
 	"storywork/internal/agent"
 	"storywork/internal/codex"
 	"storywork/internal/extract"
+	"storywork/internal/mutation"
 	"storywork/internal/project"
 	"storywork/internal/story"
 )
@@ -38,7 +39,7 @@ type IDGenerator interface {
 }
 
 type StoryMutator interface {
-	ApplyImportMutation(ctx context.Context, request story.ImportMutationRequest) (story.ImportMutationResult, error)
+	ApplyImportMutationInTransaction(ctx context.Context, request story.ImportMutationRequest) (story.ImportMutationResult, error)
 }
 
 type ImportResponse struct {
@@ -77,6 +78,7 @@ type Service struct {
 	story      StoryMutator
 	ids        IDGenerator
 	now        func() time.Time
+	mutations  *mutation.Coordinator
 	locks      sync.Map
 	claims     map[string]struct{}
 }
@@ -97,8 +99,18 @@ func NewService(session Session, git GitStore, index IndexStore, source *SourceS
 		candidates: NewCandidateStore(),
 		ids:        ids,
 		now:        now,
+		mutations:  mutation.NewCoordinator(),
 		claims:     map[string]struct{}{},
 	}
+}
+
+// WithMutationCoordinator installs the application-wide story and review
+// transaction boundary. It must be called before serving requests.
+func (s *Service) WithMutationCoordinator(coordinator *mutation.Coordinator) *Service {
+	if coordinator != nil {
+		s.mutations = coordinator
+	}
+	return s
 }
 
 func (s *Service) WithExtractor(extractor extract.Extractor) *Service {
@@ -116,6 +128,8 @@ func (s *Service) ImportDirectory(ctx context.Context, sourceDirectory string) (
 	if err != nil {
 		return ImportResponse{}, err
 	}
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	lock := s.projectLock(current.Path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -162,6 +176,8 @@ func (s *Service) ListImports(ctx context.Context) ([]ImportSummary, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 	entries, err := os.ReadDir(filepath.Join(current.Path, "imports", "raw"))
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("list imports: %w", err)
@@ -195,11 +211,34 @@ func (s *Service) ListImports(ctx context.Context) ([]ImportSummary, error) {
 	return summaries, nil
 }
 
+// LoadImport returns one canonical import summary and its durable file manifest.
+func (s *Service) LoadImport(ctx context.Context, importID string) (ImportResponse, error) {
+	current, err := s.currentProject()
+	if err != nil {
+		return ImportResponse{}, err
+	}
+	if err := ValidateImportID(importID); err != nil {
+		return ImportResponse{}, err
+	}
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
+	manifest, err := loadManifest(filepath.Join(current.Path, "imports", "raw", importID, "manifest.yaml"))
+	if err != nil {
+		return ImportResponse{}, err
+	}
+	if manifest.ID != importID {
+		return ImportResponse{}, ErrInvalidManifest
+	}
+	return ImportResponse{Import: manifest.Summary(), Files: slices.Clone(manifest.Files)}, nil
+}
+
 func (s *Service) ListChunks(ctx context.Context, importID string) ([]Chunk, error) {
 	current, err := s.currentProject()
 	if err != nil {
 		return nil, err
 	}
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 	return s.chunks.ListOrRebuild(ctx, current.Path, importID)
 }
 
@@ -211,6 +250,8 @@ func (s *Service) Extract(ctx context.Context, request ExtractRequest) (ExtractR
 	if err != nil {
 		return ExtractResponse{}, err
 	}
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	lock := s.projectLock(current.Path)
 	lock.Lock()
 	defer lock.Unlock()
@@ -230,12 +271,18 @@ func (s *Service) Extract(ctx context.Context, request ExtractRequest) (ExtractR
 	for _, chunk := range availableChunks {
 		chunkByID[chunk.ID] = chunk
 	}
-	selectedIDs := append([]string(nil), request.ChunkIDs...)
-	slices.Sort(selectedIDs)
-	selectedIDs = slices.Compact(selectedIDs)
-	if len(selectedIDs) == 0 {
+	if len(request.ChunkIDs) == 0 || len(request.ChunkIDs) > 50 {
 		return ExtractResponse{}, extract.ErrInvalidRequest
 	}
+	seenSelectedIDs := make(map[string]struct{}, len(request.ChunkIDs))
+	selectedIDs := append([]string(nil), request.ChunkIDs...)
+	for _, chunkID := range selectedIDs {
+		if _, exists := seenSelectedIDs[chunkID]; exists {
+			return ExtractResponse{}, extract.ErrInvalidRequest
+		}
+		seenSelectedIDs[chunkID] = struct{}{}
+	}
+	slices.Sort(selectedIDs)
 	selectedChunks := make([]extract.Chunk, 0, len(selectedIDs))
 	for _, chunkID := range selectedIDs {
 		chunk, ok := chunkByID[chunkID]
@@ -260,7 +307,7 @@ func (s *Service) Extract(ctx context.Context, request ExtractRequest) (ExtractR
 	if err != nil {
 		return ExtractResponse{}, err
 	}
-	candidates, err := s.buildCandidatesFromProposals(request.ImportID, selectedIDs, result.Proposals)
+	candidates, err := s.buildCandidatesFromProposals(current.Path, request.ImportID, selectedIDs, result.Proposals)
 	if err != nil {
 		return ExtractResponse{}, err
 	}
@@ -298,6 +345,8 @@ func (s *Service) ListCandidates(ctx context.Context) ([]Candidate, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 	return s.candidates.List(current.Path)
 }
 
@@ -306,6 +355,8 @@ func (s *Service) LoadCandidate(ctx context.Context, candidateID string) (Candid
 	if err != nil {
 		return Candidate{}, err
 	}
+	s.mutations.RLock()
+	defer s.mutations.RUnlock()
 	return s.candidates.Load(current.Path, candidateID)
 }
 
@@ -328,6 +379,8 @@ func (s *Service) ListCandidatesFiltered(ctx context.Context, status *CandidateS
 }
 
 func (s *Service) UpdateCandidate(ctx context.Context, candidateID string, expectedRevision string, proposal CandidateProposal) (Candidate, error) {
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	current, projectPath, err := s.claimPendingCandidate(ctx, candidateID, expectedRevision)
 	if err != nil {
 		return Candidate{}, err
@@ -348,6 +401,8 @@ func (s *Service) UpdateCandidate(ctx context.Context, candidateID string, expec
 }
 
 func (s *Service) MergeCandidates(ctx context.Context, candidateID string, request MergeRequest) (Candidate, []string, error) {
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	current, projectPath, err := s.claimPendingCandidate(ctx, candidateID, request.ExpectedRevision)
 	if err != nil {
 		return Candidate{}, nil, err
@@ -365,7 +420,7 @@ func (s *Service) MergeCandidates(ctx context.Context, candidateID string, reque
 	if current.Proposal.Codex.Type != other.Proposal.Codex.Type {
 		return Candidate{}, nil, ErrInvalidCandidate
 	}
-	replacementID, err := s.ids.NextCandidateID()
+	replacementID, err := s.reserveCandidateID(projectPath, map[string]struct{}{})
 	if err != nil {
 		return Candidate{}, nil, err
 	}
@@ -401,18 +456,23 @@ func (s *Service) MergeCandidates(ctx context.Context, candidateID string, reque
 	if err != nil {
 		return Candidate{}, nil, err
 	}
-	if err := s.replaceCandidatesAtomically(ctx, projectPath, "Merge import candidates "+candidateID+" "+request.OtherCandidateID, []Candidate{current, other, replacement}); err != nil {
+	if err := s.replaceCandidatesAtomically(ctx, projectPath, "Merge import candidates "+candidateID+" "+request.OtherCandidateID, []Candidate{current, other, replacement}, map[string]string{
+		candidateID: request.ExpectedRevision, request.OtherCandidateID: request.OtherExpectedRevision,
+	}); err != nil {
 		return Candidate{}, nil, err
 	}
 	return replacement, []string{candidateID, request.OtherCandidateID}, nil
 }
 
 func (s *Service) DiscardCandidate(ctx context.Context, candidateID, expectedRevision string) (Candidate, error) {
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	current, projectPath, err := s.claimPendingCandidate(ctx, candidateID, expectedRevision)
 	if err != nil {
 		return Candidate{}, err
 	}
 	defer s.releaseClaim(projectPath, candidateID)
+	previous := current
 	current.Status = CandidateStatusDiscarded
 	current.Decision.ReplacementCandidateID = nil
 	current.Decision.CanonicalRefs = []CanonicalRef{}
@@ -421,24 +481,27 @@ func (s *Service) DiscardCandidate(ctx context.Context, candidateID, expectedRev
 	if err != nil {
 		return Candidate{}, err
 	}
-	return s.replaceCandidateAndCommit(ctx, projectPath, "Discard import candidate "+candidateID, Candidate{ID: candidateID}, current)
+	return s.replaceCandidateAndCommit(ctx, projectPath, "Discard import candidate "+candidateID, previous, current)
 }
 
 func (s *Service) AcceptCandidate(ctx context.Context, candidateID, expectedRevision string) (Candidate, []CanonicalRef, error) {
 	if s.story == nil {
 		return Candidate{}, nil, fmt.Errorf("story mutator is not configured: %w", ErrInvalidCandidate)
 	}
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
 	current, projectPath, err := s.claimPendingCandidate(ctx, candidateID, expectedRevision)
 	if err != nil {
 		return Candidate{}, nil, err
 	}
 	defer s.releaseClaim(projectPath, candidateID)
 
+	previous := current
 	mutationRequest, err := s.acceptanceMutationRequest(ctx, projectPath, current)
 	if err != nil {
 		return Candidate{}, nil, err
 	}
-	mutationResult, err := s.story.ApplyImportMutation(ctx, mutationRequest)
+	mutationResult, err := s.story.ApplyImportMutationInTransaction(ctx, mutationRequest)
 	if err != nil {
 		return Candidate{}, nil, err
 	}
@@ -461,7 +524,7 @@ func (s *Service) AcceptCandidate(ctx context.Context, candidateID, expectedRevi
 		}
 		return Candidate{}, nil, err
 	}
-	if _, err := s.candidates.Create(projectPath, current); err != nil {
+	if _, err := s.candidates.Replace(projectPath, current, previous.Revision); err != nil {
 		if mutationResult.Rollback != nil {
 			_ = mutationResult.Rollback()
 		}
@@ -606,7 +669,7 @@ func (s *Service) replaceCandidateAndCommit(ctx context.Context, projectPath, me
 	if err != nil {
 		return Candidate{}, err
 	}
-	if _, err := s.candidates.Create(projectPath, next); err != nil {
+	if _, err := s.candidates.Replace(projectPath, next, current.Revision); err != nil {
 		_ = restoreSnapshot(snapshot)
 		return Candidate{}, err
 	}
@@ -620,7 +683,7 @@ func (s *Service) replaceCandidateAndCommit(ctx context.Context, projectPath, me
 	return next, nil
 }
 
-func (s *Service) replaceCandidatesAtomically(ctx context.Context, projectPath, message string, candidates []Candidate) error {
+func (s *Service) replaceCandidatesAtomically(ctx context.Context, projectPath, message string, candidates []Candidate, expectedRevisions map[string]string) error {
 	paths := make([]string, 0, len(candidates))
 	for _, candidate := range candidates {
 		paths = append(paths, candidatePath(projectPath, candidate.ID))
@@ -630,7 +693,13 @@ func (s *Service) replaceCandidatesAtomically(ctx context.Context, projectPath, 
 		return err
 	}
 	for _, candidate := range candidates {
-		if _, err := s.candidates.Create(projectPath, candidate); err != nil {
+		var err error
+		if expectedRevision, exists := expectedRevisions[candidate.ID]; exists {
+			_, err = s.candidates.Replace(projectPath, candidate, expectedRevision)
+		} else {
+			_, err = s.candidates.Create(projectPath, candidate)
+		}
+		if err != nil {
 			_ = restoreSnapshot(snapshot)
 			return err
 		}
@@ -683,19 +752,18 @@ func (s *Service) acceptanceMutationRequest(ctx context.Context, projectPath str
 	}
 }
 
-func (s *Service) buildCandidatesFromProposals(importID string, chunkIDs []string, proposals []extract.Proposal) ([]Candidate, error) {
+func (s *Service) buildCandidatesFromProposals(projectPath, importID string, chunkIDs []string, proposals []extract.Proposal) ([]Candidate, error) {
 	candidateIDs := make(map[string]string, len(proposals))
 	proposalKinds := make(map[string]string, len(proposals))
+	reservedIDs := make(map[string]struct{}, len(proposals))
 	for _, proposal := range proposals {
 		localID := proposalLocalID(proposal)
-		nextID, err := s.ids.NextCandidateID()
+		nextID, err := s.reserveCandidateID(projectPath, reservedIDs)
 		if err != nil {
 			return nil, err
 		}
-		if err := ValidateCandidateID(nextID); err != nil {
-			return nil, err
-		}
 		candidateIDs[localID] = nextID
+		reservedIDs[nextID] = struct{}{}
 		proposalKinds[localID] = proposal.Kind
 	}
 	candidates := make([]Candidate, 0, len(proposals))
@@ -751,6 +819,30 @@ func (s *Service) buildCandidatesFromProposals(importID string, chunkIDs []strin
 	return candidates, nil
 }
 
+func (s *Service) reserveCandidateID(projectPath string, reserved map[string]struct{}) (string, error) {
+	for range 5 {
+		nextID, err := s.ids.NextCandidateID()
+		if err != nil {
+			return "", err
+		}
+		if err := ValidateCandidateID(nextID); err != nil {
+			return "", err
+		}
+		if _, exists := reserved[nextID]; exists {
+			continue
+		}
+		_, err = os.Lstat(candidatePath(projectPath, nextID))
+		if err == nil {
+			continue
+		}
+		if !os.IsNotExist(err) {
+			return "", fmt.Errorf("inspect candidate identifier %q: %w", nextID, err)
+		}
+		return nextID, nil
+	}
+	return "", fmt.Errorf("allocate candidate identifier: %w", ErrInvalidID)
+}
+
 func proposalLocalID(proposal extract.Proposal) string {
 	switch proposal.Kind {
 	case "codex":
@@ -770,6 +862,11 @@ func rollbackCandidates(projectPath string, candidateIDs []string) error {
 	var joined []error
 	for _, candidateID := range candidateIDs {
 		if err := os.Remove(candidatePath(projectPath, candidateID)); err != nil && !os.IsNotExist(err) {
+			joined = append(joined, err)
+		}
+	}
+	if len(candidateIDs) > 0 {
+		if err := syncDirectory(filepath.Join(projectPath, "imports", "review")); err != nil {
 			joined = append(joined, err)
 		}
 	}
@@ -806,12 +903,21 @@ func restoreSnapshot(snapshots []fileSnapshot) error {
 				errs = append(errs, err)
 				continue
 			}
-			if err := os.WriteFile(snapshot.path, snapshot.content, 0o644); err != nil {
+			if err := writeFileSynced(snapshot.path, snapshot.content, 0o644); err != nil {
 				errs = append(errs, err)
 			}
 			continue
 		}
 		if err := os.Remove(snapshot.path); err != nil && !os.IsNotExist(err) {
+			errs = append(errs, err)
+		}
+	}
+	directories := map[string]struct{}{}
+	for _, snapshot := range snapshots {
+		directories[filepath.Dir(snapshot.path)] = struct{}{}
+	}
+	for directory := range directories {
+		if err := syncDirectory(directory); err != nil && !os.IsNotExist(err) {
 			errs = append(errs, err)
 		}
 	}

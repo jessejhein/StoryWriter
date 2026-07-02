@@ -158,6 +158,7 @@ func TestImportRoutesReturnExactJSONShapes(t *testing.T) {
 		},
 		acceptRefs: []importer.CanonicalRef{{Kind: "codex", ID: "char_0123456789abcdef0123"}},
 	}
+	stub.loadImportResponse = stub.importResponse
 	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	for _, testCase := range []struct {
@@ -182,6 +183,13 @@ func TestImportRoutesReturnExactJSONShapes(t *testing.T) {
 			path:         "/api/imports",
 			status:       http.StatusOK,
 			expectedJSON: `{"imports":[{"id":"imp_0123456789abcdef0123","created_at":"2026-06-30T12:00:00Z","file_count":1,"total_bytes":12}]}`,
+		},
+		{
+			name:         "load import",
+			method:       http.MethodGet,
+			path:         "/api/imports/imp_0123456789abcdef0123",
+			status:       http.StatusOK,
+			expectedJSON: `{"import":{"id":"imp_0123456789abcdef0123","created_at":"2026-06-30T12:00:00Z","file_count":1,"total_bytes":12},"files":[{"path":"notes/characters.md","bytes":12,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`,
 		},
 		{
 			name:         "list chunks",
@@ -317,6 +325,47 @@ func TestImportMutationRoutesRejectMalformedBodiesAndOversizeWithContractStatuse
 	}
 }
 
+func TestCandidateEditRejectsMissingAndNullNestedFields(t *testing.T) {
+	t.Parallel()
+
+	candidate := importer.Candidate{ID: "cand_0123456789abcdef0123", Kind: importer.CandidateKindCodex}
+	for _, testCase := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing aliases", body: `{"proposal":{"type":"character","name":"Mara","tags":[],"description":"Pilot."},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{name: "null aliases", body: `{"proposal":{"type":"character","name":"Mara","aliases":null,"tags":[],"description":"Pilot."},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{name: "missing tags", body: `{"proposal":{"type":"character","name":"Mara","aliases":[],"description":"Pilot."},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{name: "null tags", body: `{"proposal":{"type":"character","name":"Mara","aliases":[],"tags":null,"description":"Pilot."},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{candidate: candidate}, "test")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/import-candidates/"+candidate.ID, strings.NewReader(testCase.body)))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestCandidateNoOpEditReturnsBadRequest(t *testing.T) {
+	t.Parallel()
+
+	candidate := importer.Candidate{ID: "cand_0123456789abcdef0123", Kind: importer.CandidateKindArc}
+	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{
+		candidate:          candidate,
+		updateCandidateErr: importer.ErrNoCandidateChanges,
+	}, "test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/import-candidates/"+candidate.ID, strings.NewReader(
+		`{"proposal":{"title":"Act One"},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+	)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 body=%s", response.Code, response.Body.String())
+	}
+}
+
 func TestImportErrorsDoNotDiscloseSensitiveAdapterDetails(t *testing.T) {
 	t.Parallel()
 
@@ -340,6 +389,7 @@ func TestImportRoutesRejectUnsupportedMethodsWithAllowHeader(t *testing.T) {
 
 	tests := []struct{ method, path, allow string }{
 		{http.MethodPatch, "/api/imports", "GET, POST"},
+		{http.MethodPost, "/api/imports/imp_0123456789abcdef0123", "GET"},
 		{http.MethodPost, "/api/imports/imp_0123456789abcdef0123/chunks", "GET"},
 		{http.MethodGet, "/api/imports/imp_0123456789abcdef0123/extractions", "POST"},
 		{http.MethodDelete, "/api/import-candidates", "GET"},
