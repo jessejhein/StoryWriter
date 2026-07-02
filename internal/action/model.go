@@ -101,24 +101,24 @@ const (
 )
 
 type Run struct {
-	RunID              string                 `json:"run_id"`
-	Status             RunStatus              `json:"status"`
-	AgentID            string                 `json:"agent_id"`
-	StyleID            string                 `json:"style_id"`
-	Scope              contextpack.Scope      `json:"scope,omitempty"`
-	SceneID            string                 `json:"scene_id,omitempty"`
-	SceneRevision      string                 `json:"scene_revision,omitempty"`
-	ChapterID          string                 `json:"chapter_id,omitempty"`
-	ChapterFingerprint string                 `json:"chapter_fingerprint,omitempty"`
-	ParentRunID        string                 `json:"parent_run_id,omitempty"`
-	RootRunID          string                 `json:"root_run_id,omitempty"`
-	ChainDepth         int                    `json:"chain_depth,omitempty"`
-	ParentRelationship InvitationRelationship `json:"-"`
-	Selection          Selection              `json:"selection,omitempty"`
-	OriginalText       string                 `json:"-"`
-	Replacement        string                 `json:"-"`
-	Manifest           contextpack.Manifest   `json:"manifest,omitempty"`
-	ContextSummary     agent.ContextSummary   `json:"context_summary,omitempty"`
+	RunID               string                 `json:"run_id"`
+	Status              RunStatus              `json:"status"`
+	AgentID             string                 `json:"agent_id"`
+	StyleID             string                 `json:"style_id"`
+	Scope               contextpack.Scope      `json:"scope,omitempty"`
+	SceneID             string                 `json:"scene_id,omitempty"`
+	SceneRevision       string                 `json:"scene_revision,omitempty"`
+	ChapterID           string                 `json:"chapter_id,omitempty"`
+	ChapterFingerprint  string                 `json:"chapter_fingerprint,omitempty"`
+	ParentRunID         string                 `json:"parent_run_id,omitempty"`
+	RootRunID           string                 `json:"root_run_id,omitempty"`
+	ChainDepth          int                    `json:"chain_depth,omitempty"`
+	ParentRelationship  InvitationRelationship `json:"-"`
+	Selection           Selection              `json:"selection,omitempty"`
+	OriginalText        string                 `json:"-"`
+	Replacement         string                 `json:"-"`
+	Manifest            contextpack.Manifest   `json:"manifest,omitempty"`
+	ContextSummary      agent.ContextSummary   `json:"context_summary,omitempty"`
 	Findings            []Finding              `json:"findings,omitempty"`
 	FollowUpInvitations []PublishedInvitation  `json:"follow_up_invitations,omitempty"`
 	Provider            agent.ProviderIdentity `json:"provider"`

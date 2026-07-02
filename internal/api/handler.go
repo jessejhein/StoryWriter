@@ -1627,11 +1627,11 @@ func statusForStoryError(err error) int {
 
 func writeActionRunResponse(writer http.ResponseWriter, run action.Run) {
 	response := map[string]any{
-		"run_id":    run.RunID,
-		"status":    run.Status,
-		"agent_id":  run.AgentID,
-		"style_id":  run.StyleID,
-		"provider":  run.Provider,
+		"run_id":   run.RunID,
+		"status":   run.Status,
+		"agent_id": run.AgentID,
+		"style_id": run.StyleID,
+		"provider": run.Provider,
 	}
 	if run.Scope != "" {
 		response["scope"] = run.Scope
