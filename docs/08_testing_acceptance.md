@@ -234,10 +234,25 @@ strict negative API contracts, corrupt cache rebuild, and UI race/conflict state
 
 ### Milestone 7
 
-- Context builder uses active Codex state.
-- Same character has different context before/after progression.
-- Paragraph action uses minimal context.
-- Chapter action can use timeline-aware RAG.
+Evidence: `.plans/milestone_7_test_evidence.md` (July 2, 2026).
+
+Backend:
+
+- `internal/contextpack/*_test.go`: policy, budget, lexical relevance, manifests.
+- `internal/action/*_test.go`: preview, tagged runs, invitations, lineage, findings.
+- `internal/story/context_material_*_test.go`: coherent locked material reads.
+- `internal/app/milestone7_integration_test.go`:
+  `TestMilestone7TimelineContextAndConditionalActions` (happy and adversarial paths).
+
+Frontend:
+
+- `web/src/api.actions_milestone7.test.ts`: preview/run/invitation transport.
+- `web/src/editor/actionState.test.ts`: pure stale-response workflow state.
+- `web/src/editor/ContextPreview.test.tsx`: manifest display.
+- `web/src/editor/SceneEditor.milestone7_actions.test.tsx`: preview, scene rewrite, dirty guards.
+- `web/src/editor/ChapterReview.test.tsx`, `FollowUpInvitations.test.tsx`: suggestions and explicit invitation runs.
+
+Verification: full `make check`, `go test -race ./...`, 76 frontend tests.
 
 ### Milestone 8
 

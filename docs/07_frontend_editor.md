@@ -32,9 +32,14 @@ Reasons:
 - CodeMirror 6.
 - Vim keybindings enabled by user setting, default on for this project.
 - Save/reload scene.
-- Selection-based AI action menu.
-- Diff preview for patch outputs.
-- Dirty drafts disable action lookup and run controls.
+- Selection-based AI action menu with context preview before Run.
+- Scene-scoped Scene Rewrite and chapter-scoped Chapter Review actions.
+- Redacted context manifest (packs used/omitted, estimates, active Codex IDs).
+- Diff preview for selection and full-scene patch outputs.
+- Dirty drafts disable preview, action lookup, and run controls.
+- Scope-broadening confirmation when moving from selection to scene/chapter scope.
+- Follow-up invitation cards that require an explicit Run (never auto-execute).
+- Chapter Review findings grouped by scene ID without accept-prose controls.
 - Accepting a patch updates the editor baseline from the returned canonical scene without a second scene save.
 
 ### Codex screen

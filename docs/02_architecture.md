@@ -84,6 +84,21 @@ output validation live in `internal/extract`. This keeps import/review rules
 separate from scene-patch orchestration and preserves a narrow seam for future
 extraction modes or candidate kinds.
 
+Milestone 7 adds timeline-aware action context without widening provider access
+to story storage:
+
+- `internal/contextpack` owns typed targets, material packets, lexical relevance,
+  deterministic budgeting, and redacted manifests.
+- `internal/story/context_material.go` loads one coherent canonical snapshot per
+  target under the shared `internal/mutation.Coordinator` read lock.
+- `internal/action` orchestrates preview (zero provider), tagged runs for
+  selection/scene/chapter review, invitation policy/store, and accepted-operation
+  lineage metadata threaded into Git commit trailers.
+- `internal/agent` keeps registry validation and scope/output-specific provider
+  message builders; providers remain transport adapters with no story access.
+- `internal/gitstore/commit_message.go` formats validated commit subjects and
+  trailers at the Git consumer boundary.
+
 ## Suggested source repository layout
 
 ```text
@@ -97,17 +112,21 @@ extraction modes or candidate kinds.
 │       └── main.go
 ├── internal/
 │   ├── app/
+│   ├── action/
 │   ├── agent/
 │   ├── api/
 │   ├── codex/
+│   ├── contextpack/
 │   ├── extract/
 │   ├── gitstore/
 │   ├── importer/
 │   ├── index/
+│   ├── mutation/
 │   ├── provider/
 │   ├── project/
 │   ├── story/
-│   └── testutil/
+│   ├── storyfile/
+│   └── workspace/
 ├── web/
 │   ├── package.json
 │   ├── vite.config.ts

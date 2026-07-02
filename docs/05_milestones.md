@@ -8,9 +8,9 @@ Each milestone is a sprint. Each sprint must leave the app working.
 
 ## Current status
 
-- Milestones 0 through 6: implemented; `make check` green on July 1, 2026.
-- Milestone 7: next incomplete phase.
-- Milestones 7 through 9: roadmap only.
+- Milestones 0 through 7: implemented; `make check` green on July 2, 2026.
+- Milestone 8: next incomplete phase.
+- Milestones 8 through 9: roadmap only.
 
 The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
 
