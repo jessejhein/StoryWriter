@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/codex"
 )
 
@@ -18,7 +17,7 @@ func TestCodexListRouteReturnsEntriesAndMapsStatuses(t *testing.T) {
 	t.Parallel()
 
 	service := &storyServiceStub{codexEntries: []codex.Entry{}}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	// Test: GET /api/codex returns the documented empty entries array shape.
 	// Requirements: M3-R09
@@ -41,7 +40,7 @@ func TestCodexListRouteReturnsEntriesAndMapsStatuses(t *testing.T) {
 	// Requirements: M3-R01
 	service = &storyServiceStub{loadCodexErr: errors.New("decode codex/characters/x.yaml: unsupported")}
 	response = httptest.NewRecorder()
-	api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex", nil))
+	newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex", nil))
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusInternalServerError)
 	}

@@ -10,7 +10,6 @@ import (
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
-	"storywork/internal/api"
 	"storywork/internal/story"
 )
 
@@ -99,7 +98,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			Status: action.RunRejected,
 		},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	for _, testCase := range []struct {
 		name         string
@@ -205,7 +204,7 @@ func TestActionRouteStatusMapping(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &testCase.stub, "test")
+		handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &testCase.stub, "test")
 		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body))
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -214,7 +213,7 @@ func TestActionRouteStatusMapping(t *testing.T) {
 		}
 	}
 
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	for _, testCase := range []struct {
 		path  string
 		allow string
@@ -245,7 +244,7 @@ func TestActionRoutesRejectMalformedContractInputs(t *testing.T) {
 	t.Parallel()
 
 	store := &storyServiceStub{}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, store, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, store, "test")
 	tests := []struct {
 		name   string
 		method string
@@ -282,7 +281,7 @@ func TestActionRoutesRejectMalformedContractInputs(t *testing.T) {
 func TestActionRegistryLoadFailuresReturnInternalServerError(t *testing.T) {
 	t.Parallel()
 
-	handler := api.NewHandler(
+	handler := newTestHandler(
 		&projectStoreStub{},
 		&activeProjectSessionStub{},
 		&storyServiceStub{agentsErr: agent.ErrRegistryLoad},

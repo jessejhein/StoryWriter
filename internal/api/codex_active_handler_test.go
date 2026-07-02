@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/codex"
 )
 
@@ -30,7 +29,7 @@ func TestCodexActiveRouteRequiresSceneAndMapsStatuses(t *testing.T) {
 			AppliedProgressionIDs: []string{"prog_0123456789abcdef0123"},
 		},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	// Test: the active-state route requires scene_id and forwards stable entry and scene IDs to the service.
 	// Requirements: M3-R09

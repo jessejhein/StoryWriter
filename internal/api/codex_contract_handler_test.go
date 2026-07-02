@@ -11,7 +11,6 @@ import (
 	"strings"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/codex"
 	"storywork/internal/story"
 )
@@ -39,7 +38,7 @@ func TestCodexRoutesRejectUnsupportedMethods(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, nil))
 			if response.Code != http.StatusMethodNotAllowed {
@@ -78,7 +77,7 @@ func TestCodexMutationRoutesRejectOversizedBodiesAsBadRequest(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(strings.Repeat(" ", 1<<20)+`{"type":"character","name":"x","aliases":[],"tags":[],"description":"","metadata":{}}`)))
 			if response.Code != http.StatusBadRequest {
@@ -108,7 +107,7 @@ func TestCodexListResponseShapeAndSortOrder(t *testing.T) {
 		{ID: "loc_0123456789abcdef00002", Type: codex.TypeLocation, Name: "Tatooine", Aliases: []string{}, Tags: []string{}, Description: "Desert.", Metadata: map[string]string{}, Revision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
 		{ID: "char_0123456789abcdef0003", Type: codex.TypeCharacter, Name: "Anakin", Aliases: []string{}, Tags: []string{}, Description: "Jedi.", Metadata: map[string]string{}, Revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{codexEntries: entries}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{codexEntries: entries}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex", nil))
 	if response.Code != http.StatusOK {
@@ -159,7 +158,7 @@ func TestCodexSingleEntryResponseShape(t *testing.T) {
 		Metadata:    map[string]string{"status": "alive"},
 		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{codexEntry: entry}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{codexEntry: entry}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex/char_0123456789abcdef0123", nil))
 	if response.Code != http.StatusOK {
@@ -196,7 +195,7 @@ func TestCodexProgressionResponseShape(t *testing.T) {
 		}},
 		Revision: &revision,
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{progressionDocument: document}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{progressionDocument: document}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex/char_0123456789abcdef0123/progressions", nil))
 	if response.Code != http.StatusOK {
@@ -236,7 +235,7 @@ func TestCodexProgressionResponseEmptyDocumentShape(t *testing.T) {
 	t.Parallel()
 
 	// A no-progression-file response uses progressions [] and revision null per the contract.
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{progressionDocument: codex.ProgressionDocument{Progressions: []codex.Progression{}, Revision: nil}}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{progressionDocument: codex.ProgressionDocument{Progressions: []codex.Progression{}, Revision: nil}}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex/char_0123456789abcdef0123/progressions", nil))
 	if response.Code != http.StatusOK {
@@ -273,7 +272,7 @@ func TestCodexActiveStateResponseShape(t *testing.T) {
 		},
 		AppliedProgressionIDs: []string{"prog_0123456789abcdef0123"},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{activeState: activeState}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{activeState: activeState}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/codex/char_0123456789abcdef0123/active?scene_id=scn_0123456789abcdef0123", nil))
 	if response.Code != http.StatusOK {
@@ -325,7 +324,7 @@ func TestCodexActiveStateRejectsMalformedAndAbsentSceneID(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{activeCodexErr: testCase.err}, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{activeCodexErr: testCase.err}, "test")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, testCase.path, nil))
 			if response.Code != testCase.status {
@@ -373,7 +372,7 @@ func TestCodexRoutesMapNoActiveProjectAndDirtyWorktreeToConflict(t *testing.T) {
 			default:
 				service.loadCodexErr = testCase.err
 			}
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body)))
 			if response.Code != http.StatusConflict {
@@ -389,7 +388,7 @@ func TestCodexUpdateRejectsNoOpChanges(t *testing.T) {
 	// Test: a byte-identical update is mapped to 400 Bad Request, not 200, with no side effects.
 	// Requirements: M3-R03
 	body := `{"name":"Ben","aliases":[],"tags":[],"description":"","metadata":{},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{updateCodexErr: codex.ErrNoChanges}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{updateCodexErr: codex.ErrNoChanges}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123", strings.NewReader(body)))
 	if response.Code != http.StatusBadRequest {
@@ -403,7 +402,7 @@ func TestCodexCreateRejectsIDAndRevisionFields(t *testing.T) {
 	// Test: POST may not include id or revision; unknown-field rejection returns 400.
 	// Requirements: M3-R02
 	body := `{"id":"char_0123456789abcdef0123","type":"character","name":"Ben","aliases":[],"tags":[],"description":"","metadata":{},"revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/codex", strings.NewReader(body)))
 	if response.Code != http.StatusBadRequest {
@@ -417,7 +416,7 @@ func TestCodexUpdateRejectsTypeField(t *testing.T) {
 	// Test: PUT may not include type; the route ID is authoritative and type comes from canonical storage.
 	// Requirements: M3-R03
 	body := `{"type":"character","name":"Ben","aliases":[],"tags":[],"description":"","metadata":{},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123", strings.NewReader(body)))
 	if response.Code != http.StatusBadRequest {
@@ -431,7 +430,7 @@ func TestCodexProgressionPutRejectsEntryIDField(t *testing.T) {
 	// Test: PUT progressions omits entry_id; the route entry ID is authoritative.
 	// Requirements: M3-R05
 	body := `{"entry_id":"char_0123456789abcdef0123","progressions":[],"expected_revision":null}`
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123/progressions", strings.NewReader(body)))
 	if response.Code != http.StatusBadRequest {
@@ -445,7 +444,7 @@ func TestCodexUpdateRejectsNullExpectedRevision(t *testing.T) {
 	// Test: PUT entry requires a non-null expected_revision; null is rejected as 400.
 	// Requirements: M3-R17
 	body := `{"name":"Ben","aliases":[],"tags":[],"description":"","metadata":{},"expected_revision":null}`
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123", strings.NewReader(body)))
 	if response.Code != http.StatusBadRequest {
@@ -474,7 +473,7 @@ func TestCodexRoutesRejectTrailingJSONAndWrongTypes(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body)))
 			if response.Code != http.StatusBadRequest {

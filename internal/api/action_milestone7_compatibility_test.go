@@ -13,7 +13,6 @@ import (
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
-	"storywork/internal/api"
 )
 
 // Test: legacy Milestone 4-6 action run JSON remains accepted without scope fields.
@@ -40,7 +39,7 @@ func TestM7LegacyActionRunJSONRemainsAccepted(t *testing.T) {
 			},
 		},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	request := httptest.NewRequest(http.MethodPost, "/api/actions/run", strings.NewReader(legacyBody))
 	response := httptest.NewRecorder()

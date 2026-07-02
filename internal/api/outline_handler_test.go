@@ -272,6 +272,18 @@ func (s *storyServiceStub) AcceptImportCandidate(context.Context, string, string
 	return s.acceptCandidate, s.acceptRefs, s.acceptCandidateErr
 }
 
+func newTestHandler(projects api.ProjectStore, session api.ActiveProjectSession, stub *storyServiceStub, version string) http.Handler {
+	return api.NewHandler(api.HandlerDependencies{
+		Projects:  projects,
+		Session:   session,
+		Stories:   stub,
+		Actions:   stub,
+		Providers: stub,
+		Imports:   stub,
+		Version:   version,
+	})
+}
+
 // BDD trace:
 //   - Requirement: Milestone 1 fixed design decision, active project session.
 //   - Scenario: after a successful project create or open request, the backend
@@ -284,7 +296,7 @@ func TestProjectRoutesSetActiveSession(t *testing.T) {
 	createdProject := project.Project{ID: "proj_test_novel", Path: "/tmp/test-novel", GitInitialized: true, IndexInitialized: true}
 	projectStore := &projectStoreStub{created: createdProject}
 	session := &activeProjectSessionStub{}
-	handler := api.NewHandler(projectStore, session, &storyServiceStub{}, "test")
+	handler := newTestHandler(projectStore, session, &storyServiceStub{}, "test")
 
 	createRequest := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(`{"name":"Test Novel","path":"/tmp/test-novel"}`))
 	createResponse := httptest.NewRecorder()
@@ -329,7 +341,7 @@ func TestGetOutlineReturnsNestedJSONShape(t *testing.T) {
 			}},
 		}},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{outlineResult: outline}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{outlineResult: outline}, "test")
 
 	request := httptest.NewRequest(http.MethodGet, "/api/outline", nil)
 	response := httptest.NewRecorder()
@@ -366,7 +378,7 @@ func TestOutlineMutationRoutesValidateRequestsAndMapErrors(t *testing.T) {
 		},
 	}
 	service := &storyServiceStub{mutationResult: result}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	createArcRequest := httptest.NewRequest(http.MethodPost, "/api/arcs", strings.NewReader(`{"title":"Act One"}`))
 	createArcResponse := httptest.NewRecorder()
@@ -520,7 +532,7 @@ func TestOutlineMutationRoutesValidateRequestsAndMapErrors(t *testing.T) {
 			case "/api/outline/reorder":
 				service.reorderErr = testCase.serviceErr
 			}
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 			request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body))
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, request)

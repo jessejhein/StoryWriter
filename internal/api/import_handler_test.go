@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"storywork/internal/agent"
-	"storywork/internal/api"
 	"storywork/internal/extract"
 	"storywork/internal/importer"
 	"storywork/internal/story"
@@ -159,7 +158,7 @@ func TestImportRoutesReturnExactJSONShapes(t *testing.T) {
 		acceptRefs: []importer.CanonicalRef{{Kind: "codex", ID: "char_0123456789abcdef0123"}},
 	}
 	stub.loadImportResponse = stub.importResponse
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	for _, testCase := range []struct {
 		name         string
@@ -287,7 +286,7 @@ func TestImportRouteStatusMapping(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &testCase.stub, "test")
+		handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &testCase.stub, "test")
 		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body))
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -315,7 +314,7 @@ func TestImportMutationRoutesRejectMalformedBodiesAndOversizeWithContractStatuse
 		{name: "oversized import", path: "/api/imports", body: `{"source_directory":"/` + strings.Repeat("x", (1<<20)+1) + `"}`, status: http.StatusRequestEntityTooLarge},
 	}
 	for _, testCase := range tests {
-		handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+		handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 		request := httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body))
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -339,7 +338,7 @@ func TestCandidateEditRejectsMissingAndNullNestedFields(t *testing.T) {
 		{name: "null tags", body: `{"proposal":{"type":"character","name":"Mara","aliases":[],"tags":null,"description":"Pilot."},"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{candidate: candidate}, "test")
+			handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{candidate: candidate}, "test")
 			response := httptest.NewRecorder()
 			handler.ServeHTTP(response, httptest.NewRequest(http.MethodPut, "/api/import-candidates/"+candidate.ID, strings.NewReader(testCase.body)))
 			if response.Code != http.StatusBadRequest {
@@ -353,7 +352,7 @@ func TestCandidateNoOpEditReturnsBadRequest(t *testing.T) {
 	t.Parallel()
 
 	candidate := importer.Candidate{ID: "cand_0123456789abcdef0123", Kind: importer.CandidateKindArc}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{
 		candidate:          candidate,
 		updateCandidateErr: importer.ErrNoCandidateChanges,
 	}, "test")
@@ -370,7 +369,7 @@ func TestImportErrorsDoNotDiscloseSensitiveAdapterDetails(t *testing.T) {
 	t.Parallel()
 
 	sensitive := "/home/alice/private-notes token-secret provider-body"
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{
 		importErr: errors.New(sensitive),
 	}, "test")
 	request := httptest.NewRequest(http.MethodPost, "/api/imports", strings.NewReader(`{"source_directory":"/tmp/notes"}`))
@@ -398,7 +397,7 @@ func TestImportRoutesRejectUnsupportedMethodsWithAllowHeader(t *testing.T) {
 		{http.MethodGet, "/api/import-candidates/cand_0123456789abcdef0123/discard", "POST"},
 		{http.MethodGet, "/api/import-candidates/cand_0123456789abcdef0123/accept", "POST"},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	for _, testCase := range tests {
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, nil))

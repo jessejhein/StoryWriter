@@ -183,22 +183,34 @@ type StoryStore interface {
 	SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error)
 	// ResolveActiveCodexState resolves one entry as of a target scene.
 	ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error)
+}
+
+// ActionStore serves project-local agent registry and transient action runs.
+type ActionStore interface {
 	// Agents returns the strictly loaded project-local agent registry.
 	Agents(ctx context.Context) ([]agent.Agent, error)
 	// Styles returns the strictly loaded project-local style registry.
 	Styles(ctx context.Context) ([]agent.Style, error)
 	// AvailableActions returns the applicable actions for the current state.
 	AvailableActions(ctx context.Context, input agent.AvailabilityInput) ([]action.AvailableAction, error)
-	// Run executes one transient mock action against canonical scene bytes.
+	// Run executes one transient action against canonical scene bytes.
 	Run(ctx context.Context, request action.RunRequest) (action.Run, error)
 	// Accept applies one pending run to canonical scene markdown.
 	Accept(ctx context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error)
 	// Reject discards one pending run without mutating canon.
 	Reject(ctx context.Context, runID string) (action.Run, error)
+}
+
+// ProviderStore serves application-level provider profile configuration.
+type ProviderStore interface {
 	// ProviderProfiles returns the application-level provider profiles and revision.
 	ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error)
 	// SaveProviderProfiles replaces the application-level provider profiles.
 	SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error)
+}
+
+// ImportStore serves Markdown import snapshots and review candidates.
+type ImportStore interface {
 	// ImportDirectory snapshots a source directory into the active project.
 	ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error)
 	// ListImports returns imported snapshot summaries.
@@ -221,6 +233,17 @@ type StoryStore interface {
 	DiscardImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, error)
 	// AcceptImportCandidate writes one candidate into canon atomically.
 	AcceptImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, []importer.CanonicalRef, error)
+}
+
+// HandlerDependencies groups the cohesive HTTP handler boundaries.
+type HandlerDependencies struct {
+	Projects  ProjectStore
+	Session   ActiveProjectSession
+	Stories   StoryStore
+	Actions   ActionStore
+	Providers ProviderStore
+	Imports   ImportStore
+	Version   string
 }
 
 type importCandidateResponse struct {
@@ -262,7 +285,15 @@ type providerCapabilitiesRequest struct {
 }
 
 // NewHandler creates the full local Storywork HTTP router for the current milestone set.
-func NewHandler(projects ProjectStore, session ActiveProjectSession, stories StoryStore, version string) http.Handler {
+func NewHandler(deps HandlerDependencies) http.Handler {
+	projects := deps.Projects
+	session := deps.Session
+	stories := deps.Stories
+	actionStore := deps.Actions
+	providers := deps.Providers
+	importStore := deps.Imports
+	version := deps.Version
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok", "version": version})
@@ -298,7 +329,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, opened)
 	})
 	mux.HandleFunc("GET /api/provider-profiles", func(writer http.ResponseWriter, request *http.Request) {
-		profiles, revision, err := stories.ProviderProfiles(request.Context())
+		profiles, revision, err := providers.ProviderProfiles(request.Context())
 		if err != nil {
 			writeProviderError(writer, err)
 			return
@@ -343,7 +374,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		profiles, revision, err := stories.SaveProviderProfiles(request.Context(), domainProfiles, putRequest.ExpectedRevision)
+		profiles, revision, err := providers.SaveProviderProfiles(request.Context(), domainProfiles, putRequest.ExpectedRevision)
 		if err != nil {
 			writeProviderError(writer, err)
 			return
@@ -361,7 +392,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportBodyError(writer, err)
 			return
 		}
-		response, err := stories.ImportDirectory(request.Context(), importRequest.SourceDirectory)
+		response, err := importStore.ImportDirectory(request.Context(), importRequest.SourceDirectory)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -373,15 +404,15 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		imports, err := stories.ListImports(request.Context())
+		importSummaries, err := importStore.ListImports(request.Context())
 		if err != nil {
 			writeImportError(writer, err)
 			return
 		}
-		if imports == nil {
-			imports = []importer.ImportSummary{}
+		if importSummaries == nil {
+			importSummaries = []importer.ImportSummary{}
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"imports": imports})
+		writeJSON(writer, http.StatusOK, map[string]any{"imports": importSummaries})
 	})
 	mux.HandleFunc("GET /api/imports/{import_id}", func(writer http.ResponseWriter, request *http.Request) {
 		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
@@ -392,7 +423,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		response, err := stories.LoadImport(request.Context(), request.PathValue("import_id"))
+		response, err := importStore.LoadImport(request.Context(), request.PathValue("import_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -408,7 +439,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		chunks, err := stories.ListImportChunks(request.Context(), request.PathValue("import_id"))
+		chunks, err := importStore.ListImportChunks(request.Context(), request.PathValue("import_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -438,7 +469,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportBodyError(writer, err)
 			return
 		}
-		extraction, err := stories.ExtractImport(request.Context(), importer.ExtractRequest{
+		extraction, err := importStore.ExtractImport(request.Context(), importer.ExtractRequest{
 			ImportID:  request.PathValue("import_id"),
 			ChunkIDs:  extractionRequest.ChunkIDs,
 			Mode:      extractionRequest.Mode,
@@ -461,7 +492,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		candidates, err := stories.ListImportCandidates(request.Context(), status, kind)
+		candidates, err := importStore.ListImportCandidates(request.Context(), status, kind)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -477,7 +508,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		candidate, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		candidate, err := importStore.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -510,7 +541,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		current, err := importStore.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -520,7 +551,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		candidate, err := stories.UpdateImportCandidate(request.Context(), current.ID, editEnvelope.ExpectedRevision, proposal)
+		candidate, err := importStore.UpdateImportCandidate(request.Context(), current.ID, editEnvelope.ExpectedRevision, proposal)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -568,7 +599,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		current, err := importStore.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -578,7 +609,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		candidate, mergedIDs, err := stories.MergeImportCandidates(request.Context(), current.ID, importer.MergeRequest{
+		candidate, mergedIDs, err := importStore.MergeImportCandidates(request.Context(), current.ID, importer.MergeRequest{
 			OtherCandidateID:      mergeEnvelope.OtherCandidateID,
 			ExpectedRevision:      mergeEnvelope.ExpectedRevision,
 			OtherExpectedRevision: mergeEnvelope.OtherExpectedRevision,
@@ -606,7 +637,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		candidate, err := stories.DiscardImportCandidate(request.Context(), request.PathValue("candidate_id"), discardRequest.ExpectedRevision)
+		candidate, err := importStore.DiscardImportCandidate(request.Context(), request.PathValue("candidate_id"), discardRequest.ExpectedRevision)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -629,7 +660,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		candidate, canonicalRefs, err := stories.AcceptImportCandidate(request.Context(), request.PathValue("candidate_id"), acceptRequest.ExpectedRevision)
+		candidate, canonicalRefs, err := importStore.AcceptImportCandidate(request.Context(), request.PathValue("candidate_id"), acceptRequest.ExpectedRevision)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -903,7 +934,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 	})
 	mux.HandleFunc("/api/codex/{entry_id}/active", methodNotAllowed("GET"))
 	mux.HandleFunc("GET /api/agents", func(writer http.ResponseWriter, request *http.Request) {
-		agents, err := stories.Agents(request.Context())
+		agents, err := actionStore.Agents(request.Context())
 		if err != nil {
 			writeStoryError(writer, err)
 			return
@@ -944,12 +975,12 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, map[string]any{"agents": response})
 	})
 	mux.HandleFunc("GET /api/styles", func(writer http.ResponseWriter, request *http.Request) {
-		styles, err := stories.Styles(request.Context())
+		styles, err := actionStore.Styles(request.Context())
 		if err != nil {
 			writeStoryError(writer, err)
 			return
 		}
-		profiles, _, err := stories.ProviderProfiles(request.Context())
+		profiles, _, err := providers.ProviderProfiles(request.Context())
 		if err != nil {
 			writeProviderError(writer, err)
 			return
@@ -1027,12 +1058,12 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		actions, err := stories.AvailableActions(request.Context(), input)
+		availableActions, err := actionStore.AvailableActions(request.Context(), input)
 		if err != nil {
 			writeStoryError(writer, err)
 			return
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"actions": actions})
+		writeJSON(writer, http.StatusOK, map[string]any{"actions": availableActions})
 	})
 	mux.HandleFunc("POST /api/actions/run", func(writer http.ResponseWriter, request *http.Request) {
 		var runRequest struct {
@@ -1074,7 +1105,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		run, err := stories.Run(request.Context(), domainRequest)
+		run, err := actionStore.Run(request.Context(), domainRequest)
 		if err != nil {
 			writeStoryError(writer, err)
 			return
@@ -1115,7 +1146,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeStoryError(writer, err)
 			return
 		}
-		run, sceneDocument, err := stories.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
+		run, sceneDocument, err := actionStore.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
 		if err != nil {
 			writeStoryError(writer, err)
 			return
@@ -1135,7 +1166,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		run, err := stories.Reject(request.Context(), request.PathValue("run_id"))
+		run, err := actionStore.Reject(request.Context(), request.PathValue("run_id"))
 		if err != nil {
 			writeStoryError(writer, err)
 			return

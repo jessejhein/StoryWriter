@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/codex"
 	"storywork/internal/story"
 )
@@ -29,7 +28,7 @@ func TestCodexCreateAndUpdateRoutesValidateJSONAndMapStatuses(t *testing.T) {
 		Revision:    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	service := &storyServiceStub{codexEntry: entry}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	// Test: POST /api/codex forwards the canonical create payload and returns 201.
 	// Requirements: M3-R02
@@ -99,7 +98,7 @@ func TestCodexCreateAndUpdateRoutesValidateJSONAndMapStatuses(t *testing.T) {
 				loadCodexErr:   testCase.err,
 			}
 			response := httptest.NewRecorder()
-			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
+			newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
 				response,
 				httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body)),
 			)
