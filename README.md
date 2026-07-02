@@ -38,6 +38,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 16. `docs/13_milestone_4_task_prompt.md`
 17. `docs/14_milestone_5_task_prompt.md`
 18. `docs/15_milestone_6_task_prompt.md`
+19. `docs/16_milestone_7_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -109,7 +110,11 @@ Milestone 6 adds:
 
 Milestone 6 is complete. Its durable contract and working artifacts are
 `docs/15_milestone_6_task_prompt.md` and `.plans/milestone_6_*`. Milestone 7 is
-the next incomplete phase.
+the next incomplete phase. Its approved durable design is
+`docs/16_milestone_7_task_prompt.md`; implementation must follow
+`.plans/milestone_7_implementation.md` and must not be described as complete
+until `.plans/milestone_7_test_evidence.md` and the full verification suite are
+complete.
 
 ## Development
 
