@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 	"storywork/internal/project"
 	"storywork/internal/provider"
 	"storywork/internal/story"
@@ -24,6 +25,8 @@ var (
 	ErrProviderInvalid     = errors.New("provider invalid")
 	ErrProviderRejected    = errors.New("provider rejected")
 	ErrDuplicateRunID      = errors.New("duplicate action run ID")
+	ErrLineageConflict     = errors.New("action lineage conflict")
+	ErrSuggestionNoAccept  = errors.New("suggestion runs cannot be accepted")
 )
 
 var runIDPattern = regexp.MustCompile(`^run_[0-9a-f]{20}$`)
@@ -44,7 +47,17 @@ type PatchAcceptor interface {
 	AcceptScenePatch(ctx context.Context, request story.AcceptScenePatchRequest) (story.SceneDocument, error)
 }
 
+// BodyPatchAcceptor applies one reviewed full scene body replacement.
+type BodyPatchAcceptor interface {
+	AcceptSceneBodyPatch(ctx context.Context, request story.AcceptSceneBodyPatchRequest) (story.SceneDocument, error)
+}
+
 type RunIDGenerator interface {
+	Next() (string, error)
+}
+
+// InvitationIDGenerator returns opaque invitation identifiers.
+type InvitationIDGenerator interface {
 	Next() (string, error)
 }
 
@@ -84,20 +97,50 @@ const (
 	RunAccepting RunStatus = "accepting"
 	RunAccepted  RunStatus = "accepted"
 	RunRejected  RunStatus = "rejected"
+	RunCompleted RunStatus = "completed"
 )
 
 type Run struct {
-	RunID          string                 `json:"run_id"`
-	Status         RunStatus              `json:"status"`
-	AgentID        string                 `json:"agent_id"`
-	StyleID        string                 `json:"style_id"`
-	SceneID        string                 `json:"scene_id"`
-	SceneRevision  string                 `json:"scene_revision"`
-	Selection      Selection              `json:"selection"`
-	OriginalText   string                 `json:"-"`
-	Replacement    string                 `json:"-"`
-	ContextSummary agent.ContextSummary   `json:"context_summary"`
-	Provider       agent.ProviderIdentity `json:"provider"`
+	RunID              string                 `json:"run_id"`
+	Status             RunStatus              `json:"status"`
+	AgentID            string                 `json:"agent_id"`
+	StyleID            string                 `json:"style_id"`
+	Scope              contextpack.Scope      `json:"scope,omitempty"`
+	SceneID            string                 `json:"scene_id,omitempty"`
+	SceneRevision      string                 `json:"scene_revision,omitempty"`
+	ChapterID          string                 `json:"chapter_id,omitempty"`
+	ChapterFingerprint string                 `json:"chapter_fingerprint,omitempty"`
+	ParentRunID        string                 `json:"parent_run_id,omitempty"`
+	RootRunID          string                 `json:"root_run_id,omitempty"`
+	ChainDepth         int                    `json:"chain_depth,omitempty"`
+	ParentRelationship InvitationRelationship `json:"-"`
+	Selection          Selection              `json:"selection,omitempty"`
+	OriginalText       string                 `json:"-"`
+	Replacement        string                 `json:"-"`
+	Manifest           contextpack.Manifest   `json:"manifest,omitempty"`
+	ContextSummary     agent.ContextSummary   `json:"context_summary,omitempty"`
+	Findings           []Finding              `json:"findings,omitempty"`
+	Provider           agent.ProviderIdentity `json:"provider"`
+}
+
+// AcceptResult is the patch acceptance outcome with optional follow-up invitations.
+type AcceptResult struct {
+	Run                 Run
+	Scene               story.SceneDocument
+	FollowUpInvitations []PublishedInvitation
+}
+
+// PublishedInvitation is one process-local follow-up offer returned to clients.
+type PublishedInvitation struct {
+	InvitationID string `json:"invitation_id"`
+	ParentRunID  string `json:"parent_run_id"`
+	RootRunID    string `json:"root_run_id"`
+	ChainDepth   int    `json:"chain_depth"`
+	AgentID      string `json:"agent_id"`
+	Scope        string `json:"scope"`
+	SceneID      string `json:"scene_id,omitempty"`
+	ChapterID    string `json:"chapter_id,omitempty"`
+	Relationship string `json:"relationship"`
 }
 
 type RunStore struct {
@@ -123,7 +166,7 @@ func (s *RunStore) Insert(run Run) error {
 		evicted := false
 		for _, runID := range append([]string(nil), s.order...) {
 			current := s.runs[runID]
-			if current.Status == RunAccepted || current.Status == RunRejected {
+			if current.Status == RunAccepted || current.Status == RunRejected || current.Status == RunCompleted {
 				delete(s.runs, runID)
 				s.order = removeID(s.order, runID)
 				evicted = true
@@ -185,6 +228,39 @@ func (s *RunStore) MarkAccepted(runID string) (Run, error) {
 	run.Status = RunAccepted
 	s.runs[runID] = run
 	return run, nil
+}
+
+func (s *RunStore) Get(runID string) (Run, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	run, ok := s.runs[runID]
+	return run, ok
+}
+
+func (s *RunStore) MarkCompleted(runID string) (Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	run, ok := s.runs[runID]
+	if !ok {
+		return Run{}, ErrRunNotFound
+	}
+	if run.Status != RunPending {
+		return Run{}, ErrRunConflict
+	}
+	run.Status = RunCompleted
+	s.runs[runID] = run
+	return run, nil
+}
+
+func (s *RunStore) Update(run Run) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.runs[run.RunID]; !ok {
+		return ErrRunNotFound
+	}
+	s.runs[run.RunID] = run
+	return nil
 }
 
 func (s *RunStore) MarkRejected(runID string) (Run, error) {

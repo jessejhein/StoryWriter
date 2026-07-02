@@ -41,6 +41,12 @@ func (s *Service) WithContextBuilder(builder ContextBuilder) *Service {
 	return s
 }
 
+// WithBodyAcceptor injects the scene body patch acceptor.
+func (s *Service) WithBodyAcceptor(acceptor BodyPatchAcceptor) *Service {
+	s.bodyAcceptor = acceptor
+	return s
+}
+
 // PreviewContext validates and builds a redacted manifest without provider or run side effects.
 func (s *Service) PreviewContext(ctx context.Context, request TaggedRunRequest) (ContextPreviewResult, error) {
 	if err := ValidateTaggedRunRequest(request); err != nil {

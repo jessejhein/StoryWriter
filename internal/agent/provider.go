@@ -2,20 +2,24 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
+	"storywork/internal/contextpack"
 	"storywork/internal/provider"
 )
 
 type GenerateRequest struct {
-	Agent   Agent
-	Style   Style
-	Packet  ContextPacket
-	Summary ContextSummary
+	Agent       Agent
+	Style       Style
+	Packet      ContextPacket
+	TypedPacket contextpack.Packet
+	Summary     ContextSummary
+	Manifest    contextpack.Manifest
 }
 
 type GenerateResponse struct {
@@ -51,14 +55,50 @@ func (p *MockProvider) Generate(ctx context.Context, request GenerateRequest) (G
 		return GenerateResponse{}, ctx.Err()
 	default:
 	}
+	replacement, err := mockReplacement(request)
+	if err != nil {
+		return GenerateResponse{}, err
+	}
 	return GenerateResponse{
-		Replacement: "Mock polished: " + strings.TrimSpace(request.Packet.SelectedText),
+		Replacement: replacement,
 		Provider: ProviderIdentity{
 			ProfileID: request.Style.ProviderProfileID,
 			Type:      provider.TypeOpenAICompatible,
 			Model:     request.Style.Model,
 		},
 	}, nil
+}
+
+func mockReplacement(request GenerateRequest) (string, error) {
+	if request.TypedPacket != nil {
+		switch packet := request.TypedPacket.(type) {
+		case contextpack.ScenePacket:
+			return "Mock rewritten: " + strings.TrimSpace(packet.SceneMarkdown), nil
+		case contextpack.ChapterReviewPacket:
+			return mockChapterReviewFindings(packet), nil
+		case contextpack.SelectionPacket:
+			return "Mock polished: " + strings.TrimSpace(packet.SelectedText), nil
+		default:
+			return "", fmt.Errorf("unsupported packet type: %w", ErrInvalidAgent)
+		}
+	}
+	return "Mock polished: " + strings.TrimSpace(request.Packet.SelectedText), nil
+}
+
+func mockChapterReviewFindings(packet contextpack.ChapterReviewPacket) string {
+	if len(packet.ChapterScenes) == 0 {
+		return `{"findings":[]}`
+	}
+	payload := map[string]any{
+		"findings": []map[string]any{{
+			"title":               "Transition loses urgency",
+			"explanation":         "The shift between the two scenes releases tension.",
+			"scene_ids":           []string{packet.ChapterScenes[0].SceneID},
+			"follow_up_agent_ids": []string{"scene_rewrite"},
+		}},
+	}
+	encoded, _ := json.Marshal(payload)
+	return string(encoded)
 }
 
 func ValidateExecutableSelectionAgent(agent Agent) error {
