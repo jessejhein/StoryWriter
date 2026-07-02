@@ -287,10 +287,12 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(second) error = %v", err)
 	}
-	accepted, savedScene, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+	acceptResult, err := service.Accept(context.Background(), run.RunID, scene.Revision)
 	if err != nil {
 		t.Fatalf("Accept() error = %v", err)
 	}
+	accepted := acceptResult.Run
+	savedScene := acceptResult.Scene
 	if accepted.Status != RunAccepted {
 		t.Fatalf("accepted status = %q, want accepted", accepted.Status)
 	}
@@ -670,7 +672,7 @@ func TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims(t *testing.T
 	if err != nil {
 		t.Fatalf("Run(valid) error = %v", err)
 	}
-	if _, _, err := service.Accept(context.Background(), run.RunID, scene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
+	if _, err := service.Accept(context.Background(), run.RunID, scene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
 		t.Fatalf("Accept(dirty) error = %v, want ErrDirtyWorktree", err)
 	}
 	if rejected, err := service.Reject(context.Background(), run.RunID); err != nil || rejected.Status != RunRejected {
@@ -769,15 +771,15 @@ func TestConcurrentAcceptsAllowExactlyOneRunClaim(t *testing.T) {
 	firstResult := make(chan acceptResult, 1)
 	secondResult := make(chan acceptResult, 1)
 	go func() {
-		run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-		firstResult <- acceptResult{run: run, scene: saved, err: err}
+		result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+		firstResult <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 	}()
 
 	waitForAcceptorStart(t, acceptor.started)
 
 	go func() {
-		run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-		secondResult <- acceptResult{run: run, scene: saved, err: err}
+		result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+		secondResult <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 	}()
 
 	second := <-secondResult
@@ -850,8 +852,8 @@ func TestConcurrentAcceptAndRejectAllowExactlyOneTerminalDecision(t *testing.T) 
 
 			if tc.acceptClaimsFirst {
 				go func() {
-					run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-					acceptResultCh <- acceptResult{run: run, scene: saved, err: err}
+					result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+					acceptResultCh <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 				}()
 				waitForAcceptorStart(t, acceptor.started)
 				go func() {
@@ -876,8 +878,8 @@ func TestConcurrentAcceptAndRejectAllowExactlyOneTerminalDecision(t *testing.T) 
 				startAccept := make(chan struct{})
 				go func() {
 					<-startAccept
-					run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-					acceptResultCh <- acceptResult{run: run, scene: saved, err: err}
+					result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+					acceptResultCh <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 				}()
 				go func() {
 					run, err := service.Reject(context.Background(), run.RunID)
@@ -937,7 +939,7 @@ func TestRunRejectsByteIdenticalProviderOutputWithoutStoringRun(t *testing.T) {
 	if _, err := service.Reject(context.Background(), ids.next); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("Reject() error = %v, want ErrRunNotFound", err)
 	}
-	if _, _, err := service.Accept(context.Background(), ids.next, scene.Revision); !errors.Is(err, ErrRunNotFound) {
+	if _, err := service.Accept(context.Background(), ids.next, scene.Revision); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("Accept() error = %v, want ErrRunNotFound", err)
 	}
 }

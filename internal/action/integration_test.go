@@ -243,7 +243,9 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(second) error = %v", err)
 	}
-	acceptedRun, acceptedScene, err := actionService.Accept(ctx, secondRun.RunID, savedScene.Revision)
+	acceptResult, err := actionService.Accept(ctx, secondRun.RunID, savedScene.Revision)
+	acceptedRun := acceptResult.Run
+	acceptedScene := acceptResult.Scene
 	if err != nil {
 		t.Fatalf("Accept() error = %v", err)
 	}
@@ -302,7 +304,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(third) error = %v", err)
 	}
-	if _, _, err := actionService.Accept(ctx, thirdRun.RunID, "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"); !errors.Is(err, story.ErrStaleRevision) {
+	if _, err := actionService.Accept(ctx, thirdRun.RunID, "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"); !errors.Is(err, story.ErrStaleRevision) {
 		t.Fatalf("Accept(stale revision) error = %v, want ErrStaleRevision", err)
 	}
 	if gitCommitCount(t, ctx, projectPath) != commitCountBeforeRun+1 {
@@ -330,7 +332,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(fourth) error = %v", err)
 	}
-	if _, _, err := actionService.Accept(ctx, fourthRun.RunID, acceptedScene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
+	if _, err := actionService.Accept(ctx, fourthRun.RunID, acceptedScene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
 		t.Fatalf("Accept(dirty worktree) error = %v, want ErrDirtyWorktree", err)
 	}
 	if err := os.WriteFile(projectMetadata, originalProjectMetadata, 0o644); err != nil {

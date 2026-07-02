@@ -173,10 +173,12 @@ func TestM7ExistingPatchAcceptAndRejectSemanticsRemainStable(t *testing.T) {
 		t.Fatalf("Run(second) error = %v", err)
 	}
 
-	accepted, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+	acceptResult, err := service.Accept(context.Background(), run.RunID, scene.Revision)
 	if err != nil {
 		t.Fatalf("Accept() error = %v", err)
 	}
+	accepted := acceptResult.Run
+	saved := acceptResult.Scene
 	if accepted.Status != RunAccepted {
 		t.Fatalf("accepted status = %q, want accepted", accepted.Status)
 	}
@@ -189,7 +191,7 @@ func TestM7ExistingPatchAcceptAndRejectSemanticsRemainStable(t *testing.T) {
 	if saved.Revision != acceptor.scene.Revision {
 		t.Fatalf("saved scene revision = %q, want %q", saved.Revision, acceptor.scene.Revision)
 	}
-	if _, _, err := service.Accept(context.Background(), run.RunID, scene.Revision); !errors.Is(err, ErrRunConflict) {
+	if _, err := service.Accept(context.Background(), run.RunID, scene.Revision); !errors.Is(err, ErrRunConflict) {
 		t.Fatalf("Accept(again) error = %v, want ErrRunConflict", err)
 	}
 }

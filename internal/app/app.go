@@ -145,7 +145,10 @@ func NewHandler(version string) http.Handler {
 		providerService,
 		action.NewRunStore(),
 		action.NewRandomIDGenerator(),
-	).WithMaterialSource(stories).WithContextBuilder(contextpack.NewBuilder())
+	).WithMaterialSource(stories).WithContextBuilder(contextpack.NewBuilder()).
+		WithBodyAcceptor(stories).
+		WithInvitationStore(action.NewInvitationStore(1000)).
+		WithInvitationIDGenerator(action.NewRandomInvitationIDGenerator())
 	return api.NewHandler(api.HandlerDependencies{
 		Projects:  projects,
 		Session:   session,

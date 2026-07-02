@@ -166,12 +166,13 @@ func TestMilestone5RealProviderFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(accept path) error = %v", err)
 	}
-	_, accepted, err := actions.Accept(ctx, secondRun.RunID, saved.Revision)
+	acceptResult, err := actions.Accept(ctx, secondRun.RunID, saved.Revision)
 	if err != nil {
 		t.Fatalf("Accept() error = %v", err)
 	}
-	if accepted.Markdown != "Before Provider polished selection After\n" || gitCommitCount(t, ctx, projectPath) != commitsBefore+1 {
-		t.Fatalf("accepted scene/commits = %q/%d", accepted.Markdown, gitCommitCount(t, ctx, projectPath))
+	acceptedScene := acceptResult.Scene
+	if acceptedScene.Markdown != "Before Provider polished selection After\n" || gitCommitCount(t, ctx, projectPath) != commitsBefore+1 {
+		t.Fatalf("accepted scene/commits = %q/%d", acceptedScene.Markdown, gitCommitCount(t, ctx, projectPath))
 	}
 	if clean, err := git.IsClean(ctx, projectPath); err != nil || !clean {
 		t.Fatalf("IsClean() = %v, %v", clean, err)

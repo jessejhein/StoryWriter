@@ -10,22 +10,26 @@ import (
 	"strings"
 
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 	"storywork/internal/provider"
 	"storywork/internal/story"
 )
 
 // Service coordinates action registry access, provider execution, and run storage.
 type Service struct {
-	session  Session
-	loader   RegistryLoader
-	scenes   SceneLoader
-	acceptor PatchAcceptor
-	provider agent.TextGenerator
-	resolver ProfileResolver
-	runs     *RunStore
-	ids      RunIDGenerator
-	material ContextMaterialSource
-	builder  ContextBuilder
+	session      Session
+	loader       RegistryLoader
+	scenes       SceneLoader
+	acceptor     PatchAcceptor
+	bodyAcceptor BodyPatchAcceptor
+	provider     agent.TextGenerator
+	resolver     ProfileResolver
+	runs         *RunStore
+	ids          RunIDGenerator
+	material     ContextMaterialSource
+	builder      ContextBuilder
+	invitations  *InvitationStore
+	inviteIDs    InvitationIDGenerator
 }
 
 // NewService creates the action orchestration service.
@@ -188,6 +192,7 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 		Status:        RunPending,
 		AgentID:       agentDefinition.ID,
 		StyleID:       styleDefinition.ID,
+		Scope:         contextpack.ScopeSelection,
 		SceneID:       request.SceneID,
 		SceneRevision: request.SceneRevision,
 		Selection: Selection{
@@ -212,16 +217,35 @@ func (s *Service) Reject(ctx context.Context, runID string) (Run, error) {
 }
 
 // Accept applies one pending selection patch to canonical scene markdown.
-func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (Run, story.SceneDocument, error) {
+func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (AcceptResult, error) {
 	if err := ValidateRunID(runID); err != nil {
-		return Run{}, story.SceneDocument{}, err
+		return AcceptResult{}, err
 	}
 	if err := story.ValidateRevision(expectedRevision); err != nil {
-		return Run{}, story.SceneDocument{}, err
+		return AcceptResult{}, err
 	}
 	run, err := s.runs.ClaimAccepting(runID)
 	if err != nil {
-		return Run{}, story.SceneDocument{}, err
+		return AcceptResult{}, err
+	}
+	if run.Scope == contextpack.ScopeScene {
+		_ = s.runs.ReleasePending(runID)
+		return AcceptResult{}, fmt.Errorf("scene body runs require AcceptBody: %w", ErrRunConflict)
+	}
+	if run.Scope == contextpack.ScopeChapterReview || run.Status == RunCompleted {
+		_ = s.runs.ReleasePending(runID)
+		return AcceptResult{}, ErrSuggestionNoAccept
+	}
+	parent, err := ResolveParentRun(s.runs, run)
+	if err != nil {
+		_ = s.runs.ReleasePending(runID)
+		return AcceptResult{}, err
+	}
+	relationship := invitationRelationshipForRun(run, parent)
+	operation, err := BuildOperationMetadata(run, parent, relationship)
+	if err != nil {
+		_ = s.runs.ReleasePending(runID)
+		return AcceptResult{}, err
 	}
 	scene, err := s.acceptor.AcceptScenePatch(ctx, story.AcceptScenePatchRequest{
 		RunID:            run.RunID,
@@ -232,16 +256,21 @@ func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (R
 		EndByte:          run.Selection.EndByte,
 		OriginalText:     run.OriginalText,
 		ReplacementText:  run.Replacement,
+		Operation:        operation,
 	})
 	if err != nil {
 		_ = s.runs.ReleasePending(runID)
-		return Run{}, story.SceneDocument{}, err
+		return AcceptResult{}, err
 	}
 	finalRun, err := s.runs.MarkAccepted(runID)
 	if err != nil {
-		return Run{}, story.SceneDocument{}, err
+		return AcceptResult{}, err
 	}
-	return finalRun, scene, nil
+	invitations, err := s.publishFollowUpInvitations(finalRun, "accept")
+	if err != nil {
+		return AcceptResult{}, err
+	}
+	return AcceptResult{Run: finalRun, Scene: scene, FollowUpInvitations: invitations}, nil
 }
 
 func validateGeneratedReplacement(replacement string) (string, error) {
