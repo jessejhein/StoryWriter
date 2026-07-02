@@ -115,6 +115,14 @@ type SaveSceneRequest struct {
 	ExpectedRevision string
 }
 
+// SceneOperationMetadata is optional validated Git trailer input for accepted AI patches.
+type SceneOperationMetadata struct {
+	OperationID string
+	TriggeredBy string
+	DependsOn   string
+	Scope       string
+}
+
 // AcceptScenePatchRequest applies one reviewed action replacement to a canonical scene.
 type AcceptScenePatchRequest struct {
 	RunID            string
@@ -125,6 +133,7 @@ type AcceptScenePatchRequest struct {
 	EndByte          int
 	OriginalText     string
 	ReplacementText  string
+	Operation        *SceneOperationMetadata
 }
 
 // ReorderRequest reorders direct children using stable IDs.

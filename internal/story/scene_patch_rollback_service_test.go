@@ -19,12 +19,13 @@ func TestAcceptScenePatchHandlesEveryPersistenceFailureBoundary(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		configure       func(*fakeFileStore, *fakeGitStore, *fakeIndexStore, error)
-		wantRollback    int
-		wantUnstage     int
-		wantRebuild     int
-		wantCommitCalls int
+		name                   string
+		configure              func(*fakeFileStore, *fakeGitStore, *fakeIndexStore, error)
+		wantRollback           int
+		wantUnstage            int
+		wantRebuild            int
+		wantCommitCalls        int
+		wantCommitMessageCalls int
 	}{
 		{
 			name: "atomic write",
@@ -42,9 +43,9 @@ func TestAcceptScenePatchHandlesEveryPersistenceFailureBoundary(t *testing.T) {
 		{
 			name: "Git checkpoint",
 			configure: func(_ *fakeFileStore, git *fakeGitStore, _ *fakeIndexStore, cause error) {
-				git.commitErr = cause
+				git.commitMessageErr = cause
 			},
-			wantRollback: 1, wantUnstage: 1, wantRebuild: 2, wantCommitCalls: 1,
+			wantRollback: 1, wantUnstage: 1, wantRebuild: 2, wantCommitMessageCalls: 1,
 		},
 	}
 
@@ -64,10 +65,10 @@ func TestAcceptScenePatchHandlesEveryPersistenceFailureBoundary(t *testing.T) {
 			if !errors.Is(err, cause) {
 				t.Fatalf("AcceptScenePatch() error = %v, want %v", err, cause)
 			}
-			if files.rollbackCalls != test.wantRollback || git.unstageCalls != test.wantUnstage || index.rebuildCalls != test.wantRebuild || git.commitCalls != test.wantCommitCalls {
-				t.Fatalf("rollback/unstage/rebuild/commit = %d/%d/%d/%d, want %d/%d/%d/%d", files.rollbackCalls, git.unstageCalls, index.rebuildCalls, git.commitCalls, test.wantRollback, test.wantUnstage, test.wantRebuild, test.wantCommitCalls)
+			if files.rollbackCalls != test.wantRollback || git.unstageCalls != test.wantUnstage || index.rebuildCalls != test.wantRebuild || git.commitMessageCalls != test.wantCommitMessageCalls {
+				t.Fatalf("rollback/unstage/rebuild/commit = %d/%d/%d/%d, want %d/%d/%d/%d", files.rollbackCalls, git.unstageCalls, index.rebuildCalls, git.commitMessageCalls, test.wantRollback, test.wantUnstage, test.wantRebuild, test.wantCommitMessageCalls)
 			}
-			if git.commitCalls == 1 && git.commitMessages[0] != "Accept AI patch run_0123456789abcdef0123" {
+			if git.commitMessageCalls == 1 && git.commitMessages[0] != "Accept AI patch run_0123456789abcdef0123" {
 				t.Fatalf("commit message = %q", git.commitMessages[0])
 			}
 		})

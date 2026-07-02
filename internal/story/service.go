@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"storywork/internal/codex"
+	"storywork/internal/gitstore"
 	"storywork/internal/mutation"
 	"storywork/internal/project"
 )
@@ -80,6 +81,8 @@ type GitStore interface {
 	IsClean(ctx context.Context, path string) (bool, error)
 	// CommitAll stages and commits the current canonical mutation.
 	CommitAll(ctx context.Context, path, message string) error
+	// CommitAllMessage stages and commits one validated subject and optional trailers.
+	CommitAllMessage(ctx context.Context, path string, message gitstore.CommitMessage) error
 	// UnstageAll removes staged changes without discarding the working tree.
 	UnstageAll(ctx context.Context, path string) error
 }
@@ -492,7 +495,11 @@ func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatch
 	if bytes.Equal(sceneBytes, currentScene.Canonical) {
 		return SceneDocument{}, ErrNoSceneChanges
 	}
-	if err := s.persistFiles(ctx, current.Path, "Accept AI patch "+request.RunID, map[string][]byte{
+	commitMessage, err := commitMessageForScenePatch(request)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.persistFiles(ctx, current.Path, commitMessage, map[string][]byte{
 		filepath.ToSlash(filepath.Join("scenes", request.SceneID+".md")): sceneBytes,
 	}, nil); err != nil {
 		return SceneDocument{}, err
@@ -831,7 +838,7 @@ func (s *Service) ApplyImportMutationInTransaction(ctx context.Context, request 
 
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
 	var reloaded Outline
-	if err := s.persistFiles(ctx, projectPath, message, files, func() error {
+	if err := s.persistFiles(ctx, projectPath, gitstore.CommitMessage{Subject: message}, files, func() error {
 		next, err := s.files.Load(ctx, projectPath)
 		if err != nil {
 			return err
@@ -850,10 +857,25 @@ func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, m
 // it restores the target, unstages app changes, and rebuilds the index from
 // restored files. The caller owns pre-request validation and no-op detection.
 func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message, relativePath string, contents []byte) error {
-	return s.persistFiles(ctx, projectPath, message, map[string][]byte{relativePath: contents}, nil)
+	return s.persistFiles(ctx, projectPath, gitstore.CommitMessage{Subject: message}, map[string][]byte{relativePath: contents}, nil)
 }
 
-func (s *Service) persistFiles(ctx context.Context, projectPath, message string, files map[string][]byte, afterWrite func() error) error {
+func commitMessageForScenePatch(request AcceptScenePatchRequest) (gitstore.CommitMessage, error) {
+	message := gitstore.CommitMessage{Subject: "Accept AI patch " + request.RunID}
+	if request.Operation == nil {
+		return message, nil
+	}
+	message.OperationID = request.Operation.OperationID
+	message.TriggeredBy = request.Operation.TriggeredBy
+	message.DependsOn = request.Operation.DependsOn
+	message.Scope = request.Operation.Scope
+	if _, err := gitstore.FormatCommitMessage(message); err != nil {
+		return gitstore.CommitMessage{}, fmt.Errorf("operation metadata: %w", err)
+	}
+	return message, nil
+}
+
+func (s *Service) persistFiles(ctx context.Context, projectPath string, message gitstore.CommitMessage, files map[string][]byte, afterWrite func() error) error {
 	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
 	if err != nil {
 		return err
@@ -866,7 +888,7 @@ func (s *Service) persistFiles(ctx context.Context, projectPath, message string,
 	if err := s.index.Rebuild(ctx, projectPath); err != nil {
 		return s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
-	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
+	if err := s.git.CommitAllMessage(ctx, projectPath, message); err != nil {
 		return s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
 	return nil

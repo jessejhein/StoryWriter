@@ -39,6 +39,13 @@ func (f *failingGitStore) CommitAll(ctx context.Context, path, message string) e
 	}
 	return f.delegate.CommitAll(ctx, path, message)
 }
+func (f *failingGitStore) CommitAllMessage(ctx context.Context, path string, message gitstore.CommitMessage) error {
+	f.commitCalls++
+	if f.commitErr != nil && f.commitCalls > f.failAfter {
+		return f.commitErr
+	}
+	return f.delegate.CommitAllMessage(ctx, path, message)
+}
 func (f *failingGitStore) UnstageAll(ctx context.Context, path string) error {
 	return f.delegate.UnstageAll(ctx, path)
 }

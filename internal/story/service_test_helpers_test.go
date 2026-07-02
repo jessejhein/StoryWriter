@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"storywork/internal/codex"
+	"storywork/internal/gitstore"
 	"storywork/internal/project"
 )
 
@@ -39,14 +40,16 @@ func (g *fakeIDGenerator) Next(_ NodeKind) (string, error) {
 }
 
 type fakeGitStore struct {
-	clean          bool
-	isCleanErr     error
-	isCleanCalls   int
-	commitCalls    int
-	unstageCalls   int
-	commitMessages []string
-	commitErr      error
-	unstageErr     error
+	clean              bool
+	isCleanErr         error
+	isCleanCalls       int
+	commitCalls        int
+	commitMessageCalls int
+	unstageCalls       int
+	commitMessages     []string
+	commitErr          error
+	commitMessageErr   error
+	unstageErr         error
 }
 
 func (g *fakeGitStore) IsClean(context.Context, string) (bool, error) {
@@ -57,6 +60,20 @@ func (g *fakeGitStore) IsClean(context.Context, string) (bool, error) {
 func (g *fakeGitStore) CommitAll(_ context.Context, _ string, message string) error {
 	g.commitCalls++
 	g.commitMessages = append(g.commitMessages, message)
+	return g.commitErr
+}
+
+func (g *fakeGitStore) CommitAllMessage(_ context.Context, _ string, message gitstore.CommitMessage) error {
+	g.commitCalls++
+	g.commitMessageCalls++
+	formatted, err := gitstore.FormatCommitMessage(message)
+	if err != nil {
+		return err
+	}
+	g.commitMessages = append(g.commitMessages, formatted)
+	if g.commitMessageErr != nil {
+		return g.commitMessageErr
+	}
 	return g.commitErr
 }
 
