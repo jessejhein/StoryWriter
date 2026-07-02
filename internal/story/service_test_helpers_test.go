@@ -5,6 +5,7 @@ package story
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
@@ -128,6 +129,8 @@ type fakeFileStore struct {
 	marshalCodexEntryErr     error
 	progressionBytes         []byte
 	marshalProgressionsErr   error
+	scenes                   map[string]SceneDocument
+	loadSceneCallsHook       func()
 }
 
 func (s *fakeFileStore) Load(context.Context, string) (Outline, error) {
@@ -152,10 +155,20 @@ func (s *fakeFileStore) Exists(_ context.Context, _ string, relativePath string)
 	return s.exists[relativePath], nil
 }
 
-func (s *fakeFileStore) LoadScene(context.Context, string, string) (SceneDocument, error) {
+func (s *fakeFileStore) LoadScene(_ context.Context, _ string, sceneID string) (SceneDocument, error) {
 	s.loadSceneCalls++
+	if s.loadSceneCallsHook != nil {
+		s.loadSceneCallsHook()
+	}
 	if s.loadSceneErr != nil {
 		return SceneDocument{}, s.loadSceneErr
+	}
+	if s.scenes != nil {
+		scene, ok := s.scenes[sceneID]
+		if !ok {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", sceneID, ErrSceneNotFound)
+		}
+		return scene, nil
 	}
 	if s.reloadedScene != nil && s.loadSceneCalls > 1 {
 		return *s.reloadedScene, nil
