@@ -14,13 +14,16 @@ import (
 	"storywork/internal/action"
 	"storywork/internal/agent"
 	"storywork/internal/api"
+	"storywork/internal/branch"
 	"storywork/internal/contextpack"
 	"storywork/internal/extract"
 	"storywork/internal/gitstore"
 	"storywork/internal/importer"
 	"storywork/internal/index"
+	"storywork/internal/modelchat"
 	"storywork/internal/mutation"
 	"storywork/internal/project"
+	"storywork/internal/projectcheck"
 	"storywork/internal/provider"
 	"storywork/internal/story"
 	"storywork/internal/storyfile"
@@ -136,6 +139,35 @@ func NewHandler(version string) http.Handler {
 		WithMutationCoordinator(mutations).
 		WithExtractor(extract.NewRemoteExtractor(providerService, nil)).
 		WithStoryMutator(stories)
+	branchRepo := &branch.GitRepository{Store: git}
+	branchAnalyzer := &branch.ModelchatAnalyzer{
+		Resolver: func(ctx context.Context, profileID string) (modelchat.Request, error) {
+			resolved, ok, err := providerService.Resolve(ctx, profileID)
+			if err != nil {
+				return modelchat.Request{}, err
+			}
+			if !ok {
+				return modelchat.Request{}, branch.ErrProviderUnavailable
+			}
+			return modelchat.Request{Profile: resolved}, nil
+		},
+		Completer: modelchat.NewHTTPClient(),
+	}
+	branchService := branch.NewService(
+		branchRepo,
+		disposableIndex,
+		mutations,
+		branch.SessionAdapter{PathFn: func() (string, bool) {
+			current, ok := session.Current()
+			if !ok {
+				return "", false
+			}
+			return current.Path, true
+		}},
+		projectcheck.New(),
+		branchAnalyzer,
+		branch.NewRandomIDGenerator(),
+	)
 	actions := action.NewService(
 		session,
 		agent.NewLoader(),
@@ -156,6 +188,7 @@ func NewHandler(version string) http.Handler {
 		Actions:   actions,
 		Providers: providerService,
 		Imports:   &importHandlerStore{service: importService},
+		Branches:  branchService,
 		Version:   version,
 	})
 }

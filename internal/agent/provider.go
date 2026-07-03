@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"storywork/internal/contextpack"
+	"storywork/internal/modelchat"
 	"storywork/internal/provider"
 )
 
@@ -31,16 +32,13 @@ type TextGenerator interface {
 	Generate(context.Context, GenerateRequest) (GenerateResponse, error)
 }
 
-type ProviderIdentity struct {
-	ProfileID string        `json:"profile_id"`
-	Type      provider.Type `json:"type"`
-	Model     string        `json:"model"`
-}
+// ProviderIdentity is a compatibility alias for modelchat.ProviderIdentity.
+type ProviderIdentity = modelchat.ProviderIdentity
 
 var (
-	ErrProviderInvalid  = fmt.Errorf("provider invalid")
-	ErrProviderRejected = fmt.Errorf("provider rejected")
-	ErrProviderOffline  = fmt.Errorf("provider unavailable")
+	ErrProviderInvalid  = modelchat.ErrProviderInvalid
+	ErrProviderRejected = modelchat.ErrProviderRejected
+	ErrProviderOffline  = modelchat.ErrProviderOffline
 )
 
 type MockProvider struct{}

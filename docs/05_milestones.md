@@ -8,9 +8,8 @@ Each milestone is a sprint. Each sprint must leave the app working.
 
 ## Current status
 
-- Milestones 0 through 7: implemented; `make check` green on July 2, 2026.
-- Milestone 8: next incomplete phase.
-- Milestones 8 through 9: roadmap only.
+- Milestones 0 through 8: implemented; `make check` green on July 2, 2026.
+- Milestone 9: next incomplete phase.
 
 The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
 
@@ -264,9 +263,9 @@ boundaries with exactly one checkpoint.
 
 ## Milestone 7 — Timeline-aware RAG for AI actions
 
-Planning status: durable contract approved July 1, 2026; implementation not
-started. See `docs/16_milestone_7_task_prompt.md`. The working sequence, status,
-and evidence scaffold live in `.plans/milestone_7_*`.
+Status: complete July 2, 2026. Durable contract:
+`docs/16_milestone_7_task_prompt.md`. Evidence:
+`.plans/milestone_7_test_evidence.md`.
 
 ### Goal
 
@@ -304,28 +303,43 @@ them.
 
 ## Milestone 8 — What-if branches and ramification analysis
 
+Status: complete July 2, 2026. Durable contract:
+`docs/17_milestone_8_task_prompt.md`. Evidence:
+`.plans/milestone_8_test_evidence.md`.
+
 ### Goal
 
-Support controlled branch experiments.
+Support controlled what-if experiments from fixed `main` canon with direct
+comparison, explicit ramification analysis, and conservative whole-file
+promotion.
 
 ### Stories
 
-- As an author, I can create a what-if branch from canon.
-- As an author, I can edit/generate inside the branch without changing canon.
-- As an author, I can ask for ramifications of a change.
-- As an author, I can compare branch changes to canon.
-- As an author, I can manually promote selected branch files to canon.
+- As an author, I can create a what-if experiment from current `main` and
+  continue normal story, Codex, import, and AI flows on that branch.
+- As an author, I can compare the active experiment to current `main` without
+  switching away from it.
+- As an author, I can inspect read-only side-by-side canon and experiment text
+  with accessible line-level highlighting.
+- As an author, I can request explicit ramification analysis and receive strict
+  advisory findings without file mutation.
+- As an author, I can promote selected complete files to `main` or discard the
+  experiment explicitly.
 
 ### TDD focus
 
-- Git branch adapter,
-- branch status/diff parsing,
-- ramification proposal schema,
-- manual promotion workflow.
+- `internal/branch` lifecycle, comparison, promotion, and discard orchestration,
+- `internal/modelchat` shared transport extraction,
+- `internal/projectcheck` full-project validation before promotion,
+- Git adapter branch/ref/blob/tree operations,
+- Branches workspace UI with stale-response protection and branch-change
+  invalidation.
 
 ### Done when
 
-The user can create a branch, change a scene/Codex progression, compare against canon, and promote or discard manually.
+The user can create an experiment, mutate it while `main` stays unchanged,
+compare against current canon from Git objects, run explicit analysis, promote
+selected whole files with rollback-safe validation, or discard safely.
 
 ---
 

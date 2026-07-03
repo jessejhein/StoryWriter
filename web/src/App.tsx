@@ -9,6 +9,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { createProject, getHealth, openProject, type Project } from './api'
 import ConfirmDialog from './components/ConfirmDialog'
+import BranchWorkbench from './branches/BranchWorkbench'
 import CodexWorkbench from './codex/CodexWorkbench'
 import SceneEditor from './editor/SceneEditor'
 import ImportReviewWorkbench from './imports/ImportReviewWorkbench'
@@ -20,6 +21,7 @@ type ProjectView =
   | { mode: 'outline' }
   | { mode: 'codex' }
   | { mode: 'imports' }
+  | { mode: 'branches' }
   | { mode: 'scene'; sceneID: string }
 
 type ShellView =
@@ -40,6 +42,7 @@ export default function App() {
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
   const [pendingView, setPendingView] = useState<ShellView | null>(null)
+  const [branchEpoch, setBranchEpoch] = useState(0)
 
   useEffect(() => {
     getHealth()
@@ -90,6 +93,12 @@ export default function App() {
     }
     setShellView(pendingView)
     setPendingView(null)
+    setDirty(false)
+  }
+
+  function handleBranchChanged() {
+    setShellView({ area: 'project', view: { mode: 'outline' } })
+    setBranchEpoch((epoch) => epoch + 1)
     setDirty(false)
   }
 
@@ -152,21 +161,29 @@ export default function App() {
             <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'outline' } })}>Outline</button>
             <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'codex' } })}>Codex</button>
             <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'imports' } })}>Import Review</button>
+            <button type="button" onClick={() => navigate({ area: 'project', view: { mode: 'branches' } })}>Branches</button>
           </nav>
           {shellView.view.mode === 'outline' ? (
-            <OutlineWorkbench project={project} onOpenScene={(sceneID) => navigate({ area: 'project', view: { mode: 'scene', sceneID } })} />
+            <OutlineWorkbench key={branchEpoch} project={project} onOpenScene={(sceneID) => navigate({ area: 'project', view: { mode: 'scene', sceneID } })} />
           ) : shellView.view.mode === 'scene' ? (
             <SceneEditor
-              key={shellView.view.sceneID}
+              key={`${branchEpoch}:${shellView.view.sceneID}`}
               project={project}
               sceneID={shellView.view.sceneID}
               onBack={() => navigate({ area: 'project', view: { mode: 'outline' } })}
               onDirtyChange={setDirty}
             />
           ) : shellView.view.mode === 'imports' ? (
-            <ImportReviewWorkbench onDirtyChange={setDirty} />
+            <ImportReviewWorkbench key={branchEpoch} onDirtyChange={setDirty} />
+          ) : shellView.view.mode === 'branches' ? (
+            <BranchWorkbench
+              appDirty={dirty}
+              onBranchChanged={handleBranchChanged}
+              onDirtyChange={setDirty}
+              project={project}
+            />
           ) : (
-            <CodexWorkbench project={project} onDirtyChange={setDirty} />
+            <CodexWorkbench key={branchEpoch} project={project} onDirtyChange={setDirty} />
           )}
           <ConfirmDialog
             open={pendingView !== null}

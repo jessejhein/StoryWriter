@@ -647,14 +647,138 @@ POST /api/review/candidates/{candidate_id}/merge
 
 Extraction creates candidates. It does not directly mutate canon.
 
-## Branches
+## Branches (Milestone 8)
 
 ```http
-GET /api/branches
+GET  /api/branches/status
+GET  /api/branches
 POST /api/branches
-GET /api/branches/{branch_name}/diff
-POST /api/branches/{branch_name}/promote
-POST /api/branches/{branch_name}/discard
+POST /api/branches/switch
+GET  /api/branches/{experiment_id}/comparison
+GET  /api/branches/{experiment_id}/comparison/file?path=<project-relative-path>
+POST /api/branches/{experiment_id}/ramifications
+POST /api/branches/{experiment_id}/promote
+POST /api/branches/{experiment_id}/discard
 ```
 
-MVP branch promotion can be manual/coarse. Do not build complex merge UI first.
+Status response uses the frontend's explicit branch-kind contract and never
+exposes a project path:
+
+```json
+{
+  "active_branch":"branch/obi-wan-lives-0123456789abcdef0123",
+  "active_kind":"experiment",
+  "main_head":"<full object id>",
+  "experiment_head":"<full object id>",
+  "active_experiment_id":"brn_0123456789abcdef0123",
+  "worktree_clean":true
+}
+```
+
+For `main`, `active_kind` is `canon`, and both experiment fields are `null`.
+Experiment list entries add an author-safe `display_name` derived from the
+validated branch slug.
+
+Create body:
+
+```json
+{"name":"Obi-Wan lives"}
+```
+
+Switch body:
+
+```json
+{"target":"main"}
+```
+
+or:
+
+```json
+{"target":"brn_0123456789abcdef0123","expected_head":"<full object id>"}
+```
+
+Comparison response:
+
+```json
+{
+  "experiment_id":"brn_0123456789abcdef0123",
+  "branch_name":"branch/obi-wan-lives-0123456789abcdef0123",
+  "main_head":"<full object id>",
+  "experiment_head":"<full object id>",
+  "base_head":"<full object id>",
+  "fingerprint":"sha256:...",
+  "files":[{"path":"scenes/scn_....md","status":"modified"}]
+}
+```
+
+File comparison response:
+
+```json
+{
+  "path":"scenes/scn_....md",
+  "status":"modified",
+  "main_head":"<full object id>",
+  "experiment_head":"<full object id>",
+  "fingerprint":"sha256:...",
+  "canon":{"exists":true,"text":"..."},
+  "experiment":{"exists":true,"text":"..."}
+}
+```
+
+Ramification body:
+
+```json
+{
+  "goal":"Explore the consequences if Obi-Wan survives.",
+  "profile_id":"local_ollama",
+  "model":"qwen2.5:7b",
+  "expected_main_head":"<full object id>",
+  "expected_experiment_head":"<full object id>",
+  "comparison_fingerprint":"sha256:..."
+}
+```
+
+Promotion body:
+
+```json
+{
+  "paths":["scenes/scn_....md"],
+  "expected_main_head":"<full object id>",
+  "expected_experiment_head":"<full object id>",
+  "comparison_fingerprint":"sha256:..."
+}
+```
+
+Promotion response:
+
+```json
+{
+  "main_head":"<new full object id>",
+  "promoted_paths":["scenes/scn_....md"],
+  "experiment_id":"brn_0123456789abcdef0123"
+}
+```
+
+Discard body:
+
+```json
+{"expected_experiment_head":"<full object id>"}
+```
+
+Milestone 8 status rules:
+
+- `400 Bad Request`: malformed strict JSON/query, invalid name/ref/ID/path,
+  duplicate/empty path selection, unsupported Git state, or analysis budget.
+- `404 Not Found`: valid absent experiment or comparison path.
+- `409 Conflict`: no active project, dirty worktree, stale ref/fingerprint,
+  detached/unmanaged active branch, selected path changed on `main`, invalid
+  promotion subset, or branch deletion/switch conflict.
+- `413 Request Entity Too Large`: HTTP body or comparison blob exceeds its
+  documented limit.
+- `502 Bad Gateway`: provider rejects or returns invalid ramification output.
+- `503 Service Unavailable`: provider unavailable or timeout/cancellation.
+- `500 Internal Server Error`: malformed repository/canonical state, index,
+  Git, filesystem, commit, validation, or rollback failure.
+
+Comparison and branch navigation never call a provider. Ramification findings are
+transient and expose no accept route.

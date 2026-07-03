@@ -182,26 +182,53 @@ progressions:
 
 Display text may say "After Chapter 3", but storage must reference `scn_0007` or another stable ID.
 
-## Branch storage
+## Branch storage (Milestone 8)
 
-Use Git branches for what-if branches.
+Canon is the fixed local Git branch named exactly `main`. Project creation
+already initializes `main`; Storywork does not make canon configurable.
 
-Example branch names:
+Managed what-if experiments are Git branches under the reserved `branch/`
+namespace. Each experiment ID is `brn_` plus 20 lowercase hexadecimal
+characters. The Git ref is:
 
 ```text
-branch/obiwan-dies
-branch/obiwan-lives
-branch/yumina-politics-heavier
+branch/<slug>-<20 lowercase hexadecimal characters>
 ```
 
-Branch actions:
+Example:
 
-- create branch from current canon,
-- generate/edit files inside branch,
-- compare branch to canon with Git diff,
-- manually promote selected changes to canon.
+```text
+branch/obi-wan-lives-0123456789abcdef0123
+```
 
-MVP does not need automatic complex merge/cherry-pick UI. Manual promotion is acceptable.
+Rules:
+
+- experiment creation starts at the current `main` commit and checks out the new
+  experiment in the one working directory,
+- the disposable SQLite index always represents the active checked-out tree only;
+  it is rebuilt after every successful branch switch,
+- comparison reads current `main` and experiment head trees directly from Git
+  without a second checkout,
+- ramification analysis is transient: prompts, diff prose, and findings are not
+  written to Git, SQLite, project files, action-run stores, or browser storage,
+- promotion copies or deletes selected complete canonical text files onto `main`,
+  runs strict full-project validation through `internal/projectcheck`, rebuilds
+  the index, and creates exactly one promotion commit,
+- discard deletes only the experiment ref; `main` history and tree are unchanged.
+
+Promotion commit bodies use a separate typed formatter from accepted AI-action
+commits:
+
+```text
+Promote what-if brn_0123456789abcdef0123
+
+Storywork-Experiment-ID: brn_0123456789abcdef0123
+Storywork-Source-Commit: <full experiment object id>
+Storywork-Base-Commit: <full merge-base object id>
+```
+
+Milestone 8 does not implement hunk-level merge, rebase, cherry-pick, remote
+Git, or per-branch SQLite databases.
 
 ## SQLite index responsibilities
 

@@ -13,7 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"storywork/internal/agent"
+	"storywork/internal/modelchat"
 	"storywork/internal/provider"
 )
 
@@ -90,7 +90,7 @@ type Request struct {
 
 type Result struct {
 	Proposals []Proposal
-	Provider  agent.ProviderIdentity
+	Provider  modelchat.ProviderIdentity
 }
 
 type Extractor interface {
@@ -137,21 +137,21 @@ func (e *RemoteExtractor) Extract(ctx context.Context, request Request) (Result,
 		return Result{}, err
 	}
 	if e.resolver == nil {
-		return Result{}, agent.ErrProviderInvalid
+		return Result{}, modelchat.ErrProviderInvalid
 	}
 	resolved, found, err := e.resolver.Resolve(ctx, request.ProfileID)
 	if err != nil {
 		return Result{}, err
 	}
 	if !found || resolved.Readiness != provider.ReadinessReady || !resolved.Profile.Capabilities.Chat {
-		return Result{}, agent.ErrProviderInvalid
+		return Result{}, modelchat.ErrProviderInvalid
 	}
 	handler := modeHandlers[request.Mode]
 	systemPrompt, userPrompt := handler.BuildPrompts(request)
-	chatResponse, err := agent.CompleteChat(ctx, e.client, agent.ChatRequest{
+	chatResponse, err := modelchat.Complete(ctx, e.client, modelchat.Request{
 		Profile: resolved,
 		Model:   request.Model,
-		Messages: []agent.ChatMessage{
+		Messages: []modelchat.Message{
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},

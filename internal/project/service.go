@@ -3,10 +3,11 @@ package project
 // service.go orchestrates project-folder creation, validation, and derived-index setup.
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	starter "storywork/templates"
 )
@@ -217,27 +220,47 @@ func yamlScalar(value string) string {
 	return strconv.Quote(value)
 }
 
-func readMetadata(path string) (string, string, error) {
-	file, err := os.Open(path)
+type metadataDocument struct {
+	Version       int    `yaml:"version"`
+	ID            string `yaml:"id"`
+	Name          string `yaml:"name"`
+	CreatedAt     string `yaml:"created_at"`
+	DefaultBranch string `yaml:"default_branch"`
+	Settings      *struct {
+		ProseFormat                  string `yaml:"prose_format"`
+		VimModeDefault               *bool  `yaml:"vim_mode_default"`
+		AIMutationRequiresAcceptance *bool  `yaml:"ai_mutation_requires_acceptance"`
+	} `yaml:"settings"`
+}
+
+// ValidateMetadataFile strictly validates project.yaml and returns its stable identity.
+func ValidateMetadataFile(path string) (string, string, error) {
+	body, err := os.ReadFile(path)
 	if err != nil {
 		return "", "", fmt.Errorf("read project.yaml: %w", err)
 	}
-	defer file.Close()
-
-	values := make(map[string]string)
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		key, value, found := strings.Cut(line, ":")
-		if found && (key == "id" || key == "name") {
-			values[key] = strings.Trim(strings.TrimSpace(value), `"'`)
-		}
+	var document metadataDocument
+	decoder := yaml.NewDecoder(bytes.NewReader(body))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&document); err != nil {
+		return "", "", fmt.Errorf("decode project.yaml: %w", err)
 	}
-	if err := scanner.Err(); err != nil {
-		return "", "", fmt.Errorf("scan project.yaml: %w", err)
+	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return "", "", errors.New("project.yaml must contain exactly one YAML document")
 	}
-	if values["id"] == "" || values["name"] == "" {
-		return "", "", errors.New("project.yaml must contain id and name")
+	if document.Version != 1 || strings.TrimSpace(document.ID) == "" || strings.TrimSpace(document.Name) == "" {
+		return "", "", errors.New("project.yaml has invalid version, id, or name")
 	}
-	return values["id"], values["name"], nil
+	if _, err := time.Parse(time.RFC3339, document.CreatedAt); err != nil {
+		return "", "", errors.New("project.yaml has invalid created_at")
+	}
+	if document.Settings == nil || document.Settings.VimModeDefault == nil || document.Settings.AIMutationRequiresAcceptance == nil {
+		return "", "", errors.New("project.yaml settings are incomplete")
+	}
+	if document.DefaultBranch != "main" || document.Settings.ProseFormat != "markdown" || !*document.Settings.AIMutationRequiresAcceptance {
+		return "", "", errors.New("project.yaml has unsupported settings")
+	}
+	return document.ID, document.Name, nil
 }
+
+func readMetadata(path string) (string, string, error) { return ValidateMetadataFile(path) }

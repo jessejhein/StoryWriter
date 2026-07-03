@@ -75,12 +75,33 @@ Reasons:
 - Save edits, merge compatible pending candidates, discard, or accept.
 - Confirm before losing dirty candidate edits.
 
-### Branch screen
+### Branches workspace (Milestone 8)
 
-- Show current branch.
-- Create what-if branch.
-- Compare branch to canon.
-- Promote/discard manually.
+Top-level navigation; the scene editor does not own Git state.
+
+- active branch badge with explicit `Canon` or `Experiment` label,
+- deterministic managed experiment list from `GET /api/branches`,
+- create, switch, compare, analyze, promote, and discard controls,
+- changed-file list with `added`/`modified`/`deleted` status text and whole-file
+  promotion checkboxes,
+- read-only side-by-side comparison with `Canon (main)` and `Experiment` panes,
+  line numbers, textual added/deleted/modified indicators, independent horizontal
+  scrolling, and practical synchronized vertical scrolling for aligned rows,
+- explicit ramification summary/findings grouped by severity and category with an
+  advisory notice and no accept/apply controls,
+- confirmation before branch switch, promotion, or discard,
+- dirty browser-draft guard using the existing discard-confirmation pattern;
+  confirmed switch clears only browser-local unsaved state and never asks Git to
+  overwrite a dirty worktree,
+- stale-response protection keyed by project, experiment, both heads,
+  comparison fingerprint, and selected path,
+- after successful branch change, reset editor, Codex, import-review, action
+  preview/run/invitation, comparison text, and ramification findings before
+  refetching outline and branch status.
+
+Branch comparison text, goals, and findings are not persisted in browser
+storage. Inputs beyond the frontend diff bound show both complete texts with an
+explicit message that line highlighting is unavailable.
 
 ## Selection AI flow
 

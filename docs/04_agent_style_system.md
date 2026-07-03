@@ -13,9 +13,6 @@ Examples:
 - Chapter Refiner
 - Outline Architect
 - Codex Extractor
-- Ramification Analyzer
-- Branch Compare
-
 Agents define:
 
 - where they apply,
@@ -388,3 +385,25 @@ Process-local invitations expire after 30 minutes, are one-time claims, and are
 published atomically when one finding offers actions for multiple scenes.
 Context budgets use a conservative byte estimator; UI labels estimates as
 estimates, not billed tokens.
+
+## Milestone 8 branch analysis versus editor actions
+
+Ramification analysis is **not** a new editor action scope. Milestone 7 actions
+remain limited to selection, scene rewrite, and chapter review. Branch
+consequences are a separate branch-owned use case:
+
+- the Branches workspace requests analysis only through
+  `POST /api/branches/{experiment_id}/ramifications`,
+- creating, switching, listing, or comparing experiments never calls a provider,
+- the branch analyzer depends on `internal/modelchat`, not `internal/agent`
+  registry or action-run orchestration,
+- provider output is strict structured findings with category, severity, affected
+  paths, and advisory recommended actions only; findings cannot be accepted as
+  file patches,
+- comparison packets include only the author goal, sorted changed paths, and
+  bounded unified diff text for allowed project files.
+
+Shared provider chat transport now lives in `internal/modelchat`. Agent actions
+and import extraction consume the same neutral completer contract through thin
+adapters; provider wire shapes remain adapter details and do not enter action
+runs, extraction candidates, or branch comparison responses.
