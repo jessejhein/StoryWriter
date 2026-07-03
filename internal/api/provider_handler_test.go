@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/provider"
 )
 
@@ -42,7 +41,7 @@ func TestProviderProfileRoutesReturnExactJSONShapes(t *testing.T) {
 		},
 		providerRevision: &revision,
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/provider-profiles", nil))
@@ -51,7 +50,7 @@ func TestProviderProfileRoutesReturnExactJSONShapes(t *testing.T) {
 	}
 	assertJSONShape(t, response.Body.Bytes(), `{"profiles":[{"id":"hosted_api","name":"Hosted API","type":"openai_compatible","base_url":"https://api.example.test/v1","auth":{"type":"bearer_env","credential_env":"STORYWORK_HOSTED_API_KEY"},"capabilities":{"chat":true,"streaming":false,"structured_output":false,"max_context_tokens":32768},"readiness":"ready"}],"revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)
 
-	emptyHandler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	emptyHandler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	response = httptest.NewRecorder()
 	emptyHandler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/provider-profiles", nil))
 	if response.Code != http.StatusOK {
@@ -82,7 +81,7 @@ func TestProviderProfileRouteValidationAndStatusMapping(t *testing.T) {
 
 	conflictStub := &storyServiceStub{saveProviderErr: provider.ErrProfileRevisionConflict}
 	response := httptest.NewRecorder()
-	api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, conflictStub, "test").ServeHTTP(
+	newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, conflictStub, "test").ServeHTTP(
 		response,
 		httptest.NewRequest(http.MethodPut, "/api/provider-profiles", strings.NewReader(`{"profiles":[],"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`)),
 	)
@@ -118,7 +117,7 @@ func TestProviderProfileRouteValidationAndStatusMapping(t *testing.T) {
 			t.Parallel()
 			stub := &storyServiceStub{}
 			response := httptest.NewRecorder()
-			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test").ServeHTTP(
+			newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test").ServeHTTP(
 				response,
 				httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body)),
 			)
@@ -138,7 +137,7 @@ func TestProviderProfileRouteValidationAndStatusMapping(t *testing.T) {
 func TestProviderProfileRouteEnforcesBodyLimitBoundary(t *testing.T) {
 	t.Parallel()
 
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 
 	allowedBody := exactSizedProviderRequestBody(t, 1<<20)
 	response := httptest.NewRecorder()

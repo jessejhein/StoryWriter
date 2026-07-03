@@ -3,6 +3,7 @@ package gitstore
 // store.go implements the Git adapter used for project integrity checks and checkpoints.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -28,19 +29,60 @@ func (s *Store) Init(ctx context.Context, path string) error {
 	return nil
 }
 
-// CommitAll stages all non-ignored files and records a commit.
+// CommitAll stages all non-ignored files and records a subject-only commit.
 func (s *Store) CommitAll(ctx context.Context, path, message string) error {
+	formatted, err := FormatCommitMessage(CommitMessage{Subject: message})
+	if err != nil {
+		return fmt.Errorf("format commit message: %w", err)
+	}
+	return s.commitFormatted(ctx, path, formatted)
+}
+
+// CommitAllMessage stages all non-ignored files and records one validated commit body.
+func (s *Store) CommitAllMessage(ctx context.Context, path string, message CommitMessage) error {
+	formatted, err := FormatCommitMessage(message)
+	if err != nil {
+		return fmt.Errorf("format commit message: %w", err)
+	}
+	return s.commitFormatted(ctx, path, formatted)
+}
+
+// HasOperationInAncestry reports whether current branch ancestry contains an exact operation trailer.
+func (s *Store) HasOperationInAncestry(ctx context.Context, path, operationID string) (bool, error) {
+	if err := validateRunID("operation id", operationID); err != nil {
+		return false, err
+	}
+	output, err := s.run(ctx, "-C", path, "log", "--format=%B%x00")
+	if err != nil {
+		return false, fmt.Errorf("inspect operation ancestry: %w", err)
+	}
+	want := "Storywork-Operation-ID: " + operationID
+	for _, body := range strings.Split(output, "\x00") {
+		for _, line := range strings.Split(body, "\n") {
+			if line == want {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
+func (s *Store) commitFormatted(ctx context.Context, path, message string) error {
 	if _, err := s.run(ctx, "-C", path, "add", "--all"); err != nil {
 		return fmt.Errorf("stage project files: %w", err)
 	}
-	if _, err := s.run(ctx,
+	command := exec.CommandContext(ctx, s.executable,
 		"-C", path,
 		"-c", "user.name=AI Story Workshop",
 		"-c", "user.email=storywork@localhost",
-		"commit", "-m", message,
-	); err != nil {
-		return fmt.Errorf("commit project files: %w", err)
+		"commit", "-F", "-",
+	)
+	command.Stdin = strings.NewReader(message)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", strings.Join(command.Args, " "), err, strings.TrimSpace(string(output)))
 	}
+	_ = bytes.TrimSpace(output)
 	return nil
 }
 

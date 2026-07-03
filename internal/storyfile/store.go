@@ -242,6 +242,15 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 	return outline, nil
 }
 
+// LoadOutlineBytes returns the exact canonical outline.yaml bytes for optimistic fingerprints.
+func (s *Store) LoadOutlineBytes(_ context.Context, projectPath string) ([]byte, error) {
+	outlineBytes, err := s.readFile(filepath.Join(projectPath, "outline.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("read outline.yaml: %w", err)
+	}
+	return outlineBytes, nil
+}
+
 // LoadScene reads one canonical scene document and computes its revision.
 func (s *Store) LoadScene(_ context.Context, projectPath, sceneID string) (story.SceneDocument, error) {
 	if err := story.ValidateSceneID(sceneID); err != nil {

@@ -14,6 +14,7 @@ import (
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 	"storywork/internal/gitstore"
 	"storywork/internal/index"
 	"storywork/internal/project"
@@ -131,13 +132,13 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 			"run_00000000000000000003",
 			"run_00000000000000000004",
 		}},
-	)
+	).WithMaterialSource(storyService).WithContextBuilder(contextpack.NewBuilder())
 
 	agents, err := actionService.Agents(ctx)
 	if err != nil {
 		t.Fatalf("Agents() error = %v", err)
 	}
-	if len(agents) != 2 || agents[0].ID != "chapter_refiner" || agents[1].ID != "line_polish" {
+	if len(agents) != 3 || agents[0].ID != "chapter_review" || agents[1].ID != "line_polish" || agents[2].ID != "scene_rewrite" {
 		t.Fatalf("agents = %#v", agents)
 	}
 	styles, err := actionService.Styles(ctx)
@@ -243,7 +244,9 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(second) error = %v", err)
 	}
-	acceptedRun, acceptedScene, err := actionService.Accept(ctx, secondRun.RunID, savedScene.Revision)
+	acceptResult, err := actionService.Accept(ctx, secondRun.RunID, savedScene.Revision)
+	acceptedRun := acceptResult.Run
+	acceptedScene := acceptResult.Scene
 	if err != nil {
 		t.Fatalf("Accept() error = %v", err)
 	}
@@ -263,16 +266,17 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if clean, err := git.IsClean(ctx, projectPath); err != nil || !clean {
 		t.Fatalf("IsClean() after accept = %v, %v", clean, err)
 	}
+	reloadedStories := story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator())
 	reloadedActionService := action.NewService(
 		session,
 		agent.NewLoader(),
-		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
-		story.NewService(session, storyfile.New(), git, disposableIndex, story.NewRandomIDGenerator()),
+		reloadedStories,
+		reloadedStories,
 		agent.NewMockProvider(),
 		nil,
 		action.NewRunStore(),
 		&staticRunIDGenerator{ids: []string{"run_00000000000000000005"}},
-	)
+	).WithMaterialSource(reloadedStories).WithContextBuilder(contextpack.NewBuilder())
 	reloadedScene, err := storyfile.New().LoadScene(ctx, projectPath, savedScene.ID)
 	if err != nil {
 		t.Fatalf("LoadScene(reloaded) error = %v", err)
@@ -302,7 +306,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(third) error = %v", err)
 	}
-	if _, _, err := actionService.Accept(ctx, thirdRun.RunID, "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"); !errors.Is(err, story.ErrStaleRevision) {
+	if _, err := actionService.Accept(ctx, thirdRun.RunID, "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"); !errors.Is(err, story.ErrStaleRevision) {
 		t.Fatalf("Accept(stale revision) error = %v, want ErrStaleRevision", err)
 	}
 	if gitCommitCount(t, ctx, projectPath) != commitCountBeforeRun+1 {
@@ -330,7 +334,7 @@ func TestMilestone4ActionFlowWithRealAdapters(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(fourth) error = %v", err)
 	}
-	if _, _, err := actionService.Accept(ctx, fourthRun.RunID, acceptedScene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
+	if _, err := actionService.Accept(ctx, fourthRun.RunID, acceptedScene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
 		t.Fatalf("Accept(dirty worktree) error = %v, want ErrDirtyWorktree", err)
 	}
 	if err := os.WriteFile(projectMetadata, originalProjectMetadata, 0o644); err != nil {

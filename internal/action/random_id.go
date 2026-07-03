@@ -19,3 +19,15 @@ func (g *RandomIDGenerator) Next() (string, error) {
 	}
 	return "run_" + hex.EncodeToString(raw[:]), nil
 }
+
+// RandomInvitationIDGenerator returns random invitation identifiers.
+type RandomInvitationIDGenerator struct{}
+
+// NewRandomInvitationIDGenerator creates the production invitation ID generator.
+func NewRandomInvitationIDGenerator() *RandomInvitationIDGenerator {
+	return &RandomInvitationIDGenerator{}
+}
+
+func (g *RandomInvitationIDGenerator) Next() (string, error) {
+	return NewInvitationID()
+}

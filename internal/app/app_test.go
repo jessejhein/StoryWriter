@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"storywork/internal/agent"
@@ -43,4 +44,17 @@ type failingRoundTripper struct{ t *testing.T }
 func (f failingRoundTripper) RoundTrip(*http.Request) (*http.Response, error) {
 	f.t.Fatal("invalid config path reached outbound HTTP")
 	return nil, errors.New("unexpected outbound HTTP")
+}
+
+// Test: production composition supplies every handler dependency boundary.
+// Requirements: M7-R19.
+func TestProductionCompositionSuppliesAllHandlerStores(t *testing.T) {
+	t.Parallel()
+
+	handler := NewHandler("composition-test")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("health status = %d, want 200 body=%s", response.Code, response.Body.String())
+	}
 }

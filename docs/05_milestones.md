@@ -8,9 +8,9 @@ Each milestone is a sprint. Each sprint must leave the app working.
 
 ## Current status
 
-- Milestones 0 through 6: implemented; `make check` green on July 1, 2026.
-- Milestone 7: next incomplete phase.
-- Milestones 7 through 9: roadmap only.
+- Milestones 0 through 7: implemented; `make check` green on July 2, 2026.
+- Milestone 8: next incomplete phase.
+- Milestones 8 through 9: roadmap only.
 
 The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.
 
@@ -264,9 +264,20 @@ boundaries with exactly one checkpoint.
 
 ## Milestone 7 — Timeline-aware RAG for AI actions
 
+Planning status: durable contract approved July 1, 2026; implementation not
+started. See `docs/16_milestone_7_task_prompt.md`. The working sequence, status,
+and evidence scaffold live in `.plans/milestone_7_*`.
+
 ### Goal
 
 Use active Codex and story position to build context for agents.
+
+For this milestone, `timeline_aware` means deterministic active-progression
+resolution plus lexical relevance, not embeddings. Each model run has one
+explicit scope. Line Polish remains paragraph-sized; Scene Rewrite may use
+timeline-aware context; Chapter Review returns suggestions rather than a
+multi-scene rewrite. Conditional follow-ups require a separate author-approved
+run and accepted dependencies are recorded in portable Git commit trailers.
 
 ### Stories
 
@@ -284,7 +295,10 @@ Use active Codex and story position to build context for agents.
 
 ### Done when
 
-Two scenes at different timeline positions produce different Codex context for the same character.
+Two scenes at different timeline positions produce different Codex context for
+the same character, paragraph actions are proven not to send wider context, and
+conditional follow-ups make no provider call until the author explicitly runs
+them.
 
 ---
 

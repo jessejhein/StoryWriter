@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"storywork/internal/codex"
+	"storywork/internal/gitstore"
 	"storywork/internal/mutation"
 	"storywork/internal/project"
 )
@@ -80,8 +81,14 @@ type GitStore interface {
 	IsClean(ctx context.Context, path string) (bool, error)
 	// CommitAll stages and commits the current canonical mutation.
 	CommitAll(ctx context.Context, path, message string) error
+	// CommitAllMessage stages and commits one validated subject and optional trailers.
+	CommitAllMessage(ctx context.Context, path string, message gitstore.CommitMessage) error
 	// UnstageAll removes staged changes without discarding the working tree.
 	UnstageAll(ctx context.Context, path string) error
+}
+
+type operationAncestryStore interface {
+	HasOperationInAncestry(ctx context.Context, path, operationID string) (bool, error)
 }
 
 // IndexStore rebuilds the disposable project index.
@@ -492,7 +499,96 @@ func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatch
 	if bytes.Equal(sceneBytes, currentScene.Canonical) {
 		return SceneDocument{}, ErrNoSceneChanges
 	}
-	if err := s.persistFiles(ctx, current.Path, "Accept AI patch "+request.RunID, map[string][]byte{
+	commitMessage, err := commitMessageForScenePatch(request)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.validateOperationAncestry(ctx, current.Path, request.Operation); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.persistFiles(ctx, current.Path, commitMessage, map[string][]byte{
+		filepath.ToSlash(filepath.Join("scenes", request.SceneID+".md")): sceneBytes,
+	}, nil); err != nil {
+		return SceneDocument{}, err
+	}
+	nextScene.Revision = ComputeRevision(sceneBytes)
+	nextScene.Canonical = append([]byte(nil), sceneBytes...)
+	return nextScene, nil
+}
+
+// AcceptSceneBodyPatch validates and persists one reviewed full scene body replacement.
+func (s *Service) AcceptSceneBodyPatch(ctx context.Context, request AcceptSceneBodyPatchRequest) (SceneDocument, error) {
+	current, err := s.currentProject()
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateSceneID(request.SceneID); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateRevision(request.RunSceneRevision); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := ValidateRevision(request.ExpectedRevision); err != nil {
+		return SceneDocument{}, err
+	}
+	if request.RunID == "" {
+		return SceneDocument{}, fmt.Errorf("run_id is required: %w", ErrInvalidSelection)
+	}
+	s.mutations.Lock()
+	defer s.mutations.Unlock()
+
+	clean, err := s.git.IsClean(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if !clean {
+		return SceneDocument{}, ErrDirtyWorktree
+	}
+	outline, err := s.files.Load(ctx, current.Path)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	sceneRef, err := findScene(outline, request.SceneID)
+	if err != nil {
+		if errors.Is(err, ErrParentNotFound) {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", request.SceneID, ErrSceneNotFound)
+		}
+		return SceneDocument{}, err
+	}
+	currentScene, err := s.files.LoadScene(ctx, current.Path, request.SceneID)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if currentScene.ChapterID != sceneRef.ChapterID {
+		return SceneDocument{}, fmt.Errorf("scene %q chapter mismatch: %w", request.SceneID, ErrSceneNotFound)
+	}
+	if currentScene.Revision != request.RunSceneRevision || currentScene.Revision != request.ExpectedRevision {
+		return SceneDocument{}, fmt.Errorf("scene %q revision changed: %w", request.SceneID, ErrStaleRevision)
+	}
+	if currentScene.Markdown != request.OriginalMarkdown {
+		return SceneDocument{}, fmt.Errorf("scene %q markdown changed: %w", request.SceneID, ErrStaleRevision)
+	}
+	replacement, err := NormalizeMarkdown(request.ReplacementMarkdown)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if replacement == currentScene.Markdown {
+		return SceneDocument{}, ErrNoSceneChanges
+	}
+	nextScene := currentScene
+	nextScene.Markdown = replacement
+	sceneBytes, err := s.files.MarshalSceneDocument(nextScene)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	commitMessage, err := commitMessageForBodyPatch(request)
+	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.validateOperationAncestry(ctx, current.Path, request.Operation); err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.persistFiles(ctx, current.Path, commitMessage, map[string][]byte{
 		filepath.ToSlash(filepath.Join("scenes", request.SceneID+".md")): sceneBytes,
 	}, nil); err != nil {
 		return SceneDocument{}, err
@@ -831,7 +927,7 @@ func (s *Service) ApplyImportMutationInTransaction(ctx context.Context, request 
 
 func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, message string, files map[string][]byte) (MutationResult, error) {
 	var reloaded Outline
-	if err := s.persistFiles(ctx, projectPath, message, files, func() error {
+	if err := s.persistFiles(ctx, projectPath, gitstore.CommitMessage{Subject: message}, files, func() error {
 		next, err := s.files.Load(ctx, projectPath)
 		if err != nil {
 			return err
@@ -850,10 +946,51 @@ func (s *Service) persistMutation(ctx context.Context, projectPath, changedID, m
 // it restores the target, unstages app changes, and rebuilds the index from
 // restored files. The caller owns pre-request validation and no-op detection.
 func (s *Service) commitCodexMutation(ctx context.Context, projectPath, message, relativePath string, contents []byte) error {
-	return s.persistFiles(ctx, projectPath, message, map[string][]byte{relativePath: contents}, nil)
+	return s.persistFiles(ctx, projectPath, gitstore.CommitMessage{Subject: message}, map[string][]byte{relativePath: contents}, nil)
 }
 
-func (s *Service) persistFiles(ctx context.Context, projectPath, message string, files map[string][]byte, afterWrite func() error) error {
+func commitMessageForScenePatch(request AcceptScenePatchRequest) (gitstore.CommitMessage, error) {
+	return commitMessageForOperation(request.RunID, request.Operation)
+}
+
+func commitMessageForBodyPatch(request AcceptSceneBodyPatchRequest) (gitstore.CommitMessage, error) {
+	return commitMessageForOperation(request.RunID, request.Operation)
+}
+
+func commitMessageForOperation(runID string, operation *SceneOperationMetadata) (gitstore.CommitMessage, error) {
+	message := gitstore.CommitMessage{Subject: "Accept AI patch " + runID}
+	if operation == nil {
+		return message, nil
+	}
+	message.OperationID = operation.OperationID
+	message.TriggeredBy = operation.TriggeredBy
+	message.DependsOn = operation.DependsOn
+	message.Scope = operation.Scope
+	if _, err := gitstore.FormatCommitMessage(message); err != nil {
+		return gitstore.CommitMessage{}, fmt.Errorf("operation metadata: %w", err)
+	}
+	return message, nil
+}
+
+func (s *Service) validateOperationAncestry(ctx context.Context, projectPath string, operation *SceneOperationMetadata) error {
+	if operation == nil || operation.TriggeredBy == "" {
+		return nil
+	}
+	history, ok := s.git.(operationAncestryStore)
+	if !ok {
+		return fmt.Errorf("Git operation ancestry is unavailable: %w", gitstore.ErrInvalidCommitMessage)
+	}
+	found, err := history.HasOperationInAncestry(ctx, projectPath, operation.TriggeredBy)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("trigger operation %q is absent from branch ancestry: %w", operation.TriggeredBy, gitstore.ErrInvalidCommitMessage)
+	}
+	return nil
+}
+
+func (s *Service) persistFiles(ctx context.Context, projectPath string, message gitstore.CommitMessage, files map[string][]byte, afterWrite func() error) error {
 	rollback, err := s.files.WriteFiles(ctx, projectPath, files)
 	if err != nil {
 		return err
@@ -866,7 +1003,7 @@ func (s *Service) persistFiles(ctx context.Context, projectPath, message string,
 	if err := s.index.Rebuild(ctx, projectPath); err != nil {
 		return s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
-	if err := s.git.CommitAll(ctx, projectPath, message); err != nil {
+	if err := s.git.CommitAllMessage(ctx, projectPath, message); err != nil {
 		return s.rollbackMutation(ctx, projectPath, rollback, err)
 	}
 	return nil

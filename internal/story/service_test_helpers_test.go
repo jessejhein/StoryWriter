@@ -5,10 +5,12 @@ package story
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 
 	"storywork/internal/codex"
+	"storywork/internal/gitstore"
 	"storywork/internal/project"
 )
 
@@ -39,14 +41,19 @@ func (g *fakeIDGenerator) Next(_ NodeKind) (string, error) {
 }
 
 type fakeGitStore struct {
-	clean          bool
-	isCleanErr     error
-	isCleanCalls   int
-	commitCalls    int
-	unstageCalls   int
-	commitMessages []string
-	commitErr      error
-	unstageErr     error
+	clean              bool
+	isCleanErr         error
+	isCleanCalls       int
+	commitCalls        int
+	commitMessageCalls int
+	unstageCalls       int
+	commitMessages     []string
+	commitErr          error
+	commitMessageErr   error
+	unstageErr         error
+	operationExists    bool
+	operationLookupErr error
+	operationLookups   []string
 }
 
 func (g *fakeGitStore) IsClean(context.Context, string) (bool, error) {
@@ -60,9 +67,28 @@ func (g *fakeGitStore) CommitAll(_ context.Context, _ string, message string) er
 	return g.commitErr
 }
 
+func (g *fakeGitStore) CommitAllMessage(_ context.Context, _ string, message gitstore.CommitMessage) error {
+	g.commitCalls++
+	g.commitMessageCalls++
+	formatted, err := gitstore.FormatCommitMessage(message)
+	if err != nil {
+		return err
+	}
+	g.commitMessages = append(g.commitMessages, formatted)
+	if g.commitMessageErr != nil {
+		return g.commitMessageErr
+	}
+	return g.commitErr
+}
+
 func (g *fakeGitStore) UnstageAll(context.Context, string) error {
 	g.unstageCalls++
 	return g.unstageErr
+}
+
+func (g *fakeGitStore) HasOperationInAncestry(_ context.Context, _ string, operationID string) (bool, error) {
+	g.operationLookups = append(g.operationLookups, operationID)
+	return g.operationExists, g.operationLookupErr
 }
 
 type fakeIndexStore struct {
@@ -80,6 +106,7 @@ type fakeFileStore struct {
 	loadErr                  error
 	reloadErr                error
 	loadCalls                int
+	exactOutlineBytes        []byte
 	loadHook                 func(int)
 	marshaled                Outline
 	reloadPending            bool
@@ -111,6 +138,15 @@ type fakeFileStore struct {
 	marshalCodexEntryErr     error
 	progressionBytes         []byte
 	marshalProgressionsErr   error
+	scenes                   map[string]SceneDocument
+	loadSceneCallsHook       func()
+}
+
+func (f *fakeFileStore) LoadOutlineBytes(context.Context, string) ([]byte, error) {
+	if f.exactOutlineBytes != nil {
+		return append([]byte(nil), f.exactOutlineBytes...), nil
+	}
+	return f.MarshalOutline(f.loadOutline)
 }
 
 func (s *fakeFileStore) Load(context.Context, string) (Outline, error) {
@@ -135,10 +171,20 @@ func (s *fakeFileStore) Exists(_ context.Context, _ string, relativePath string)
 	return s.exists[relativePath], nil
 }
 
-func (s *fakeFileStore) LoadScene(context.Context, string, string) (SceneDocument, error) {
+func (s *fakeFileStore) LoadScene(_ context.Context, _ string, sceneID string) (SceneDocument, error) {
 	s.loadSceneCalls++
+	if s.loadSceneCallsHook != nil {
+		s.loadSceneCallsHook()
+	}
 	if s.loadSceneErr != nil {
 		return SceneDocument{}, s.loadSceneErr
+	}
+	if s.scenes != nil {
+		scene, ok := s.scenes[sceneID]
+		if !ok {
+			return SceneDocument{}, fmt.Errorf("scene %q: %w", sceneID, ErrSceneNotFound)
+		}
+		return scene, nil
 	}
 	if s.reloadedScene != nil && s.loadSceneCalls > 1 {
 		return *s.reloadedScene, nil

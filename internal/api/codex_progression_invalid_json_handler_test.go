@@ -9,8 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"storywork/internal/api"
 )
 
 // Test: malformed nested progression JSON returns a JSON 400 response without invoking the story service.
@@ -53,7 +51,7 @@ func TestCodexProgressionRouteRejectsNullAndMissingNestedFields(t *testing.T) {
 
 			service := &storyServiceStub{}
 			response := httptest.NewRecorder()
-			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
+			newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
 				response,
 				httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123/progressions", strings.NewReader(testCase.body)),
 			)

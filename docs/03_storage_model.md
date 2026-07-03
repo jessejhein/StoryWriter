@@ -275,3 +275,21 @@ CREATE TABLE files (
 ```
 
 Later milestones add story, Codex, progressions, imports, and agent run logs.
+
+## Accepted action operation trailers (Milestone 7)
+
+Accepted AI patch operations may attach portable Git commit trailers with stable
+operation IDs. Authoritative trailer text lives in Git commit bodies; SQLite may
+index trailers for lookup but must not be the only copy of causal relationships.
+
+Implemented trailers:
+
+- `Storywork-Operation-ID`
+- `Storywork-Scope`
+- `Storywork-Triggered-By` (causal parent)
+- `Storywork-Depends-On` (semantic dependency; omitted for trigger-only children)
+
+Trailers are validated before write. Invalid IDs, injection, cycles, or
+self-dependencies are rejected before canonical bytes change. A child trailer's
+accepted parent operation must also exist in current branch ancestry. Git notes
+are not used for operation lineage in Milestone 7.

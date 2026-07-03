@@ -1,4 +1,4 @@
-version: 2
+version: 3
 id: line_polish
 name: Line Polish
 description: Rewrite selected prose for clarity, cadence, and flow while preserving meaning.
@@ -22,8 +22,17 @@ context_policy:
   forbidden:
     - global_codex_rag
     - raw_import_notes
+    - prior_chat
+context_budget:
+  max_input_estimated_tokens: 4096
+  reserved_output_estimated_tokens: 1024
 rag_policy:
   mode: none
+follow_ups:
+  on_accept:
+    - agent_id: scene_rewrite
+      scope: scene
+      relationship: triggered
 control:
   output_mode: patch
   requires_acceptance: true

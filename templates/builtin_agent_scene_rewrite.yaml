@@ -1,0 +1,43 @@
+version: 3
+id: scene_rewrite
+name: Scene Rewrite
+description: Rewrite one scene while preserving established facts and intent.
+applies_when:
+  surfaces:
+    - editor
+  input_scopes:
+    - scene
+  min_words: 1
+  max_words: 12000
+model_requirements:
+  min_context_tokens: 4096
+  supports_streaming: false
+  supports_structured_output: false
+context_policy:
+  required:
+    - current_scene
+    - style_sheet
+    - active_codex_at_position
+  optional:
+    - outline_neighborhood
+  forbidden:
+    - global_codex_rag
+    - raw_import_notes
+    - prior_chat
+context_budget:
+  max_input_estimated_tokens: 12000
+  reserved_output_estimated_tokens: 4000
+rag_policy:
+  mode: timeline_aware
+follow_ups:
+  on_accept:
+    - agent_id: chapter_review
+      scope: chapter_review
+      relationship: triggered
+control:
+  output_mode: patch
+  requires_acceptance: true
+  can_modify_canon: false
+output:
+  type: revised_text
+  requires_diff_preview: true

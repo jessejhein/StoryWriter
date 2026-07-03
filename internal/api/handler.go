@@ -11,12 +11,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"strings"
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
 	"storywork/internal/codex"
+	"storywork/internal/contextpack"
 	"storywork/internal/extract"
 	"storywork/internal/importer"
 	"storywork/internal/project"
@@ -183,22 +183,44 @@ type StoryStore interface {
 	SaveProgressions(ctx context.Context, entryID string, request codex.SaveProgressionsRequest) (codex.ProgressionDocument, error)
 	// ResolveActiveCodexState resolves one entry as of a target scene.
 	ResolveActiveCodexState(ctx context.Context, entryID, sceneID string) (codex.ActiveState, error)
+}
+
+// ActionStore serves project-local agent registry and transient action runs.
+type ActionStore interface {
 	// Agents returns the strictly loaded project-local agent registry.
 	Agents(ctx context.Context) ([]agent.Agent, error)
 	// Styles returns the strictly loaded project-local style registry.
 	Styles(ctx context.Context) ([]agent.Style, error)
 	// AvailableActions returns the applicable actions for the current state.
 	AvailableActions(ctx context.Context, input agent.AvailabilityInput) ([]action.AvailableAction, error)
-	// Run executes one transient mock action against canonical scene bytes.
+	// Run executes one transient action against canonical scene bytes.
 	Run(ctx context.Context, request action.RunRequest) (action.Run, error)
 	// Accept applies one pending run to canonical scene markdown.
-	Accept(ctx context.Context, runID, expectedRevision string) (action.Run, story.SceneDocument, error)
+	Accept(ctx context.Context, runID, expectedRevision string) (action.AcceptResult, error)
+	// AcceptRun dispatches acceptance to the correct scope-specific handler.
+	AcceptRun(ctx context.Context, runID, expectedRevision string) (action.AcceptResult, error)
+	// AcceptBody applies one pending scene body patch to canonical markdown.
+	AcceptBody(ctx context.Context, runID, expectedRevision string) (action.AcceptResult, error)
+	// RunTagged executes one scope-aware action run.
+	RunTagged(ctx context.Context, request action.TaggedRunRequest) (action.Run, error)
+	// RunInvitation executes one explicit follow-up invitation.
+	RunInvitation(ctx context.Context, invitationID string, request action.InvitationRunRequest) (action.Run, error)
 	// Reject discards one pending run without mutating canon.
 	Reject(ctx context.Context, runID string) (action.Run, error)
+	// PreviewContext returns a redacted manifest without provider or run side effects.
+	PreviewContext(ctx context.Context, request action.TaggedRunRequest) (action.ContextPreviewResult, error)
+}
+
+// ProviderStore serves application-level provider profile configuration.
+type ProviderStore interface {
 	// ProviderProfiles returns the application-level provider profiles and revision.
 	ProviderProfiles(ctx context.Context) ([]provider.Profile, *string, error)
 	// SaveProviderProfiles replaces the application-level provider profiles.
 	SaveProviderProfiles(ctx context.Context, profiles []provider.Profile, expectedRevision *string) ([]provider.Profile, *string, error)
+}
+
+// ImportStore serves Markdown import snapshots and review candidates.
+type ImportStore interface {
 	// ImportDirectory snapshots a source directory into the active project.
 	ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error)
 	// ListImports returns imported snapshot summaries.
@@ -221,6 +243,17 @@ type StoryStore interface {
 	DiscardImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, error)
 	// AcceptImportCandidate writes one candidate into canon atomically.
 	AcceptImportCandidate(ctx context.Context, candidateID, expectedRevision string) (importer.Candidate, []importer.CanonicalRef, error)
+}
+
+// HandlerDependencies groups the cohesive HTTP handler boundaries.
+type HandlerDependencies struct {
+	Projects  ProjectStore
+	Session   ActiveProjectSession
+	Stories   StoryStore
+	Actions   ActionStore
+	Providers ProviderStore
+	Imports   ImportStore
+	Version   string
 }
 
 type importCandidateResponse struct {
@@ -262,7 +295,15 @@ type providerCapabilitiesRequest struct {
 }
 
 // NewHandler creates the full local Storywork HTTP router for the current milestone set.
-func NewHandler(projects ProjectStore, session ActiveProjectSession, stories StoryStore, version string) http.Handler {
+func NewHandler(deps HandlerDependencies) http.Handler {
+	projects := deps.Projects
+	session := deps.Session
+	stories := deps.Stories
+	actionStore := deps.Actions
+	providers := deps.Providers
+	importStore := deps.Imports
+	version := deps.Version
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]string{"status": "ok", "version": version})
@@ -298,7 +339,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		writeJSON(writer, http.StatusOK, opened)
 	})
 	mux.HandleFunc("GET /api/provider-profiles", func(writer http.ResponseWriter, request *http.Request) {
-		profiles, revision, err := stories.ProviderProfiles(request.Context())
+		profiles, revision, err := providers.ProviderProfiles(request.Context())
 		if err != nil {
 			writeProviderError(writer, err)
 			return
@@ -343,7 +384,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		profiles, revision, err := stories.SaveProviderProfiles(request.Context(), domainProfiles, putRequest.ExpectedRevision)
+		profiles, revision, err := providers.SaveProviderProfiles(request.Context(), domainProfiles, putRequest.ExpectedRevision)
 		if err != nil {
 			writeProviderError(writer, err)
 			return
@@ -361,7 +402,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportBodyError(writer, err)
 			return
 		}
-		response, err := stories.ImportDirectory(request.Context(), importRequest.SourceDirectory)
+		response, err := importStore.ImportDirectory(request.Context(), importRequest.SourceDirectory)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -373,15 +414,15 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		imports, err := stories.ListImports(request.Context())
+		importSummaries, err := importStore.ListImports(request.Context())
 		if err != nil {
 			writeImportError(writer, err)
 			return
 		}
-		if imports == nil {
-			imports = []importer.ImportSummary{}
+		if importSummaries == nil {
+			importSummaries = []importer.ImportSummary{}
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"imports": imports})
+		writeJSON(writer, http.StatusOK, map[string]any{"imports": importSummaries})
 	})
 	mux.HandleFunc("GET /api/imports/{import_id}", func(writer http.ResponseWriter, request *http.Request) {
 		if err := importer.ValidateImportID(request.PathValue("import_id")); err != nil {
@@ -392,7 +433,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		response, err := stories.LoadImport(request.Context(), request.PathValue("import_id"))
+		response, err := importStore.LoadImport(request.Context(), request.PathValue("import_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -408,7 +449,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		chunks, err := stories.ListImportChunks(request.Context(), request.PathValue("import_id"))
+		chunks, err := importStore.ListImportChunks(request.Context(), request.PathValue("import_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -438,7 +479,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportBodyError(writer, err)
 			return
 		}
-		extraction, err := stories.ExtractImport(request.Context(), importer.ExtractRequest{
+		extraction, err := importStore.ExtractImport(request.Context(), importer.ExtractRequest{
 			ImportID:  request.PathValue("import_id"),
 			ChunkIDs:  extractionRequest.ChunkIDs,
 			Mode:      extractionRequest.Mode,
@@ -461,7 +502,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		candidates, err := stories.ListImportCandidates(request.Context(), status, kind)
+		candidates, err := importStore.ListImportCandidates(request.Context(), status, kind)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -477,7 +518,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		candidate, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		candidate, err := importStore.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -510,7 +551,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		current, err := importStore.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -520,7 +561,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		candidate, err := stories.UpdateImportCandidate(request.Context(), current.ID, editEnvelope.ExpectedRevision, proposal)
+		candidate, err := importStore.UpdateImportCandidate(request.Context(), current.ID, editEnvelope.ExpectedRevision, proposal)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -568,7 +609,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		current, err := stories.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
+		current, err := importStore.LoadImportCandidate(request.Context(), request.PathValue("candidate_id"))
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -578,7 +619,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeError(writer, http.StatusBadRequest, err)
 			return
 		}
-		candidate, mergedIDs, err := stories.MergeImportCandidates(request.Context(), current.ID, importer.MergeRequest{
+		candidate, mergedIDs, err := importStore.MergeImportCandidates(request.Context(), current.ID, importer.MergeRequest{
 			OtherCandidateID:      mergeEnvelope.OtherCandidateID,
 			ExpectedRevision:      mergeEnvelope.ExpectedRevision,
 			OtherExpectedRevision: mergeEnvelope.OtherExpectedRevision,
@@ -606,7 +647,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		candidate, err := stories.DiscardImportCandidate(request.Context(), request.PathValue("candidate_id"), discardRequest.ExpectedRevision)
+		candidate, err := importStore.DiscardImportCandidate(request.Context(), request.PathValue("candidate_id"), discardRequest.ExpectedRevision)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -629,7 +670,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 			writeImportError(writer, err)
 			return
 		}
-		candidate, canonicalRefs, err := stories.AcceptImportCandidate(request.Context(), request.PathValue("candidate_id"), acceptRequest.ExpectedRevision)
+		candidate, canonicalRefs, err := importStore.AcceptImportCandidate(request.Context(), request.PathValue("candidate_id"), acceptRequest.ExpectedRevision)
 		if err != nil {
 			writeImportError(writer, err)
 			return
@@ -902,253 +943,7 @@ func NewHandler(projects ProjectStore, session ActiveProjectSession, stories Sto
 		})
 	})
 	mux.HandleFunc("/api/codex/{entry_id}/active", methodNotAllowed("GET"))
-	mux.HandleFunc("GET /api/agents", func(writer http.ResponseWriter, request *http.Request) {
-		agents, err := stories.Agents(request.Context())
-		if err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		type agentResponse struct {
-			ID                 string              `json:"id"`
-			Name               string              `json:"name"`
-			Description        string              `json:"description"`
-			Surfaces           []agent.Surface     `json:"surfaces"`
-			InputScopes        []agent.InputScope  `json:"input_scopes"`
-			MinWords           int                 `json:"min_words"`
-			MaxWords           int                 `json:"max_words"`
-			RequiredContext    []agent.ContextPack `json:"required_context"`
-			OptionalContext    []agent.ContextPack `json:"optional_context"`
-			ForbiddenContext   []agent.ContextPack `json:"forbidden_context"`
-			RAGMode            agent.RAGMode       `json:"rag_mode"`
-			OutputMode         agent.OutputMode    `json:"output_mode"`
-			RequiresAcceptance bool                `json:"requires_acceptance"`
-		}
-		response := make([]agentResponse, 0, len(agents))
-		for _, item := range agents {
-			response = append(response, agentResponse{
-				ID:                 item.ID,
-				Name:               item.Name,
-				Description:        item.Description,
-				Surfaces:           append([]agent.Surface(nil), item.AppliesWhen.Surfaces...),
-				InputScopes:        append([]agent.InputScope(nil), item.AppliesWhen.InputScopes...),
-				MinWords:           item.AppliesWhen.MinWords,
-				MaxWords:           item.AppliesWhen.MaxWords,
-				RequiredContext:    append([]agent.ContextPack(nil), item.ContextPolicy.Required...),
-				OptionalContext:    append([]agent.ContextPack(nil), item.ContextPolicy.Optional...),
-				ForbiddenContext:   append([]agent.ContextPack(nil), item.ContextPolicy.Forbidden...),
-				RAGMode:            item.RAGPolicy.Mode,
-				OutputMode:         item.Control.OutputMode,
-				RequiresAcceptance: item.Control.RequiresAcceptance,
-			})
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{"agents": response})
-	})
-	mux.HandleFunc("GET /api/styles", func(writer http.ResponseWriter, request *http.Request) {
-		styles, err := stories.Styles(request.Context())
-		if err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		profiles, _, err := stories.ProviderProfiles(request.Context())
-		if err != nil {
-			writeProviderError(writer, err)
-			return
-		}
-		readinessByID := make(map[string]provider.ProfileReadiness, len(profiles))
-		for _, item := range profiles {
-			if item.Readiness == provider.ReadinessMissingCredential {
-				readinessByID[item.ID] = provider.ProfileReadinessMissingCredential
-				continue
-			}
-			readinessByID[item.ID] = provider.ProfileReadinessReady
-		}
-		type styleResponse struct {
-			ID                string                    `json:"id"`
-			Version           int                       `json:"version"`
-			Name              string                    `json:"name"`
-			ProviderProfileID string                    `json:"provider_profile_id"`
-			Model             string                    `json:"model"`
-			Temperature       float64                   `json:"temperature"`
-			SystemPrompt      string                    `json:"system_prompt"`
-			ProviderReadiness provider.ProfileReadiness `json:"provider_readiness"`
-		}
-		response := make([]styleResponse, 0, len(styles))
-		for _, item := range styles {
-			readiness := provider.ProfileReadinessReady
-			if item.Version == 2 {
-				var ok bool
-				readiness, ok = readinessByID[item.ProviderProfileID]
-				if !ok {
-					readiness = provider.ProfileReadinessMissingProfile
-				}
-			}
-			response = append(response, styleResponse{
-				ID:                item.ID,
-				Version:           item.Version,
-				Name:              item.Name,
-				ProviderProfileID: item.ProviderProfileID,
-				Model:             item.Model,
-				Temperature:       item.Temperature,
-				SystemPrompt:      item.SystemPrompt,
-				ProviderReadiness: readiness,
-			})
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{"styles": response})
-	})
-	mux.HandleFunc("GET /api/actions/available", func(writer http.ResponseWriter, request *http.Request) {
-		if err := validateExactQuery(request, "surface", "input_scope", "scene_id", "selection_words"); err != nil {
-			writeError(writer, http.StatusBadRequest, err)
-			return
-		}
-		if !request.URL.Query().Has("selection_words") {
-			writeError(writer, http.StatusBadRequest, errors.New("selection_words is required"))
-			return
-		}
-		selectionWords := 0
-		if raw := request.URL.Query().Get("selection_words"); raw != "" {
-			value, err := strconv.Atoi(raw)
-			if err != nil {
-				writeError(writer, http.StatusBadRequest, fmt.Errorf("selection_words must be an integer"))
-				return
-			}
-			if value < 0 {
-				writeError(writer, http.StatusBadRequest, fmt.Errorf("selection_words must be greater than or equal to zero"))
-				return
-			}
-			selectionWords = value
-		}
-		input := agent.AvailabilityInput{
-			Surface:        agent.Surface(request.URL.Query().Get("surface")),
-			InputScope:     agent.InputScope(request.URL.Query().Get("input_scope")),
-			SceneID:        request.URL.Query().Get("scene_id"),
-			SelectionWords: selectionWords,
-		}
-		if err := validateAvailabilityInput(input); err != nil {
-			writeError(writer, http.StatusBadRequest, err)
-			return
-		}
-		actions, err := stories.AvailableActions(request.Context(), input)
-		if err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{"actions": actions})
-	})
-	mux.HandleFunc("POST /api/actions/run", func(writer http.ResponseWriter, request *http.Request) {
-		var runRequest struct {
-			AgentID       string `json:"agent_id"`
-			StyleID       string `json:"style_id"`
-			Surface       string `json:"surface"`
-			InputScope    string `json:"input_scope"`
-			SceneID       string `json:"scene_id"`
-			SceneRevision string `json:"scene_revision"`
-			Selection     *struct {
-				StartByte *int    `json:"start_byte"`
-				EndByte   *int    `json:"end_byte"`
-				Text      *string `json:"text"`
-			} `json:"selection"`
-		}
-		if err := decodeJSONWithRequiredFields(writer, request, &runRequest, 1<<20,
-			requiredJSONField{name: "agent_id"},
-			requiredJSONField{name: "style_id"},
-			requiredJSONField{name: "surface"},
-			requiredJSONField{name: "input_scope"},
-			requiredJSONField{name: "scene_id"},
-			requiredJSONField{name: "scene_revision"},
-			requiredJSONField{name: "selection"},
-		); err != nil {
-			writeBodyLimitError(writer, err)
-			return
-		}
-		if runRequest.Selection == nil || runRequest.Selection.StartByte == nil || runRequest.Selection.EndByte == nil || runRequest.Selection.Text == nil {
-			writeError(writer, http.StatusBadRequest, errors.New("selection.start_byte, selection.end_byte, and selection.text are required"))
-			return
-		}
-		domainRequest := action.RunRequest{
-			AgentID: runRequest.AgentID, StyleID: runRequest.StyleID,
-			Surface: agent.Surface(runRequest.Surface), InputScope: agent.InputScope(runRequest.InputScope),
-			SceneID: runRequest.SceneID, SceneRevision: runRequest.SceneRevision,
-			Selection: action.Selection{StartByte: *runRequest.Selection.StartByte, EndByte: *runRequest.Selection.EndByte, Text: *runRequest.Selection.Text},
-		}
-		if err := action.ValidateRunRequest(domainRequest); err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		run, err := stories.Run(request.Context(), domainRequest)
-		if err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusCreated, map[string]any{
-			"run_id":         run.RunID,
-			"status":         run.Status,
-			"agent_id":       run.AgentID,
-			"style_id":       run.StyleID,
-			"scene_id":       run.SceneID,
-			"scene_revision": run.SceneRevision,
-			"selection": map[string]int{
-				"start_byte": run.Selection.StartByte,
-				"end_byte":   run.Selection.EndByte,
-			},
-			"output_mode": "patch",
-			"patch": map[string]string{
-				"original":    run.OriginalText,
-				"replacement": run.Replacement,
-			},
-			"context_summary": run.ContextSummary,
-			"provider":        run.Provider,
-		})
-	})
-	mux.HandleFunc("POST /api/actions/{run_id}/accept", func(writer http.ResponseWriter, request *http.Request) {
-		if err := action.ValidateRunID(request.PathValue("run_id")); err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		var acceptRequest struct {
-			ExpectedRevision string `json:"expected_revision"`
-		}
-		if err := decodeJSONWithRequiredFields(writer, request, &acceptRequest, 1<<20, requiredJSONField{name: "expected_revision"}); err != nil {
-			writeBodyLimitError(writer, err)
-			return
-		}
-		if err := story.ValidateRevision(acceptRequest.ExpectedRevision); err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		run, sceneDocument, err := stories.Accept(request.Context(), request.PathValue("run_id"), acceptRequest.ExpectedRevision)
-		if err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"run_id": run.RunID,
-			"status": run.Status,
-			"scene":  sceneDocument,
-		})
-	})
-	mux.HandleFunc("POST /api/actions/{run_id}/reject", func(writer http.ResponseWriter, request *http.Request) {
-		if err := action.ValidateRunID(request.PathValue("run_id")); err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		if err := requireEmptyBody(request); err != nil {
-			writeError(writer, http.StatusBadRequest, err)
-			return
-		}
-		run, err := stories.Reject(request.Context(), request.PathValue("run_id"))
-		if err != nil {
-			writeStoryError(writer, err)
-			return
-		}
-		writeJSON(writer, http.StatusOK, map[string]any{
-			"run_id": run.RunID,
-			"status": run.Status,
-		})
-	})
-	mux.HandleFunc("/api/actions/available", methodNotAllowed("GET"))
-	mux.HandleFunc("/api/actions/run", methodNotAllowed("POST"))
-	mux.HandleFunc("/api/actions/{run_id}/accept", methodNotAllowed("POST"))
-	mux.HandleFunc("/api/actions/{run_id}/reject", methodNotAllowed("POST"))
+	registerActionRoutes(mux, actionRouteDeps{actions: actionStore, providers: providers})
 	mux.HandleFunc("/api/provider-profiles", methodNotAllowed("GET, PUT"))
 	return mux
 }
@@ -1520,23 +1315,6 @@ func writeProviderError(writer http.ResponseWriter, err error) {
 	}
 }
 
-func validateAvailabilityInput(input agent.AvailabilityInput) error {
-	switch input.Surface {
-	case agent.SurfaceEditor, agent.SurfaceChapterView:
-	default:
-		return fmt.Errorf("surface must be one of %q or %q", agent.SurfaceEditor, agent.SurfaceChapterView)
-	}
-	switch input.InputScope {
-	case agent.InputScopeSelection, agent.InputScopeChapter:
-	default:
-		return fmt.Errorf("input_scope must be one of %q or %q", agent.InputScopeSelection, agent.InputScopeChapter)
-	}
-	if input.Surface == agent.SurfaceEditor && input.InputScope == agent.InputScopeSelection && strings.TrimSpace(input.SceneID) == "" {
-		return fmt.Errorf("scene_id is required for editor selection availability")
-	}
-	return nil
-}
-
 func statusForStoryError(err error) int {
 	switch {
 	case errors.Is(err, agent.ErrRegistryLoad):
@@ -1553,8 +1331,14 @@ func statusForStoryError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, story.ErrParentNotFound), errors.Is(err, story.ErrSceneNotFound), errors.Is(err, codex.ErrEntryNotFound), errors.Is(err, codex.ErrSceneNotFound):
 		return http.StatusNotFound
-	case errors.Is(err, action.ErrAgentNotFound), errors.Is(err, action.ErrStyleNotFound), errors.Is(err, action.ErrRunNotFound):
+	case errors.Is(err, action.ErrAgentNotFound), errors.Is(err, action.ErrStyleNotFound), errors.Is(err, action.ErrRunNotFound), errors.Is(err, action.ErrInvitationNotFound):
 		return http.StatusNotFound
+	case errors.Is(err, action.ErrInvitationConflict), errors.Is(err, action.ErrLineageConflict):
+		return http.StatusConflict
+	case errors.Is(err, action.ErrInvitationInvalid), errors.Is(err, action.ErrInvitationForbidden):
+		return http.StatusBadRequest
+	case errors.Is(err, contextpack.ErrBudgetOverflow):
+		return http.StatusBadRequest
 	case errors.Is(err, action.ErrRunCapacity), errors.Is(err, action.ErrProviderUnavailable):
 		return http.StatusServiceUnavailable
 	case errors.Is(err, action.ErrProviderRejected):

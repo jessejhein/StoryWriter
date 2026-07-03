@@ -138,6 +138,7 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
         json: async () => ({
           run_id: 'run_utf8',
           status: 'accepted',
+          follow_up_invitations: [],
           scene: {
             id: 'scn_0123456789abcdef0123',
             chapter_id: 'ch_0123456789abcdef0123',
@@ -160,7 +161,7 @@ test('runs, rejects, and accepts scene actions through the fetch boundary', asyn
   await waitFor(() => expect(screen.getByRole('button', { name: 'Run action' })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Run action' }))
   await waitFor(() => expect(screen.getByText('Mock polished: Alpha beta')).toBeInTheDocument())
-  const previewRegion = screen.getByRole('region', { name: 'AI patch preview' })
+  const previewRegion = screen.getByRole('region', { name: 'AI action preview' })
   expect(document.activeElement).toBe(previewRegion)
   expect(screen.getByText('Context packs: selected_text, style_sheet. RAG mode: none. Provider: mock_default (openai_compatible, model mock).')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Copy replacement' }))
@@ -221,7 +222,7 @@ test('disables actions for dirty drafts', async () => {
   await waitFor(() => expect(screen.getByDisplayValue('The Duel')).toBeInTheDocument())
   fireEvent.change(screen.getByLabelText('Scene Markdown'), { target: { value: 'Changed draft' } })
   expect(screen.getByRole('button', { name: 'AI actions' })).toBeDisabled()
-  expect(screen.getByText('Save or reload the scene before running AI actions.')).toBeInTheDocument()
+  expect(screen.getAllByText('Save or reload the scene before running AI actions.').length).toBeGreaterThan(0)
 
   vi.unstubAllGlobals()
 })

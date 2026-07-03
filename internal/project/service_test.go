@@ -45,7 +45,7 @@ func TestCreateWritesStarterProjectAndInitializesStores(t *testing.T) {
 
 	wantPaths := []string{
 		"project.yaml", "outline.yaml", ".gitignore",
-		"agents/line_polish.yaml", "agents/chapter_refiner.yaml", "styles/precise_editor.yaml",
+		"agents/line_polish.yaml", "agents/scene_rewrite.yaml", "agents/chapter_review.yaml", "styles/precise_editor.yaml",
 		"arcs", "chapters", "scenes", "codex/characters", "codex/locations",
 		"codex/lore", "codex/custom", "progressions", "imports/raw",
 		"imports/processed", ".storywork/tmp", ".storywork/index.sqlite", ".git",

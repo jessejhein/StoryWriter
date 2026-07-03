@@ -365,3 +365,26 @@ Real-provider prompts contain only the agent task, style system prompt, and
 exact selected text. OpenAI-compatible and Ollama results enter the same
 transient patch workflow as mock output. Provider identity is retained for the
 preview, but canon changes only through explicit acceptance.
+
+## Milestone 7 version-3 agents
+
+Milestone 7 adds strict `version: 3` agents with explicit scopes, context
+policy, conservative budgets, timeline-aware RAG mode, follow-up transitions,
+and output contracts. Versions 1 and 2 remain unchanged.
+
+Starter agents:
+
+- `line_polish` — selection scope; `rag_mode: none`; minimal
+  `selected_text` + `style_sheet` packet.
+- `scene_rewrite` — scene scope; `rag_mode: timeline_aware`; may include
+  current scene, style, active Codex at target position, and bounded outline
+  neighbors.
+- `chapter_review` — `chapter_review` scope; returns strict JSON findings, not
+  prose patches; `output_mode: suggestion`.
+
+Follow-up invitations are declared in agent YAML (`follow_ups.on_accept` and
+completed suggestion paths) but never auto-run. Maximum chain depth is 3.
+Process-local invitations expire after 30 minutes, are one-time claims, and are
+published atomically when one finding offers actions for multiple scenes.
+Context budgets use a conservative byte estimator; UI labels estimates as
+estimates, not billed tokens.

@@ -10,7 +10,6 @@ import (
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
-	"storywork/internal/api"
 	"storywork/internal/story"
 )
 
@@ -99,7 +98,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			Status: action.RunRejected,
 		},
 	}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, stub, "test")
 
 	for _, testCase := range []struct {
 		name         string
@@ -144,7 +143,7 @@ func TestActionRoutesReturnExactJSONShapes(t *testing.T) {
 			path:         "/api/actions/run_0123456789abcdef0123/accept",
 			body:         `{"expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
 			status:       http.StatusOK,
-			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"accepted","scene":{"id":"scn_0123456789abcdef0123","chapter_id":"ch_0123456789abcdef0123","title":"The Duel","frontmatter":{"pov":"Luke","status":"draft","exclude_from_ai":false},"markdown":"Updated prose...","revision":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}`,
+			expectedJSON: `{"run_id":"run_0123456789abcdef0123","status":"accepted","scene":{"id":"scn_0123456789abcdef0123","chapter_id":"ch_0123456789abcdef0123","title":"The Duel","frontmatter":{"pov":"Luke","status":"draft","exclude_from_ai":false},"markdown":"Updated prose...","revision":"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"follow_up_invitations":null}`,
 		},
 		{
 			name:         "reject action",
@@ -194,7 +193,7 @@ func TestActionRouteStatusMapping(t *testing.T) {
 		{name: "invalid availability selection words", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_1&selection_words=oops", status: http.StatusBadRequest},
 		{name: "invalid availability negative selection words", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&scene_id=scn_1&selection_words=-1", status: http.StatusBadRequest},
 		{name: "invalid availability surface", method: http.MethodGet, path: "/api/actions/available?surface=codex&input_scope=selection&scene_id=scn_1&selection_words=200", status: http.StatusBadRequest},
-		{name: "invalid availability input scope", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=scene&scene_id=scn_1&selection_words=200", status: http.StatusBadRequest},
+		{name: "invalid availability input scope", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=paragraph&scene_id=scn_1&selection_words=200", status: http.StatusBadRequest},
 		{name: "missing availability scene id", method: http.MethodGet, path: "/api/actions/available?surface=editor&input_scope=selection&selection_words=200", status: http.StatusBadRequest},
 		{name: "registry failure on list", method: http.MethodGet, path: "/api/agents", stub: storyServiceStub{agentsErr: agent.ErrRegistryLoad}, status: http.StatusInternalServerError},
 		{name: "agent missing on run", method: http.MethodPost, path: "/api/actions/run", body: `{"agent_id":"line_polish","style_id":"precise_editor","surface":"editor","input_scope":"selection","scene_id":"scn_0123456789abcdef0123","scene_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","selection":{"start_byte":0,"end_byte":5,"text":"Alpha"}}`, stub: storyServiceStub{actionRunErr: action.ErrAgentNotFound}, status: http.StatusNotFound},
@@ -205,7 +204,7 @@ func TestActionRouteStatusMapping(t *testing.T) {
 	}
 
 	for _, testCase := range tests {
-		handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &testCase.stub, "test")
+		handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &testCase.stub, "test")
 		request := httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body))
 		response := httptest.NewRecorder()
 		handler.ServeHTTP(response, request)
@@ -214,7 +213,7 @@ func TestActionRouteStatusMapping(t *testing.T) {
 		}
 	}
 
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "test")
 	for _, testCase := range []struct {
 		path  string
 		allow string
@@ -245,7 +244,7 @@ func TestActionRoutesRejectMalformedContractInputs(t *testing.T) {
 	t.Parallel()
 
 	store := &storyServiceStub{}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, store, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, store, "test")
 	tests := []struct {
 		name   string
 		method string
@@ -282,7 +281,7 @@ func TestActionRoutesRejectMalformedContractInputs(t *testing.T) {
 func TestActionRegistryLoadFailuresReturnInternalServerError(t *testing.T) {
 	t.Parallel()
 
-	handler := api.NewHandler(
+	handler := newTestHandler(
 		&projectStoreStub{},
 		&activeProjectSessionStub{},
 		&storyServiceStub{agentsErr: agent.ErrRegistryLoad},

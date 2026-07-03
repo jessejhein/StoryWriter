@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/story"
 )
 
@@ -34,7 +33,7 @@ func TestSceneLoadRouteMapsStatuses(t *testing.T) {
 		Revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	service := &storyServiceStub{sceneResult: scene}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/scenes/scn_00000000000000000001", nil))
@@ -69,7 +68,7 @@ func TestSceneLoadRouteMapsStatuses(t *testing.T) {
 
 			service := &storyServiceStub{loadSceneErr: testCase.err}
 			response := httptest.NewRecorder()
-			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
+			newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
 				response,
 				httptest.NewRequest(http.MethodGet, "/api/scenes/scn_00000000000000000001", nil),
 			)
@@ -101,7 +100,7 @@ func TestSceneSaveRouteValidatesJSONAndMapsStatuses(t *testing.T) {
 		Revision: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}
 	service := &storyServiceStub{sceneResult: scene}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	requestBody := `{"title":"The Duel","frontmatter":{"pov":"Luke","status":"revised","exclude_from_ai":false},"markdown":"Revised.\n","expected_revision":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`
 	response := httptest.NewRecorder()
@@ -134,7 +133,7 @@ func TestSceneSaveRouteValidatesJSONAndMapsStatuses(t *testing.T) {
 
 			service := &storyServiceStub{saveSceneErr: testCase.err}
 			response := httptest.NewRecorder()
-			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
+			newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test").ServeHTTP(
 				response,
 				httptest.NewRequest(http.MethodPut, "/api/scenes/scn_00000000000000000001", strings.NewReader(testCase.body)),
 			)

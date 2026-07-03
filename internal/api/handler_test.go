@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/project"
 )
 
@@ -37,7 +36,7 @@ func TestHealth(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	response := httptest.NewRecorder()
-	api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "0.0.0-test").ServeHTTP(response, request)
+	newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{}, "0.0.0-test").ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
@@ -66,7 +65,7 @@ func TestCreateProject(t *testing.T) {
 	}}
 	request := httptest.NewRequest(http.MethodPost, "/api/projects", strings.NewReader(`{"name":"Test Novel","path":"/tmp/test-novel"}`))
 	response := httptest.NewRecorder()
-	api.NewHandler(store, &activeProjectSessionStub{}, &storyServiceStub{}, "test").ServeHTTP(response, request)
+	newTestHandler(store, &activeProjectSessionStub{}, &storyServiceStub{}, "test").ServeHTTP(response, request)
 
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want %d: %s", response.Code, http.StatusCreated, response.Body.String())

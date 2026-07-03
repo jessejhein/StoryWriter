@@ -565,6 +565,75 @@ Milestone 4 status rules:
 - `503 Service Unavailable`: transient run capacity exhaustion or provider cancellation/unavailability.
 - `500 Internal Server Error`: malformed canonical registry state discovered during list/availability, filesystem/index/Git failure, or rollback failure.
 
+## Milestone 7 context preview and tagged runs
+
+```http
+POST /api/actions/context-preview
+POST /api/action-invitations/{invitation_id}/run
+```
+
+`POST /api/actions/run` accepts the Milestone 4 selection body and a strict
+tagged body:
+
+```json
+{
+  "agent_id": "scene_rewrite",
+  "style_id": "precise_editor",
+  "scope": "scene",
+  "target": {"scene_id": "scn_...", "scene_revision": "sha256:..."}
+}
+```
+
+Context preview uses the same request shape and returns:
+
+```json
+{
+  "manifest": {
+    "scope": "scene",
+    "packs_used": ["current_scene", "style_sheet", "active_codex_at_position"],
+    "packs_omitted": [],
+    "estimated_input_tokens": 1200,
+    "max_input_estimated_tokens": 12000,
+    "rag_mode": "timeline_aware",
+    "active_codex": [{"entry_id": "char_...", "applied_progression_ids": ["prog_..."]}]
+  },
+  "target_revision": "sha256:..."
+}
+```
+
+For `chapter_review`, preview treats the supplied well-formed fingerprint as an
+advisory token and returns the current fingerprint in `target_revision`. This
+lets the UI obtain a coherent read token without a provider call. The subsequent
+run or invitation run must send that returned fingerprint and fails on mismatch.
+
+Preview performs no provider call and returns no packet prose.
+
+Tagged run responses add `scope`, `parent_run_id`, `root_run_id`, `chain_depth`,
+and `manifest`. Scene patch runs include full-scene `patch.original` and
+`patch.replacement`. Chapter review runs use `output_mode: "suggestion"` with
+`findings` and no patch.
+
+Patch accept responses add `follow_up_invitations` (always an array). Invitation
+run request:
+
+```json
+{"style_id": "precise_editor", "expected_target_revision": "sha256:..."}
+```
+
+Milestone 7 additions to status rules:
+
+- `400 Bad Request`: malformed tagged target, context budget overflow,
+  invalid invitation ID, invalid suggestion JSON.
+- `409 Conflict`: stale target revision/fingerprint, consumed invitation,
+  lineage conflict.
+- `502 Bad Gateway`: provider returns invalid structured suggestion output.
+
+Invitations expire 30 minutes after creation. Expired and already claimed or
+consumed invitation runs return `409 Conflict` without a provider call.
+
+`GET /api/actions/available` accepts `input_scope` values `selection`, `scene`,
+`chapter`, and `chapter_review`.
+
 ## Import
 
 ```http

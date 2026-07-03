@@ -1,7 +1,7 @@
 # Storywork Documentation Standards
 
 **Last Updated:** July 2026
-**Version:** Milestone 6
+**Version:** Milestone 7
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
 
@@ -208,7 +208,7 @@ All HTTP endpoints are self-documenting via the handler code. When adding a new 
 2. Document request/response types
 3. Update this `DOCUMENTATION.md` under the API section (if major)
 
-Implemented through Milestone 6:
+Implemented through Milestone 7:
 
 ```text
 GET  /api/codex
@@ -221,9 +221,11 @@ GET  /api/codex/{entry_id}/active?scene_id={scene_id}
 GET  /api/agents
 GET  /api/styles
 GET  /api/actions/available?surface={surface}&input_scope={scope}&scene_id={scene_id}&selection_words={count}
+POST /api/actions/context-preview
 POST /api/actions/run
 POST /api/actions/{run_id}/accept
 POST /api/actions/{run_id}/reject
+POST /api/action-invitations/{invitation_id}/run
 GET  /api/provider-profiles
 PUT  /api/provider-profiles
 POST /api/imports
@@ -258,6 +260,12 @@ provider-neutral structure extraction, a durable candidate review queue, and
 explicit accept/edit/merge/discard routes. Canon still changes only through the
 story-owned mutation services after explicit acceptance. Its durable contract is
 `docs/15_milestone_6_task_prompt.md`.
+
+Milestone 7 adds redacted context preview, tagged selection/scene/chapter-review
+runs, deterministic follow-up invitations, and Git commit trailers for accepted
+operation lineage. Context assembly lives in `internal/contextpack`; providers
+receive scope-specific messages only. Its durable contract is
+`docs/16_milestone_7_task_prompt.md`.
 
 Example:
 

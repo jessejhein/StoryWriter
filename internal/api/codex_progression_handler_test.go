@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"storywork/internal/api"
 	"storywork/internal/codex"
 	"storywork/internal/story"
 )
@@ -24,7 +23,7 @@ func TestCodexProgressionRoutesValidateJSONAndMapStatuses(t *testing.T) {
 		Revision:     &revision,
 	}
 	service := &storyServiceStub{progressionDocument: document}
-	handler := api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
+	handler := newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, service, "test")
 
 	// Test: GET and PUT progressions use the route entry ID and forward nullable expected revisions.
 	// Requirements: M3-R09
@@ -63,7 +62,7 @@ func TestCodexProgressionRoutesValidateJSONAndMapStatuses(t *testing.T) {
 			t.Parallel()
 
 			response := httptest.NewRecorder()
-			api.NewHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{saveProgressionsErr: testCase.err}, "test").ServeHTTP(
+			newTestHandler(&projectStoreStub{}, &activeProjectSessionStub{}, &storyServiceStub{saveProgressionsErr: testCase.err}, "test").ServeHTTP(
 				response,
 				httptest.NewRequest(http.MethodPut, "/api/codex/char_0123456789abcdef0123/progressions", strings.NewReader(testCase.body)),
 			)

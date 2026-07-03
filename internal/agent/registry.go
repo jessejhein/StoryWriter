@@ -187,6 +187,84 @@ func decodeAgentDocument(contents []byte) (Agent, error) {
 				RequiresDiffPreview: document.Output.RequiresDiffPreview,
 			},
 		})
+	case 3:
+		var document struct {
+			Version           int            `yaml:"version"`
+			ID                string         `yaml:"id"`
+			Name              string         `yaml:"name"`
+			Description       string         `yaml:"description"`
+			AppliesWhen       appliesWhenDoc `yaml:"applies_when"`
+			ModelRequirements struct {
+				MinContextTokens         int  `yaml:"min_context_tokens"`
+				SupportsStreaming        bool `yaml:"supports_streaming"`
+				SupportsStructuredOutput bool `yaml:"supports_structured_output"`
+			} `yaml:"model_requirements"`
+			ContextPolicy contextPolicyDoc `yaml:"context_policy"`
+			ContextBudget struct {
+				MaxInputEstimatedTokens       int `yaml:"max_input_estimated_tokens"`
+				ReservedOutputEstimatedTokens int `yaml:"reserved_output_estimated_tokens"`
+			} `yaml:"context_budget"`
+			RAGPolicy struct {
+				Mode RAGMode `yaml:"mode"`
+			} `yaml:"rag_policy"`
+			FollowUps struct {
+				OnAccept []struct {
+					AgentID      string               `yaml:"agent_id"`
+					Scope        FollowUpScope        `yaml:"scope"`
+					Relationship FollowUpRelationship `yaml:"relationship"`
+				} `yaml:"on_accept"`
+			} `yaml:"follow_ups"`
+			Control controlDoc `yaml:"control"`
+			Output  outputDoc  `yaml:"output"`
+		}
+		if err := decodeSingleYAML(contents, &document); err != nil {
+			return Agent{}, err
+		}
+		followUps := make([]FollowUpRule, 0, len(document.FollowUps.OnAccept))
+		for _, item := range document.FollowUps.OnAccept {
+			followUps = append(followUps, FollowUpRule{
+				AgentID:      item.AgentID,
+				Scope:        item.Scope,
+				Relationship: item.Relationship,
+			})
+		}
+		return ValidateAgentV3(Agent{
+			Version:     document.Version,
+			ID:          document.ID,
+			Name:        document.Name,
+			Description: document.Description,
+			AppliesWhen: ApplicabilityRule{
+				Surfaces:    document.AppliesWhen.Surfaces,
+				InputScopes: document.AppliesWhen.InputScopes,
+				MinWords:    document.AppliesWhen.MinWords,
+				MaxWords:    document.AppliesWhen.MaxWords,
+			},
+			ModelRequirements: ModelRequirements{
+				MinContextTokens:         document.ModelRequirements.MinContextTokens,
+				SupportsStreaming:        document.ModelRequirements.SupportsStreaming,
+				SupportsStructuredOutput: document.ModelRequirements.SupportsStructuredOutput,
+			},
+			ContextPolicy: ContextPolicy{
+				Required:  document.ContextPolicy.Required,
+				Optional:  document.ContextPolicy.Optional,
+				Forbidden: document.ContextPolicy.Forbidden,
+			},
+			ContextBudget: ContextBudget{
+				MaxInputEstimatedTokens:       document.ContextBudget.MaxInputEstimatedTokens,
+				ReservedOutputEstimatedTokens: document.ContextBudget.ReservedOutputEstimatedTokens,
+			},
+			RAGPolicy: RAGPolicy{Mode: document.RAGPolicy.Mode},
+			FollowUps: FollowUpPolicy{OnAccept: followUps},
+			Control: Control{
+				OutputMode:         document.Control.OutputMode,
+				RequiresAcceptance: document.Control.RequiresAcceptance,
+				CanModifyCanon:     document.Control.CanModifyCanon,
+			},
+			Output: Output{
+				Type:                document.Output.Type,
+				RequiresDiffPreview: document.Output.RequiresDiffPreview,
+			},
+		})
 	default:
 		return Agent{}, fmt.Errorf("agent version %d is unsupported", header.Version)
 	}

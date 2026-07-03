@@ -38,6 +38,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 16. `docs/13_milestone_4_task_prompt.md`
 17. `docs/14_milestone_5_task_prompt.md`
 18. `docs/15_milestone_6_task_prompt.md`
+19. `docs/16_milestone_7_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -77,14 +78,15 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 6 are implemented and `make check` is green as of
-July 1, 2026. The app includes the local project foundation, canonical outline
+Milestones 0 through 7 are implemented and `make check` is green as of
+July 2, 2026. The app includes the local project foundation, canonical outline
 editing, the Vim-friendly scene editor with revision conflict protection and
 one Git checkpoint per explicit save, the Codex workbench with strict
 progression validation and active-state resolution, the agent/style registry
 and reviewable AI patch workflow, application-level provider profiles with real
-OpenAI-compatible and Ollama adapters, plus the Milestone 6 Markdown import and
-review queue.
+OpenAI-compatible and Ollama adapters, the Milestone 6 Markdown import and
+review queue, and Milestone 7 timeline-aware context with scene rewrite,
+chapter review suggestions, context preview, and explicit follow-up invitations.
 
 Milestone 4 adds:
 
@@ -107,9 +109,11 @@ Milestone 6 adds:
   canon until the author accepts a candidate,
 - the Import Review workbench and strict HTTP routes for the full flow.
 
-Milestone 6 is complete. Its durable contract and working artifacts are
-`docs/15_milestone_6_task_prompt.md` and `.plans/milestone_6_*`. Milestone 7 is
-the next incomplete phase.
+Milestone 7 adds timeline-aware context assembly (`internal/contextpack`),
+redacted context preview, scene-scoped Scene Rewrite, chapter-scoped Chapter
+Review suggestions, deterministic follow-up invitations, and Git commit
+trailers for accepted operation lineage. Its durable contract is
+`docs/16_milestone_7_task_prompt.md`. Milestone 8 is the next incomplete phase.
 
 ## Development
 
@@ -143,8 +147,9 @@ The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 - `internal/project`: project creation/opening orchestration.
 - `internal/gitstore`: Git command adapter.
 - `internal/index`: rebuildable SQLite index adapter.
-- `internal/agent`: strict agent/style registry, applicability, context policy, and mock provider boundaries.
-- `internal/action`: transient AI action orchestration and accept/reject run lifecycle.
+- `internal/agent`: strict agent/style registry (v1–v3), applicability, scope-specific message builders, and provider boundaries.
+- `internal/action`: scope-aware action orchestration, context preview, invitations, lineage, and accept/reject run lifecycle.
+- `internal/contextpack`: deterministic context policy, budgeting, lexical relevance, and redacted manifests.
 - `internal/extract`: provider-neutral extraction request, prompt, and response validation.
 - `internal/importer`: Markdown snapshot import, chunking, review queue, and acceptance orchestration.
 - `internal/mutation`: shared transaction coordination for story and durable review mutations.

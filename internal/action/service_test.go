@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"storywork/internal/agent"
+	"storywork/internal/contextpack"
 	"storywork/internal/project"
 	"storywork/internal/provider"
 	"storywork/internal/story"
@@ -159,30 +160,6 @@ func (g *fakeRunIDGenerator) Next() (string, error) {
 func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 	t.Parallel()
 
-	linePolish := agent.Agent{
-		Version:     1,
-		ID:          "line_polish",
-		Name:        "Line Polish",
-		Description: "Rewrite selected prose.",
-		AppliesWhen: agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeSelection}, MinWords: 2, MaxWords: 1500},
-		ContextPolicy: agent.ContextPolicy{
-			Required:  []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet},
-			Optional:  []agent.ContextPack{agent.ContextSurrounding},
-			Forbidden: []agent.ContextPack{agent.ContextGlobalCodexRAG, agent.ContextRawImportNotes},
-		},
-		RAGPolicy: agent.RAGPolicy{Mode: agent.RAGModeNone},
-		Control:   agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
-		Output:    agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
-	}
-	style := agent.Style{
-		Version:           1,
-		ID:                "precise_editor",
-		Name:              "Precise Editor",
-		ProviderProfileID: "mock_default",
-		Model:             "mock",
-		Temperature:       0.2,
-		SystemPrompt:      "Prompt",
-	}
 	scene := story.SceneDocument{
 		ID:          "scn_0123456789abcdef0123",
 		ChapterID:   "ch_0123456789abcdef0123",
@@ -203,16 +180,7 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 		Markdown:    "Mock polished: Alpha beta gamma delta.\n",
 		Revision:    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 	}}
-	service := NewService(
-		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
-		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{style}}},
-		&fakeSceneLoader{scene: scene},
-		acceptor,
-		provider,
-		nil,
-		NewRunStore(),
-		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
-	)
+	service := newActionTestService(scene, provider, acceptor, NewRunStore(), &fakeRunIDGenerator{next: "run_0123456789abcdef0123"})
 
 	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
 		Surface:        agent.SurfaceEditor,
@@ -246,11 +214,15 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 	if run.Status != RunPending || run.Replacement != "Mock polished: Alpha beta" || run.OriginalText != "Alpha beta" {
 		t.Fatalf("run = %#v", run)
 	}
-	if provider.calls != 1 || provider.request.Packet.SelectedText != "Alpha beta" {
-		t.Fatalf("provider request = %#v", provider.request)
+	if provider.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", provider.calls)
 	}
-	if got := provider.request.Summary.PacksUsed; len(got) != 2 || got[0] != agent.ContextSelectedText || got[1] != agent.ContextStyleSheet {
-		t.Fatalf("provider summary = %#v", provider.request.Summary)
+	selectionPacket, ok := provider.request.TypedPacket.(contextpack.SelectionPacket)
+	if !ok || selectionPacket.SelectedText != "Alpha beta" {
+		t.Fatalf("provider typed packet = %#v", provider.request.TypedPacket)
+	}
+	if !manifestHasPacks(run.Manifest.PacksUsed, contextpack.PackSelectedText, contextpack.PackStyleSheet) {
+		t.Fatalf("run manifest packs = %#v", run.Manifest.PacksUsed)
 	}
 
 	rejected, err := service.Reject(context.Background(), run.RunID)
@@ -265,16 +237,7 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 	}
 
 	secondRunStore := NewRunStore()
-	service = NewService(
-		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
-		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{style}}},
-		&fakeSceneLoader{scene: scene},
-		acceptor,
-		provider,
-		nil,
-		secondRunStore,
-		&fakeRunIDGenerator{next: "run_ffffffffffffffffffff"},
-	)
+	service = newActionTestService(scene, provider, acceptor, secondRunStore, &fakeRunIDGenerator{next: "run_ffffffffffffffffffff"})
 	run, err = service.Run(context.Background(), RunRequest{
 		AgentID:       "line_polish",
 		StyleID:       "precise_editor",
@@ -287,10 +250,12 @@ func TestServiceRunRejectAndAcceptFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run(second) error = %v", err)
 	}
-	accepted, savedScene, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+	acceptResult, err := service.Accept(context.Background(), run.RunID, scene.Revision)
 	if err != nil {
 		t.Fatalf("Accept() error = %v", err)
 	}
+	accepted := acceptResult.Run
+	savedScene := acceptResult.Scene
 	if accepted.Status != RunAccepted {
 		t.Fatalf("accepted status = %q, want accepted", accepted.Status)
 	}
@@ -328,15 +293,6 @@ func TestServiceRejectsInvalidProviderOutputBeforeRunInsertion(t *testing.T) {
 		Control:   agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
 		Output:    agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
 	}
-	style := agent.Style{
-		Version:           1,
-		ID:                "precise_editor",
-		Name:              "Precise Editor",
-		ProviderProfileID: "mock_default",
-		Model:             "mock",
-		Temperature:       0.2,
-		SystemPrompt:      "Prompt",
-	}
 	scene := story.SceneDocument{
 		ID:          "scn_0123456789abcdef0123",
 		ChapterID:   "ch_0123456789abcdef0123",
@@ -348,14 +304,14 @@ func TestServiceRejectsInvalidProviderOutputBeforeRunInsertion(t *testing.T) {
 	}
 	service := NewService(
 		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
-		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{style}}},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{testPreciseEditorStyle()}}},
 		&fakeSceneLoader{scene: scene},
 		&fakeAcceptor{},
 		&fakeProvider{response: agent.GenerateResponse{Replacement: " \t"}},
 		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
-	)
+	).WithMaterialSource(selectionMaterialSource(scene, "Alpha beta")).WithContextBuilder(contextpack.NewBuilder())
 
 	_, err := service.Run(context.Background(), RunRequest{
 		AgentID:       "line_polish",
@@ -451,7 +407,7 @@ func TestServiceFiltersRealProviderStylesAndRechecksRunTimeReadiness(t *testing.
 		resolver,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
-	)
+	).WithMaterialSource(selectionMaterialSource(scene, "Alpha beta")).WithContextBuilder(contextpack.NewBuilder())
 
 	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
 		Surface:        agent.SurfaceEditor,
@@ -557,7 +513,7 @@ func TestAvailableActionsSortsCompatibleStylesByNameThenID(t *testing.T) {
 		resolver,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
-	)
+	).WithMaterialSource(selectionMaterialSource(scene, "Alpha beta")).WithContextBuilder(contextpack.NewBuilder())
 
 	actions, err := service.AvailableActions(context.Background(), agent.AvailabilityInput{
 		Surface:        agent.SurfaceEditor,
@@ -587,30 +543,8 @@ func TestAvailableActionsSortsCompatibleStylesByNameThenID(t *testing.T) {
 func TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims(t *testing.T) {
 	t.Parallel()
 
-	linePolish := agent.Agent{
-		Version:     1,
-		ID:          "line_polish",
-		Name:        "Line Polish",
-		Description: "Rewrite selected prose.",
-		AppliesWhen: agent.ApplicabilityRule{Surfaces: []agent.Surface{agent.SurfaceEditor}, InputScopes: []agent.InputScope{agent.InputScopeSelection}, MinWords: 1, MaxWords: 1500},
-		ContextPolicy: agent.ContextPolicy{
-			Required:  []agent.ContextPack{agent.ContextSelectedText, agent.ContextStyleSheet},
-			Optional:  []agent.ContextPack{agent.ContextSurrounding},
-			Forbidden: []agent.ContextPack{agent.ContextGlobalCodexRAG, agent.ContextRawImportNotes},
-		},
-		RAGPolicy: agent.RAGPolicy{Mode: agent.RAGModeNone},
-		Control:   agent.Control{OutputMode: agent.OutputModePatch, RequiresAcceptance: true},
-		Output:    agent.Output{Type: agent.OutputTypeReplacementText, RequiresDiffPreview: true},
-	}
-	style := agent.Style{
-		Version:           1,
-		ID:                "precise_editor",
-		Name:              "Precise Editor",
-		ProviderProfileID: "mock_default",
-		Model:             "mock",
-		Temperature:       0.2,
-		SystemPrompt:      "Prompt",
-	}
+	linePolish := testLinePolishAgent()
+	linePolish.AppliesWhen.MinWords = 1
 	scene := story.SceneDocument{
 		ID:          "scn_0123456789abcdef0123",
 		ChapterID:   "ch_0123456789abcdef0123",
@@ -624,14 +558,14 @@ func TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims(t *testing.T
 	acceptor := &fakeAcceptor{err: story.ErrDirtyWorktree}
 	service := NewService(
 		&fakeSession{project: project.Project{Path: "/tmp/test-project"}, ok: true},
-		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{style}}},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish}, Styles: []agent.Style{testPreciseEditorStyle()}}},
 		&fakeSceneLoader{scene: scene},
 		acceptor,
 		provider,
 		nil,
 		NewRunStore(),
 		&fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
-	)
+	).WithMaterialSource(selectionMaterialSource(scene, "Alpha")).WithContextBuilder(contextpack.NewBuilder())
 
 	if _, err := service.Run(context.Background(), RunRequest{
 		AgentID:       "line_polish",
@@ -670,7 +604,7 @@ func TestServiceRejectsStaleSelectionsAndReleasesFailedAcceptClaims(t *testing.T
 	if err != nil {
 		t.Fatalf("Run(valid) error = %v", err)
 	}
-	if _, _, err := service.Accept(context.Background(), run.RunID, scene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
+	if _, err := service.Accept(context.Background(), run.RunID, scene.Revision); !errors.Is(err, story.ErrDirtyWorktree) {
 		t.Fatalf("Accept(dirty) error = %v, want ErrDirtyWorktree", err)
 	}
 	if rejected, err := service.Reject(context.Background(), run.RunID); err != nil || rejected.Status != RunRejected {
@@ -769,15 +703,15 @@ func TestConcurrentAcceptsAllowExactlyOneRunClaim(t *testing.T) {
 	firstResult := make(chan acceptResult, 1)
 	secondResult := make(chan acceptResult, 1)
 	go func() {
-		run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-		firstResult <- acceptResult{run: run, scene: saved, err: err}
+		result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+		firstResult <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 	}()
 
 	waitForAcceptorStart(t, acceptor.started)
 
 	go func() {
-		run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-		secondResult <- acceptResult{run: run, scene: saved, err: err}
+		result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+		secondResult <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 	}()
 
 	second := <-secondResult
@@ -850,8 +784,8 @@ func TestConcurrentAcceptAndRejectAllowExactlyOneTerminalDecision(t *testing.T) 
 
 			if tc.acceptClaimsFirst {
 				go func() {
-					run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-					acceptResultCh <- acceptResult{run: run, scene: saved, err: err}
+					result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+					acceptResultCh <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 				}()
 				waitForAcceptorStart(t, acceptor.started)
 				go func() {
@@ -876,8 +810,8 @@ func TestConcurrentAcceptAndRejectAllowExactlyOneTerminalDecision(t *testing.T) 
 				startAccept := make(chan struct{})
 				go func() {
 					<-startAccept
-					run, saved, err := service.Accept(context.Background(), run.RunID, scene.Revision)
-					acceptResultCh <- acceptResult{run: run, scene: saved, err: err}
+					result, err := service.Accept(context.Background(), run.RunID, scene.Revision)
+					acceptResultCh <- acceptResult{run: result.Run, scene: result.Scene, err: err}
 				}()
 				go func() {
 					run, err := service.Reject(context.Background(), run.RunID)
@@ -937,7 +871,7 @@ func TestRunRejectsByteIdenticalProviderOutputWithoutStoringRun(t *testing.T) {
 	if _, err := service.Reject(context.Background(), ids.next); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("Reject() error = %v, want ErrRunNotFound", err)
 	}
-	if _, _, err := service.Accept(context.Background(), ids.next, scene.Revision); !errors.Is(err, ErrRunNotFound) {
+	if _, err := service.Accept(context.Background(), ids.next, scene.Revision); !errors.Is(err, ErrRunNotFound) {
 		t.Fatalf("Accept() error = %v, want ErrRunNotFound", err)
 	}
 }
@@ -973,6 +907,32 @@ func newConcurrentActionTestService(t *testing.T, replacement, runID string) (*S
 	return service, scene, acceptor, provider
 }
 
+func manifestHasPacks(packs []contextpack.Pack, required ...contextpack.Pack) bool {
+	if len(packs) != len(required) {
+		return false
+	}
+	seen := make(map[contextpack.Pack]struct{}, len(packs))
+	for _, pack := range packs {
+		seen[pack] = struct{}{}
+	}
+	for _, pack := range required {
+		if _, ok := seen[pack]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func selectionMaterialSource(scene story.SceneDocument, selectedText string) ContextMaterialSource {
+	return &fakeMaterialSource{result: story.ContextMaterialResult{
+		Material: contextpack.Material{
+			Scope:         contextpack.ScopeSelection,
+			SelectionText: selectedText,
+		},
+		TargetRevision: scene.Revision,
+	}}
+}
+
 func newActionTestService(scene story.SceneDocument, provider *fakeProvider, acceptor *fakeAcceptor, runs *RunStore, ids *fakeRunIDGenerator) *Service {
 	linePolish := testLinePolishAgent()
 	style := testPreciseEditorStyle()
@@ -985,7 +945,7 @@ func newActionTestService(scene story.SceneDocument, provider *fakeProvider, acc
 		nil,
 		runs,
 		ids,
-	)
+	).WithMaterialSource(selectionMaterialSource(scene, "Alpha beta")).WithContextBuilder(contextpack.NewBuilder())
 }
 
 func testLinePolishAgent() agent.Agent {
