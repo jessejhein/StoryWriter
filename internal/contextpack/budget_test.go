@@ -1,11 +1,12 @@
-package contextpack
-
 // BDD Scenario: 7.2.2 - Exclude irrelevant Codex entries
 // Requirements: M7-R07, M7-R08
 // Test purpose: Deterministic budgeting reserves output space, never truncates required text, and reports omissions.
 
+package contextpack
+
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -169,6 +170,35 @@ func TestBudgetOverflowFailsBeforeProviderUse(t *testing.T) {
 	})
 	if !errors.Is(err, ErrBudgetOverflow) {
 		t.Fatalf("Build() error = %v, want %v", err, ErrBudgetOverflow)
+	}
+}
+
+// Test: a required active-Codex pack remains visible when lexical selection is empty.
+// Requirements: M7-R06, M7-R07, M7-R10.
+func TestBuilderReportsRequiredEmptyActiveCodexPack(t *testing.T) {
+	t.Parallel()
+
+	packet, manifest, err := NewBuilder().Build(BuildRequest{
+		Scope:   ScopeScene,
+		Policy:  Policy{Required: []Pack{PackCurrentScene, PackStyleSheet, PackActiveCodex}},
+		Budget:  Budget{MaxInputEstimatedTokens: 1000, ReservedOutputEstimatedTokens: 100},
+		RAGMode: RAGModeTimelineAware,
+		Material: Material{
+			Scope: ScopeScene, SceneMarkdown: "No named character appears.", TargetSceneID: "scn_a",
+			Style:           StyleSheet{ID: "style", SystemPrompt: "prompt"},
+			SceneOrder:      []SceneOrderRef{{ID: "scn_a"}},
+			CodexCandidates: []CodexEntryCandidate{{EntryID: "char_a", EntryType: "character", Name: "Ann"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	scenePacket := packet.(ScenePacket)
+	if len(scenePacket.ActiveCodex) != 0 {
+		t.Fatalf("active codex = %#v, want empty", scenePacket.ActiveCodex)
+	}
+	if !slices.Contains(manifest.PacksUsed, PackActiveCodex) {
+		t.Fatalf("packs_used = %#v, want required empty active-Codex pack", manifest.PacksUsed)
 	}
 }
 

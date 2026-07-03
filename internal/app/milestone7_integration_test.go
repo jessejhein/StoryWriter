@@ -1,8 +1,8 @@
-package app_test
-
 // BDD Scenario: 7.2.1 - Resolve different active facts by scene
 // Requirements: M7-R01 through M7-R18
 // Test purpose: Real adapters prove timeline context, previews, invitations, and adversarial guards.
+
+package app_test
 
 import (
 	"net/http"

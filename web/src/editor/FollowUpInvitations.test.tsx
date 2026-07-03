@@ -1,3 +1,7 @@
+// BDD Scenario: 7.4.1 - Offer a follow-up without calling a provider
+// Requirements: M7-R11, M7-R17
+// Test purpose: verify invitation provenance and explicit execution controls.
+
 import { fireEvent, render, screen } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import FollowUpInvitations from './FollowUpInvitations'

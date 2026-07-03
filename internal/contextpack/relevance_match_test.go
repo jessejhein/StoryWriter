@@ -1,8 +1,8 @@
-package contextpack
-
 // BDD Scenario: 7.2.2 - Exclude irrelevant Codex entries
 // Requirements: M7-R06
 // Test purpose: Lexical mention evidence is deterministic and boundary-safe before ranking.
+
+package contextpack
 
 import (
 	"testing"

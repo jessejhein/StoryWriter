@@ -369,16 +369,7 @@ export default function SceneActionWorkflow({
     const requestVersion = actionWorkflow.requestVersion
     const sceneVersion = sceneVersionRef.current
     try {
-      let preview = await previewActionContext(requestBody)
-      if (scope === 'chapter_review') {
-        preview = await previewActionContext({
-          ...requestBody,
-          target: {
-            chapter_id: baseline.chapter_id,
-            fingerprint: preview.target_revision,
-          },
-        })
-      }
+	  const preview = await previewActionContext(requestBody)
       if (sceneVersion !== sceneVersionRef.current || requestVersion !== actionWorkflow.requestVersion) {
         return
       }
@@ -413,9 +404,7 @@ export default function SceneActionWorkflow({
     try {
       let response: RunActionResponse
       if (invitation) {
-        const expectedRevision = invitation.scope === 'chapter_review'
-          ? actionWorkflow.preview?.targetRevision ?? baseline.revision
-          : baseline.revision
+		const expectedRevision = await invitationTargetRevision(invitation, styleID)
         const invited = await runInvitation(invitation.invitation_id, {
           style_id: styleID,
           expected_target_revision: expectedRevision,
@@ -503,9 +492,7 @@ export default function SceneActionWorkflow({
     const requestVersion = actionWorkflow.requestVersion
     const sceneVersion = sceneVersionRef.current
     try {
-      const expectedRevision = invitation.scope === 'chapter_review'
-        ? actionWorkflow.preview?.targetRevision ?? baseline.revision
-        : baseline.revision
+	  const expectedRevision = await invitationTargetRevision(invitation, styleID)
       const response = await runInvitation(invitation.invitation_id, {
         style_id: styleID,
         expected_target_revision: expectedRevision,
@@ -524,6 +511,22 @@ export default function SceneActionWorkflow({
         requestVersion,
       ))
     }
+  }
+
+  async function invitationTargetRevision(invitation: FollowUpInvitation, styleID: string): Promise<string> {
+	if (invitation.scope !== 'chapter_review') {
+	  return baseline.revision
+	}
+	const preview = await previewActionContext({
+	  agent_id: invitation.agent_id,
+	  style_id: styleID,
+	  scope: 'chapter_review',
+	  target: {
+		chapter_id: invitation.chapter_id ?? baseline.chapter_id,
+		fingerprint: `sha256:${'0'.repeat(64)}`,
+	  },
+	})
+	return preview.target_revision
   }
 
   async function submitAcceptAction() {

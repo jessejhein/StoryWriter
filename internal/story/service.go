@@ -87,6 +87,10 @@ type GitStore interface {
 	UnstageAll(ctx context.Context, path string) error
 }
 
+type operationAncestryStore interface {
+	HasOperationInAncestry(ctx context.Context, path, operationID string) (bool, error)
+}
+
 // IndexStore rebuilds the disposable project index.
 type IndexStore interface {
 	// Rebuild recreates the derived index from canonical project files.
@@ -499,6 +503,9 @@ func (s *Service) AcceptScenePatch(ctx context.Context, request AcceptScenePatch
 	if err != nil {
 		return SceneDocument{}, err
 	}
+	if err := s.validateOperationAncestry(ctx, current.Path, request.Operation); err != nil {
+		return SceneDocument{}, err
+	}
 	if err := s.persistFiles(ctx, current.Path, commitMessage, map[string][]byte{
 		filepath.ToSlash(filepath.Join("scenes", request.SceneID+".md")): sceneBytes,
 	}, nil); err != nil {
@@ -576,6 +583,9 @@ func (s *Service) AcceptSceneBodyPatch(ctx context.Context, request AcceptSceneB
 	}
 	commitMessage, err := commitMessageForBodyPatch(request)
 	if err != nil {
+		return SceneDocument{}, err
+	}
+	if err := s.validateOperationAncestry(ctx, current.Path, request.Operation); err != nil {
 		return SceneDocument{}, err
 	}
 	if err := s.persistFiles(ctx, current.Path, commitMessage, map[string][]byte{
@@ -960,6 +970,24 @@ func commitMessageForOperation(runID string, operation *SceneOperationMetadata) 
 		return gitstore.CommitMessage{}, fmt.Errorf("operation metadata: %w", err)
 	}
 	return message, nil
+}
+
+func (s *Service) validateOperationAncestry(ctx context.Context, projectPath string, operation *SceneOperationMetadata) error {
+	if operation == nil || operation.TriggeredBy == "" {
+		return nil
+	}
+	history, ok := s.git.(operationAncestryStore)
+	if !ok {
+		return fmt.Errorf("Git operation ancestry is unavailable: %w", gitstore.ErrInvalidCommitMessage)
+	}
+	found, err := history.HasOperationInAncestry(ctx, projectPath, operation.TriggeredBy)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("trigger operation %q is absent from branch ancestry: %w", operation.TriggeredBy, gitstore.ErrInvalidCommitMessage)
+	}
+	return nil
 }
 
 func (s *Service) persistFiles(ctx context.Context, projectPath string, message gitstore.CommitMessage, files map[string][]byte, afterWrite func() error) error {

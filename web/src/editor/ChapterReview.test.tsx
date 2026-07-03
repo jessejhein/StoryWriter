@@ -1,3 +1,7 @@
+// BDD Scenario: 7.3.2 - Return suggestions without canon mutation
+// Requirements: M7-R04, M7-R16
+// Test purpose: verify findings are grouped by scene without accept controls.
+
 import { render, screen } from '@testing-library/react'
 import { expect, test } from 'vitest'
 import ChapterReview from './ChapterReview'

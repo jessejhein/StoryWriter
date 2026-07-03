@@ -132,6 +132,7 @@ type OutlineNeighbor struct {
 // Material is the typed canonical snapshot consumed by the pure builder.
 type Material struct {
 	Scope            Scope
+	ChapterID        string
 	Style            StyleSheet
 	SelectionText    string
 	SceneMarkdown    string
@@ -177,8 +178,14 @@ type ChapterReviewPacket struct {
 	ChapterID        string
 	Style            StyleSheet
 	ChapterScenes    []ChapterSceneText
-	ActiveCodex      []CodexEntryState
+	ActiveCodex      []ChapterCodexState
 	OutlineNeighbors []OutlineNeighbor
+}
+
+// ChapterCodexState retains the chapter scenes for which one resolved state applies.
+type ChapterCodexState struct {
+	State    CodexEntryState
+	SceneIDs []string
 }
 
 // Packet is one typed context payload variant.
@@ -274,6 +281,17 @@ func cloneStringSlice(values []string) []string {
 		return nil
 	}
 	return append([]string(nil), values...)
+}
+
+func cloneChapterCodexStates(values []ChapterCodexState) []ChapterCodexState {
+	if len(values) == 0 {
+		return nil
+	}
+	cloned := make([]ChapterCodexState, len(values))
+	for index, value := range values {
+		cloned[index] = ChapterCodexState{State: cloneCodexEntryState(value.State), SceneIDs: cloneStringSlice(value.SceneIDs)}
+	}
+	return cloned
 }
 
 func cloneCodexEntryState(entry CodexEntryState) CodexEntryState {

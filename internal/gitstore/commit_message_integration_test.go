@@ -1,8 +1,8 @@
-package gitstore_test
-
 // BDD Scenario: 7.5.1 - Record causal and dependency trailers
 // Requirements: M7-R13
 // Test purpose: Verify Git writes exact commit bodies for operation metadata.
+
+package gitstore_test
 
 import (
 	"context"
@@ -68,6 +68,35 @@ func TestCommitAllMessageWritesExactSubjectAndTrailers(t *testing.T) {
 	}, "\n")
 	if got, wantBody := strings.TrimRight(commitBody(t, dir), "\n"), strings.TrimRight(want, "\n"); got != wantBody {
 		t.Fatalf("commit body = %q, want %q", got, wantBody)
+	}
+}
+
+// Test: accepted operation IDs can be found in current branch ancestry.
+// Requirements: M7-R13.
+func TestHasOperationInAncestryFindsExactTrailer(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "story.txt"), []byte("initial\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := initRepo(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, "story.txt"), []byte("next\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitAllMessage(context.Background(), dir, gitstore.CommitMessage{
+		Subject: "Accept AI patch run_aaaaaaaaaaaaaaaaaaaa", OperationID: "run_aaaaaaaaaaaaaaaaaaaa",
+		Scope: "scene:scn_0123456789abcdef0123",
+	}); err != nil {
+		t.Fatalf("CommitAllMessage() error = %v", err)
+	}
+	found, err := store.HasOperationInAncestry(context.Background(), dir, "run_aaaaaaaaaaaaaaaaaaaa")
+	if err != nil || !found {
+		t.Fatalf("HasOperationInAncestry() = %v, %v, want true, nil", found, err)
+	}
+	found, err = store.HasOperationInAncestry(context.Background(), dir, "run_bbbbbbbbbbbbbbbbbbbb")
+	if err != nil || found {
+		t.Fatalf("HasOperationInAncestry(absent) = %v, %v, want false, nil", found, err)
 	}
 }
 

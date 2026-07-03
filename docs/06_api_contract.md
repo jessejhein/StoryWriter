@@ -601,6 +601,11 @@ Context preview uses the same request shape and returns:
 }
 ```
 
+For `chapter_review`, preview treats the supplied well-formed fingerprint as an
+advisory token and returns the current fingerprint in `target_revision`. This
+lets the UI obtain a coherent read token without a provider call. The subsequent
+run or invitation run must send that returned fingerprint and fails on mismatch.
+
 Preview performs no provider call and returns no packet prose.
 
 Tagged run responses add `scope`, `parent_run_id`, `root_run_id`, `chain_depth`,
@@ -622,6 +627,9 @@ Milestone 7 additions to status rules:
 - `409 Conflict`: stale target revision/fingerprint, consumed invitation,
   lineage conflict.
 - `502 Bad Gateway`: provider returns invalid structured suggestion output.
+
+Invitations expire 30 minutes after creation. Expired and already claimed or
+consumed invitation runs return `409 Conflict` without a provider call.
 
 `GET /api/actions/available` accepts `input_scope` values `selection`, `scene`,
 `chapter`, and `chapter_review`.

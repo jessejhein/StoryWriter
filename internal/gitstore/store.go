@@ -47,6 +47,26 @@ func (s *Store) CommitAllMessage(ctx context.Context, path string, message Commi
 	return s.commitFormatted(ctx, path, formatted)
 }
 
+// HasOperationInAncestry reports whether current branch ancestry contains an exact operation trailer.
+func (s *Store) HasOperationInAncestry(ctx context.Context, path, operationID string) (bool, error) {
+	if err := validateRunID("operation id", operationID); err != nil {
+		return false, err
+	}
+	output, err := s.run(ctx, "-C", path, "log", "--format=%B%x00")
+	if err != nil {
+		return false, fmt.Errorf("inspect operation ancestry: %w", err)
+	}
+	want := "Storywork-Operation-ID: " + operationID
+	for _, body := range strings.Split(output, "\x00") {
+		for _, line := range strings.Split(body, "\n") {
+			if line == want {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (s *Store) commitFormatted(ctx context.Context, path, message string) error {
 	if _, err := s.run(ctx, "-C", path, "add", "--all"); err != nil {
 		return fmt.Errorf("stage project files: %w", err)

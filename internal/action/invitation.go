@@ -10,12 +10,14 @@ import (
 	"regexp"
 	"sort"
 	"sync"
+	"time"
 
 	"storywork/internal/agent"
 	"storywork/internal/contextpack"
 )
 
 const maxInvitationChainDepth = 3
+const invitationTTL = 30 * time.Minute
 
 var (
 	ErrInvitationNotFound  = errors.New("action invitation not found")
@@ -45,6 +47,7 @@ type Invitation struct {
 	ChapterID    string
 	Relationship InvitationRelationship
 	Status       string
+	createdAt    time.Time
 }
 
 // InvitationRunRequest authorizes one explicit invitation execution.
@@ -123,6 +126,7 @@ type InvitationStore struct {
 	invitations map[string]Invitation
 	order       []string
 	limit       int
+	now         func() time.Time
 }
 
 // NewInvitationStore creates one bounded invitation store.
@@ -130,26 +134,43 @@ func NewInvitationStore(limit int) *InvitationStore {
 	if limit <= 0 {
 		limit = 1000
 	}
-	return &InvitationStore{invitations: make(map[string]Invitation), limit: limit}
+	return &InvitationStore{invitations: make(map[string]Invitation), limit: limit, now: time.Now}
 }
 
 // Publish stores one validated invitation.
 func (s *InvitationStore) Publish(invitation Invitation) error {
+	return s.PublishBatch([]Invitation{invitation})
+}
+
+// PublishBatch stores invitations atomically after validating capacity and identifiers.
+func (s *InvitationStore) PublishBatch(invitations []Invitation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := validateInvitationID(invitation.ID); err != nil {
-		return err
+	batchIDs := make(map[string]struct{}, len(invitations))
+	for _, invitation := range invitations {
+		if err := validateInvitationID(invitation.ID); err != nil {
+			return err
+		}
+		if _, exists := s.invitations[invitation.ID]; exists {
+			return ErrInvitationConflict
+		}
+		if _, duplicate := batchIDs[invitation.ID]; duplicate {
+			return ErrInvitationConflict
+		}
+		batchIDs[invitation.ID] = struct{}{}
 	}
-	if _, exists := s.invitations[invitation.ID]; exists {
-		return ErrInvitationConflict
+	for len(s.invitations)+len(invitations) > s.limit && s.evictTerminalLocked() {
 	}
-	s.evictTerminalLocked()
-	if len(s.invitations) >= s.limit {
+	if len(s.invitations)+len(invitations) > s.limit {
 		return ErrRunCapacity
 	}
-	invitation.Status = "offered"
-	s.invitations[invitation.ID] = invitation
-	s.order = append(s.order, invitation.ID)
+	createdAt := s.now()
+	for _, invitation := range invitations {
+		invitation.Status = "offered"
+		invitation.createdAt = createdAt
+		s.invitations[invitation.ID] = invitation
+		s.order = append(s.order, invitation.ID)
+	}
 	return nil
 }
 
@@ -162,6 +183,11 @@ func (s *InvitationStore) Claim(invitationID string) (Invitation, error) {
 		return Invitation{}, ErrInvitationNotFound
 	}
 	if invitation.Status != "offered" {
+		return Invitation{}, ErrInvitationConflict
+	}
+	if !s.now().Before(invitation.createdAt.Add(invitationTTL)) {
+		invitation.Status = "expired"
+		s.invitations[invitationID] = invitation
 		return Invitation{}, ErrInvitationConflict
 	}
 	invitation.Status = "claimed"
@@ -208,15 +234,16 @@ func (s *InvitationStore) Get(invitationID string) (Invitation, bool) {
 	return invitation, ok
 }
 
-func (s *InvitationStore) evictTerminalLocked() {
+func (s *InvitationStore) evictTerminalLocked() bool {
 	for _, id := range append([]string(nil), s.order...) {
 		invitation := s.invitations[id]
 		if invitation.Status == "consumed" {
 			delete(s.invitations, id)
 			s.order = removeID(s.order, id)
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // ValidateInvitationID validates invitation identifier syntax.

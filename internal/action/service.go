@@ -240,12 +240,17 @@ func validateGeneratedReplacement(replacement string) (string, error) {
 }
 
 func (s *Service) styleCompatible(ctx context.Context, agentDefinition agent.Agent, style agent.Style) (bool, error) {
+	compatible, _, err := s.styleCompatibility(ctx, agentDefinition, style)
+	return compatible, err
+}
+
+func (s *Service) styleCompatibility(ctx context.Context, agentDefinition agent.Agent, style agent.Style) (bool, int, error) {
 	if s.resolver == nil || (style.Version == 1 && style.ProviderProfileID == "mock_default" && style.Model == "mock") {
-		return true, nil
+		return true, 0, nil
 	}
 	resolved, found, err := s.resolver.Resolve(ctx, style.ProviderProfileID)
 	if err != nil {
-		return false, err
+		return false, 0, err
 	}
 	var profileRef *provider.Profile
 	if found {
@@ -253,7 +258,10 @@ func (s *Service) styleCompatible(ctx context.Context, agentDefinition agent.Age
 		profileRef = &profileCopy
 	}
 	decision := agent.ExecutableCompatibility(agentDefinition, style, profileRef, resolved.Readiness)
-	return decision.Compatible, nil
+	if !decision.Compatible || profileRef == nil {
+		return decision.Compatible, 0, nil
+	}
+	return true, profileRef.Capabilities.MaxContextTokens, nil
 }
 
 func (s *Service) insertRun(run Run) (Run, error) {

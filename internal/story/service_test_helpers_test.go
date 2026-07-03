@@ -51,6 +51,9 @@ type fakeGitStore struct {
 	commitErr          error
 	commitMessageErr   error
 	unstageErr         error
+	operationExists    bool
+	operationLookupErr error
+	operationLookups   []string
 }
 
 func (g *fakeGitStore) IsClean(context.Context, string) (bool, error) {
@@ -83,6 +86,11 @@ func (g *fakeGitStore) UnstageAll(context.Context, string) error {
 	return g.unstageErr
 }
 
+func (g *fakeGitStore) HasOperationInAncestry(_ context.Context, _ string, operationID string) (bool, error) {
+	g.operationLookups = append(g.operationLookups, operationID)
+	return g.operationExists, g.operationLookupErr
+}
+
 type fakeIndexStore struct {
 	rebuildCalls int
 	rebuildErr   error
@@ -98,6 +106,7 @@ type fakeFileStore struct {
 	loadErr                  error
 	reloadErr                error
 	loadCalls                int
+	exactOutlineBytes        []byte
 	loadHook                 func(int)
 	marshaled                Outline
 	reloadPending            bool
@@ -131,6 +140,13 @@ type fakeFileStore struct {
 	marshalProgressionsErr   error
 	scenes                   map[string]SceneDocument
 	loadSceneCallsHook       func()
+}
+
+func (f *fakeFileStore) LoadOutlineBytes(context.Context, string) ([]byte, error) {
+	if f.exactOutlineBytes != nil {
+		return append([]byte(nil), f.exactOutlineBytes...), nil
+	}
+	return f.MarshalOutline(f.loadOutline)
 }
 
 func (s *fakeFileStore) Load(context.Context, string) (Outline, error) {

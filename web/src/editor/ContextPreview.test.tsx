@@ -1,3 +1,7 @@
+// BDD Scenario: 7.1.1 - Preview minimal Line Polish context
+// Requirements: M7-R08, M7-R17
+// Test purpose: verify redacted context packs, estimates, and omissions.
+
 import { render, screen } from '@testing-library/react'
 import { expect, test } from 'vitest'
 import ContextPreview from './ContextPreview'

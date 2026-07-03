@@ -156,8 +156,8 @@ func TestChapterReviewRunRejectsInvalidProviderOutputWithoutRun(t *testing.T) {
 			},
 		},
 	})
-	if !errors.Is(err, ErrProviderInvalid) {
-		t.Fatalf("RunTagged() error = %v, want ErrProviderInvalid", err)
+	if !errors.Is(err, ErrProviderRejected) {
+		t.Fatalf("RunTagged() error = %v, want ErrProviderRejected", err)
 	}
 }
 

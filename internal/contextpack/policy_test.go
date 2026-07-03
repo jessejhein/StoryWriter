@@ -1,8 +1,8 @@
-package contextpack
-
 // BDD Scenario: 7.1.1 - Preview minimal Line Polish context
 // Requirements: M7-R02, M7-R07
 // Test purpose: Context policy is enforced before budgeting and cannot leak forbidden packs.
+
+package contextpack
 
 import (
 	"errors"

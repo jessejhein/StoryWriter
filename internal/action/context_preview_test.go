@@ -7,11 +7,13 @@ package action
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"storywork/internal/agent"
 	"storywork/internal/contextpack"
 	"storywork/internal/project"
+	"storywork/internal/provider"
 	"storywork/internal/story"
 )
 
@@ -116,13 +118,13 @@ func TestPreviewBuildsSelectionSceneAndChapterManifests(t *testing.T) {
 		AgentID: "chapter_review", StyleID: "precise_editor",
 		Target: TaggedTarget{Scope: contextpack.ScopeChapterReview, Chapter: &ChapterReviewTarget{
 			ChapterID:   "ch_0123456789abcdef0123",
-			Fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			Fingerprint: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}},
 	})
 	if err != nil {
 		t.Fatalf("chapter PreviewContext() error = %v", err)
 	}
-	if preview.Manifest.Scope != contextpack.ScopeChapterReview {
+	if preview.Manifest.Scope != contextpack.ScopeChapterReview || preview.TargetRevision != chapterSource.result.TargetRevision {
 		t.Fatalf("chapter manifest = %#v", preview.Manifest)
 	}
 }
@@ -178,6 +180,51 @@ func TestPreviewReturnsBudgetAndCanonicalStateErrors(t *testing.T) {
 		AgentID: "line_polish", StyleID: "precise_editor", Target: selectionTargetFixture(),
 	}); !errors.Is(err, story.ErrStaleRevision) {
 		t.Fatalf("PreviewContext() error = %v, want ErrStaleRevision", err)
+	}
+}
+
+// Test: preview budgets against the selected provider's actual context limit.
+// Requirements: M7-R07, M7-R08, M7-R12.
+func TestPreviewUsesResolvedProviderContextLimit(t *testing.T) {
+	t.Parallel()
+
+	agentDefinition := testSceneRewriteAgent()
+	agentDefinition.ModelRequirements.MinContextTokens = 32
+	style := testPreciseEditorStyle()
+	style.Version = 2
+	style.ProviderProfileID = "small_context"
+	style.Model = "test-model"
+	source := &fakeMaterialSource{result: story.ContextMaterialResult{
+		Material: contextpack.Material{
+			Scope: contextpack.ScopeScene, SceneMarkdown: strings.Repeat("x", 100),
+			TargetSceneID: "scn_0123456789abcdef0123",
+			SceneOrder:    []contextpack.SceneOrderRef{{ID: "scn_0123456789abcdef0123"}},
+		},
+		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}}
+	resolver := &fakeProfileResolver{resolved: provider.ResolvedProfile{
+		Profile: provider.Profile{
+			ID: "small_context", Type: provider.TypeOpenAICompatible,
+			Capabilities: provider.Capabilities{Chat: true, MaxContextTokens: 64},
+			Readiness:    provider.ReadinessReady,
+		},
+	}, found: true}
+	service := NewService(
+		&fakeSession{project: project.Project{Path: "/tmp/test"}, ok: true},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{agentDefinition}, Styles: []agent.Style{style}}},
+		&fakeSceneLoader{}, &fakeAcceptor{}, &fakeProvider{}, resolver,
+		NewRunStore(), &fakeRunIDGenerator{next: "run_0123456789abcdef0123"},
+	).WithMaterialSource(source).WithContextBuilder(contextpack.NewBuilder())
+
+	_, err := service.PreviewContext(context.Background(), TaggedRunRequest{
+		AgentID: agentDefinition.ID, StyleID: style.ID,
+		Target: TaggedTarget{Scope: contextpack.ScopeScene, Scene: &SceneTarget{
+			SceneID:       "scn_0123456789abcdef0123",
+			SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+	})
+	if !errors.Is(err, contextpack.ErrBudgetOverflow) {
+		t.Fatalf("PreviewContext() error = %v, want provider-limit budget overflow", err)
 	}
 }
 

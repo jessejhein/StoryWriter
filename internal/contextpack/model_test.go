@@ -1,11 +1,12 @@
-package contextpack
-
 // BDD Scenario: 7.1.1 - Preview minimal Line Polish context
 // Requirements: M7-R07, M7-R10
 // Test purpose: Context targets, packets, material values, and manifests stay typed and redacted.
 
+package contextpack
+
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -43,6 +44,21 @@ func TestTargetsRequireExactlyOneMatchingScopePayload(t *testing.T) {
 		},
 	}); err != nil {
 		t.Fatalf("ValidateTarget(selection) error = %v", err)
+	}
+}
+
+// Test: builder rejects material whose typed scope does not match the request.
+// Requirements: M7-R01, M7-R07.
+func TestBuilderRejectsMaterialScopeMismatch(t *testing.T) {
+	t.Parallel()
+
+	_, _, err := NewBuilder().Build(BuildRequest{
+		Scope: ScopeScene, Policy: Policy{Required: []Pack{PackCurrentScene, PackStyleSheet}},
+		Budget: Budget{MaxInputEstimatedTokens: 100}, RAGMode: RAGModeNone,
+		Material: Material{Scope: ScopeSelection, SceneMarkdown: "wrong shape"},
+	})
+	if !errors.Is(err, ErrInvalidTarget) {
+		t.Fatalf("Build() error = %v, want ErrInvalidTarget", err)
 	}
 }
 

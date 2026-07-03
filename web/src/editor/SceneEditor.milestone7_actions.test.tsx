@@ -1,3 +1,7 @@
+// BDD Scenario: 7.2.3 / 7.3.2 - Scene replacement and chapter suggestions
+// Requirements: M7-R03, M7-R04, M7-R09, M7-R11, M7-R15, M7-R17
+// Test purpose: verify the integrated editor action workflows and dirty guards.
+
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { expect, test, vi } from 'vitest'
 import type { Project } from '../api'
@@ -312,6 +316,27 @@ test('shows chapter review findings and follow-up invitation with scope confirma
   await waitFor(() => expect(screen.getByRole('button', { name: 'Run broader action' })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Run broader action' }))
   await waitFor(() => expect(requests.some((request) => request.path === '/api/action-invitations/invite_0123456789abcdef0123/run')).toBe(true))
+  vi.unstubAllGlobals()
+})
+
+// Test: chapter context preview obtains the current fingerprint in one read-only request.
+// Requirements: M7-R09, M7-R17.
+test('previews chapter context once and retains the returned fingerprint', async () => {
+  const requests: Array<{ path: string; init?: RequestInit }> = []
+  vi.stubGlobal('fetch', buildFetchMock(requests))
+  render(<SceneEditor project={project} sceneID="scn_0123456789abcdef0123" onBack={() => {}} onDirtyChange={() => {}} />)
+  await waitFor(() => expect(screen.getByDisplayValue('The Duel')).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Review chapter' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Preview context' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Preview context' }))
+  await waitFor(() => expect(screen.getByText('chapter_review', { selector: 'strong' })).toBeInTheDocument())
+
+  const previews = requests.filter((request) => request.path === '/api/actions/context-preview')
+  expect(previews).toHaveLength(1)
+  expect(JSON.parse(String(previews[0]?.init?.body))).toMatchObject({
+    scope: 'chapter_review',
+    target: { chapter_id: 'ch_0123456789abcdef0123' },
+  })
   vi.unstubAllGlobals()
 })
 

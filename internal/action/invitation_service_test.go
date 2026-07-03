@@ -134,12 +134,13 @@ func TestRunInvitationFailureReleasesClaimForRetry(t *testing.T) {
 		},
 	}, &fakeProvider{response: agent.GenerateResponse{Replacement: "Mock rewritten: Ann arrives."}})
 	service.runs = store
+	service.loader = &fakeLoader{registry: agent.Registry{Agents: []agent.Agent{testLinePolishV3Agent(), testSceneRewriteAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}}
 	service.invitations = invites
 	service.inviteIDs = &fakeInvitationIDGenerator{next: "invite_ffffffffffffffffffff"}
 	id := "invite_0123456789abcdef0123"
 	if err := invites.Publish(Invitation{
 		ID: id, ParentRunID: parentRun.RunID, RootRunID: parentRun.RunID, ChainDepth: 2,
-		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123",
+		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123", Relationship: InvitationTriggered,
 	}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -177,12 +178,13 @@ func TestRunInvitationSuccessConsumesAndCreatesChildRun(t *testing.T) {
 	invites := NewInvitationStore(10)
 	service := newSceneRunTestService(t, material, &fakeProvider{response: agent.GenerateResponse{Replacement: "Mock rewritten: Ann arrives."}})
 	service.runs = store
+	service.loader = &fakeLoader{registry: agent.Registry{Agents: []agent.Agent{testLinePolishV3Agent(), testSceneRewriteAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}}
 	service.invitations = invites
 	service.inviteIDs = &fakeInvitationIDGenerator{next: "invite_0123456789abcdef0123"}
 	id := "invite_0123456789abcdef0123"
 	if err := invites.Publish(Invitation{
 		ID: id, ParentRunID: parentRun.RunID, RootRunID: parentRun.RunID, ChainDepth: 2,
-		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123",
+		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123", Relationship: InvitationTriggered,
 	}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -208,6 +210,34 @@ func TestRunInvitationRejectsForgedStaleConsumedAndRecursiveInput(t *testing.T) 
 	service := newInvitationTestService(t, testActionScene(), &fakeAcceptor{}, NewInvitationStore(10))
 	if _, err := service.RunInvitation(context.Background(), "invite_bad", InvitationRunRequest{StyleID: "precise_editor", ExpectedTargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}); err == nil {
 		t.Fatal("RunInvitation(bad id) expected error")
+	}
+}
+
+// Test: an invitation absent from the parent's current configured transitions is rejected.
+// Requirements: M7-R11, M7-R12.
+func TestRunInvitationRejectsDisallowedConfiguredTransition(t *testing.T) {
+	t.Parallel()
+
+	parentRun := Run{RunID: "run_aaaaaaaaaaaaaaaaaaaa", Status: RunAccepted, AgentID: "line_polish", Scope: contextpack.ScopeSelection, SceneID: "scn_0123456789abcdef0123", SceneRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ChainDepth: 1}
+	invites := NewInvitationStore(10)
+	runs := NewRunStore()
+	if err := runs.Insert(parentRun); err != nil {
+		t.Fatalf("Insert(parent) error = %v", err)
+	}
+	service := newSceneInvitationTestService(t, runs, invites, &sceneRunMaterialSource{result: story.ContextMaterialResult{
+		Material:       contextpack.Material{Scope: contextpack.ScopeScene, SceneMarkdown: "Scene.\n", TargetSceneID: "scn_0123456789abcdef0123", SceneOrder: []contextpack.SceneOrderRef{{ID: "scn_0123456789abcdef0123"}}},
+		TargetRevision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}})
+	linePolish := testLinePolishV3Agent()
+	linePolish.FollowUps = agent.FollowUpPolicy{}
+	service.loader = &fakeLoader{registry: agent.Registry{Agents: []agent.Agent{linePolish, testSceneRewriteAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}}
+	id := "invite_0123456789abcdef0123"
+	if err := invites.Publish(Invitation{ID: id, ParentRunID: parentRun.RunID, RootRunID: parentRun.RunID, ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: parentRun.SceneID, Relationship: InvitationTriggered}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	_, err := service.RunInvitation(context.Background(), id, InvitationRunRequest{StyleID: "precise_editor", ExpectedTargetRevision: parentRun.SceneRevision})
+	if !errors.Is(err, ErrInvitationForbidden) {
+		t.Fatalf("RunInvitation() error = %v, want ErrInvitationForbidden", err)
 	}
 }
 
@@ -263,7 +293,7 @@ func TestRunInvitationRejectsStaleTargetRevision(t *testing.T) {
 	id := "invite_0123456789abcdef0123"
 	if err := invites.Publish(Invitation{
 		ID: id, ParentRunID: parentRun.RunID, RootRunID: parentRun.RunID, ChainDepth: 2,
-		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123",
+		AgentID: "scene_rewrite", Scope: contextpack.ScopeScene, SceneID: "scn_0123456789abcdef0123", Relationship: InvitationTriggered,
 	}); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
@@ -313,7 +343,7 @@ func newSceneInvitationTestService(t *testing.T, runs *RunStore, invites *Invita
 	scene := testActionScene()
 	return NewService(
 		&fakeSession{project: project.Project{Path: "/tmp/test"}, ok: true},
-		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{testSceneRewriteAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}},
+		&fakeLoader{registry: agent.Registry{Agents: []agent.Agent{testLinePolishV3Agent(), testSceneRewriteAgent()}, Styles: []agent.Style{testPreciseEditorStyle()}}},
 		&fakeSceneLoader{scene: scene},
 		&fakeAcceptor{},
 		&fakeProvider{response: agent.GenerateResponse{Replacement: "Mock rewritten: Scene.\n"}},

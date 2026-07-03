@@ -28,7 +28,8 @@ func (s *Service) RunTagged(ctx context.Context, request TaggedRunRequest) (Run,
 	if err != nil {
 		return Run{}, err
 	}
-	if compatible, err := s.styleCompatible(ctx, agentDefinition, styleDefinition); err != nil {
+	compatible, providerContextLimit, err := s.styleCompatibility(ctx, agentDefinition, styleDefinition)
+	if err != nil {
 		return Run{}, err
 	} else if !compatible {
 		return Run{}, fmt.Errorf("style %q is incompatible with agent %q: %w", styleDefinition.ID, agentDefinition.ID, ErrProviderInvalid)
@@ -36,7 +37,7 @@ func (s *Service) RunTagged(ctx context.Context, request TaggedRunRequest) (Run,
 	if err := validateAgentScope(agentDefinition, request.Target); err != nil {
 		return Run{}, err
 	}
-	packet, manifest, materialResult, err := s.buildRunContext(ctx, request, agentDefinition, styleDefinition)
+	packet, manifest, materialResult, err := s.buildRunContext(ctx, request, agentDefinition, styleDefinition, providerContextLimit)
 	if err != nil {
 		return Run{}, err
 	}
@@ -52,7 +53,7 @@ func (s *Service) RunTagged(ctx context.Context, request TaggedRunRequest) (Run,
 	return s.insertTaggedRun(ctx, request, agentDefinition, manifest, materialResult, generated)
 }
 
-func (s *Service) buildRunContext(ctx context.Context, request TaggedRunRequest, agentDefinition agent.Agent, styleDefinition agent.Style) (contextpack.Packet, contextpack.Manifest, story.ContextMaterialResult, error) {
+func (s *Service) buildRunContext(ctx context.Context, request TaggedRunRequest, agentDefinition agent.Agent, styleDefinition agent.Style, providerContextLimit int) (contextpack.Packet, contextpack.Manifest, story.ContextMaterialResult, error) {
 	if s.material == nil || s.builder == nil {
 		return nil, contextpack.Manifest{}, story.ContextMaterialResult{}, fmt.Errorf("context assembly is not configured")
 	}
@@ -67,7 +68,7 @@ func (s *Service) buildRunContext(ctx context.Context, request TaggedRunRequest,
 	packet, manifest, err := s.builder.Build(contextpack.BuildRequest{
 		Scope:     request.Target.Scope,
 		Policy:    agentPolicy(agentDefinition),
-		Budget:    agentBudget(agentDefinition),
+		Budget:    agentBudget(agentDefinition, providerContextLimit),
 		RAGMode:   contextpack.RAGMode(agentDefinition.RAGPolicy.Mode),
 		Material:  material,
 		Estimator: contextpack.ByteEstimator{},
@@ -161,7 +162,7 @@ func (s *Service) parseChapterReviewOutput(raw string, agentDefinition agent.Age
 	}
 	findings, err := ParseFindings(raw, allowedFollowUpsFromAgent(agentDefinition), allowedScenes)
 	if err != nil {
-		return FindingsResponse{}, nil, fmt.Errorf("%w: %w", ErrProviderInvalid, err)
+		return FindingsResponse{}, nil, fmt.Errorf("%w: %w", ErrProviderRejected, err)
 	}
 	return findings, findingsInvitations(findings), nil
 }
@@ -171,15 +172,17 @@ func findingsInvitations(findings FindingsResponse) []preparedInvitation {
 	prepared := make([]preparedInvitation, 0)
 	for _, finding := range findings.Findings {
 		for _, agentID := range finding.FollowUpAgentIDs {
-			key := agentID + "|scene|" + finding.SceneIDs[0]
-			if _, ok := seen[key]; ok {
-				continue
+			for _, sceneID := range finding.SceneIDs {
+				key := agentID + "|scene|" + sceneID
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				prepared = append(prepared, preparedInvitation{
+					AgentID: agentID, Scope: contextpack.ScopeScene, SceneID: sceneID,
+					Relationship: InvitationTriggered,
+				})
 			}
-			seen[key] = struct{}{}
-			prepared = append(prepared, preparedInvitation{
-				AgentID: agentID, Scope: contextpack.ScopeScene, SceneID: finding.SceneIDs[0],
-				Relationship: InvitationTriggered,
-			})
 		}
 	}
 	return prepared

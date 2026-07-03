@@ -60,12 +60,23 @@ func TestMessageBuilderFormatsChapterReviewExactly(t *testing.T) {
 		ChapterID:     "ch_0123456789abcdef0123",
 		ChapterScenes: []contextpack.ChapterSceneText{{SceneID: "scn_0123456789abcdef0123", Markdown: "Scene.\n"}},
 		Style:         contextpack.StyleSheet{ID: "precise_editor", SystemPrompt: "Prompt"},
+		ActiveCodex: []contextpack.ChapterCodexState{{
+			State: contextpack.CodexEntryState{
+				EntryID: "char_0123456789abcdef0123", Name: "Ann", Description: "A pilot.",
+				Metadata: map[string]string{"status": "missing"}, AppliedProgressionIDs: []string{"prog_0123456789abcdef0123"},
+			},
+			SceneIDs: []string{"scn_0123456789abcdef0123"},
+		}},
+		OutlineNeighbors: []contextpack.OutlineNeighbor{{Kind: "chapter", ID: "ch_aaaaaaaaaaaaaaaaaaaa", Text: "Before"}},
 	})
 	if err != nil {
 		t.Fatalf("BuildMessages() error = %v", err)
 	}
-	if !strings.Contains(messages[1].Content, "findings") || !strings.Contains(messages[1].Content, "Scene.\n") {
-		t.Fatalf("messages = %#v", messages)
+	content := messages[1].Content
+	for _, required := range []string{"findings", "Scene.\n", "char_0123456789abcdef0123", "status=missing", "prog_0123456789abcdef0123", "ch_aaaaaaaaaaaaaaaaaaaa", "Before", "Applies to scenes: scn_0123456789abcdef0123"} {
+		if !strings.Contains(content, required) {
+			t.Fatalf("message does not contain %q: %q", required, content)
+		}
 	}
 }
 

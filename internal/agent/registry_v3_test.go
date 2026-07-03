@@ -1,8 +1,8 @@
-package agent
-
 // BDD Scenario: 7.1.1 - Preview minimal Line Polish context
 // Requirements: M7-R01, M7-R02
 // Test purpose: Registry loading keeps old versions strict while dispatching version-3 agents and starter templates.
+
+package agent
 
 import (
 	"context"

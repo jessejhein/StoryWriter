@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"storywork/internal/contextpack"
 )
@@ -24,6 +25,24 @@ func TestInvitationStoreValidatesIDsAndRejectsDuplicates(t *testing.T) {
 	}
 	if err := store.Publish(invitation); !errors.Is(err, ErrInvitationConflict) {
 		t.Fatalf("duplicate Publish() error = %v", err)
+	}
+}
+
+// Test: expired invitations cannot be claimed for provider execution.
+// Requirements: M7-R12.
+func TestInvitationStoreRejectsExpiredInvitation(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC)
+	store := NewInvitationStore(10)
+	store.now = func() time.Time { return now }
+	id := "invite_0123456789abcdef0123"
+	if err := store.Publish(Invitation{ID: id, ParentRunID: "run_0123456789abcdef0123", RootRunID: "run_0123456789abcdef0123", ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	now = now.Add(invitationTTL)
+	if _, err := store.Claim(id); !errors.Is(err, ErrInvitationConflict) {
+		t.Fatalf("Claim(expired) error = %v, want ErrInvitationConflict", err)
 	}
 }
 
@@ -106,6 +125,27 @@ func TestInvitationStoreEvictsTerminalNotLiveInvitations(t *testing.T) {
 	}
 	if err := store.Publish(Invitation{ID: "invite_cccccccccccccccccccc", ParentRunID: "run_0123456789abcdef0123", RootRunID: "run_0123456789abcdef0123", ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene}); err != nil {
 		t.Fatalf("Publish(after evict) error = %v", err)
+	}
+}
+
+// Test: publishing a batch is all-or-nothing when live capacity is insufficient.
+// Requirements: M7-R11, M7-R16.
+func TestInvitationStoreBatchCapacityFailureLeavesNoPartialInvitations(t *testing.T) {
+	t.Parallel()
+
+	store := NewInvitationStore(2)
+	if err := store.Publish(Invitation{ID: "invite_aaaaaaaaaaaaaaaaaaaa", ParentRunID: "run_0123456789abcdef0123", RootRunID: "run_0123456789abcdef0123", ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	err := store.PublishBatch([]Invitation{
+		{ID: "invite_bbbbbbbbbbbbbbbbbbbb", ParentRunID: "run_0123456789abcdef0123", RootRunID: "run_0123456789abcdef0123", ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene},
+		{ID: "invite_cccccccccccccccccccc", ParentRunID: "run_0123456789abcdef0123", RootRunID: "run_0123456789abcdef0123", ChainDepth: 2, AgentID: "scene_rewrite", Scope: contextpack.ScopeScene},
+	})
+	if !errors.Is(err, ErrRunCapacity) {
+		t.Fatalf("PublishBatch() error = %v, want ErrRunCapacity", err)
+	}
+	if _, ok := store.Get("invite_bbbbbbbbbbbbbbbbbbbb"); ok {
+		t.Fatal("capacity failure published part of the batch")
 	}
 }
 

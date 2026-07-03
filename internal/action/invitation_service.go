@@ -66,6 +66,13 @@ func (s *Service) RunInvitation(ctx context.Context, invitationID string, reques
 	if invitation.ChainDepth >= maxInvitationChainDepth {
 		return Run{}, fmt.Errorf("invitation chain depth exceeded: %w", ErrInvitationForbidden)
 	}
+	parentAgent, err := s.registryAgent(parent.AgentID)
+	if err != nil {
+		return Run{}, err
+	}
+	if !configuredInvitationTransition(parentAgent, invitation) {
+		return Run{}, fmt.Errorf("invitation transition is no longer configured: %w", ErrInvitationForbidden)
+	}
 
 	target, err := s.targetForInvitation(invitation, request.ExpectedTargetRevision)
 	if err != nil {
@@ -103,6 +110,15 @@ func (s *Service) RunInvitation(ctx context.Context, invitationID string, reques
 	}
 	release = false
 	return child, nil
+}
+
+func configuredInvitationTransition(parent agent.Agent, invitation Invitation) bool {
+	for _, rule := range parent.FollowUps.OnAccept {
+		if rule.AgentID == invitation.AgentID && contextpack.Scope(rule.Scope) == invitation.Scope && InvitationRelationship(rule.Relationship) == invitation.Relationship {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) registryAgent(agentID string) (agent.Agent, error) {
@@ -174,16 +190,20 @@ func (s *Service) publishPreparedInvitations(run Run, prepared []preparedInvitat
 		rootRunID = run.RootRunID
 	}
 	chainDepth := run.effectiveChainDepth() + 1
-	published := make([]PublishedInvitation, 0, len(prepared))
+	batch := make([]Invitation, 0, len(prepared))
 	for index, offer := range prepared {
 		invitation := Invitation{
 			ID: ids[index], ParentRunID: run.RunID, RootRunID: rootRunID, ChainDepth: chainDepth,
 			AgentID: offer.AgentID, Scope: offer.Scope, SceneID: offer.SceneID, ChapterID: offer.ChapterID,
 			Relationship: offer.Relationship,
 		}
-		if err := s.invitations.Publish(invitation); err != nil {
-			return nil, err
-		}
+		batch = append(batch, invitation)
+	}
+	if err := s.invitations.PublishBatch(batch); err != nil {
+		return nil, err
+	}
+	published := make([]PublishedInvitation, 0, len(batch))
+	for _, invitation := range batch {
 		published = append(published, publishedInvitation(invitation))
 	}
 	return published, nil

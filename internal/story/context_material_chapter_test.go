@@ -61,6 +61,30 @@ func TestLoadChapterMaterialReturnsOrderedScenesAndNeighbors(t *testing.T) {
 	}
 }
 
+// Test: chapter material fingerprints the exact outline.yaml bytes rather than re-encoded YAML.
+// Requirements: M7-R04, M7-R12.
+func TestLoadChapterMaterialFingerprintsExactOutlineBytes(t *testing.T) {
+	t.Parallel()
+
+	outline := mustMultiSceneOutline(t)
+	scenes := mustAllSceneDocuments(t, outline)
+	exactOutlineBytes := []byte("# author formatting\nversion: 1\nroot: {arcs: []}\n")
+	files := &fakeFileStore{loadOutline: outline, scenes: scenes, exactOutlineBytes: exactOutlineBytes}
+	service := newContextMaterialService(t, files)
+
+	result, err := service.LoadChapterMaterial(context.Background(), "ch_00000000000000000001")
+	if err != nil {
+		t.Fatalf("LoadChapterMaterial() error = %v", err)
+	}
+	pairs := []ChapterSceneRevision{
+		{SceneID: "scn_00000000000000000001", Revision: scenes["scn_00000000000000000001"].Revision},
+		{SceneID: "scn_00000000000000000002", Revision: scenes["scn_00000000000000000002"].Revision},
+	}
+	if want := ComputeChapterFingerprint(exactOutlineBytes, pairs); result.TargetRevision != want {
+		t.Fatalf("fingerprint = %q, want exact-byte fingerprint %q", result.TargetRevision, want)
+	}
+}
+
 // Test: chapter fingerprint hashes outline bytes and ordered scene revisions.
 // Requirements: M7-R04.
 func TestChapterFingerprintUsesOutlineAndOrderedSceneRevisions(t *testing.T) {

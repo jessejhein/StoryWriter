@@ -384,5 +384,7 @@ Starter agents:
 
 Follow-up invitations are declared in agent YAML (`follow_ups.on_accept` and
 completed suggestion paths) but never auto-run. Maximum chain depth is 3.
+Process-local invitations expire after 30 minutes, are one-time claims, and are
+published atomically when one finding offers actions for multiple scenes.
 Context budgets use a conservative byte estimator; UI labels estimates as
 estimates, not billed tokens.

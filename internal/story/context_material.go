@@ -46,6 +46,10 @@ type contextSnapshot struct {
 	outlineBytes []byte
 }
 
+type outlineByteLoader interface {
+	LoadOutlineBytes(context.Context, string) ([]byte, error)
+}
+
 // LoadSelectionMaterial loads one coherent selection snapshot under the read lock.
 func (s *Service) LoadSelectionMaterial(ctx context.Context, request SelectionMaterialRequest) (ContextMaterialResult, error) {
 	if err := ValidateSceneID(request.SceneID); err != nil {
@@ -177,6 +181,7 @@ func (s *Service) LoadChapterMaterial(ctx context.Context, chapterID string) (Co
 	return ContextMaterialResult{
 		Material: contextpack.Material{
 			Scope:            contextpack.ScopeChapterReview,
+			ChapterID:        chapterID,
 			ChapterScenes:    chapterScenes,
 			SceneOrder:       sceneOrderRefs(snapshot.outline),
 			CodexCandidates:  candidates,
@@ -206,7 +211,11 @@ func (s *Service) loadContextSnapshot(ctx context.Context) (contextSnapshot, err
 	if err != nil {
 		return contextSnapshot{}, err
 	}
-	outlineBytes, err := s.files.MarshalOutline(outline)
+	loader, ok := s.files.(outlineByteLoader)
+	if !ok {
+		return contextSnapshot{}, errors.New("exact outline byte loading is unavailable")
+	}
+	outlineBytes, err := loader.LoadOutlineBytes(ctx, current.Path)
 	if err != nil {
 		return contextSnapshot{}, err
 	}

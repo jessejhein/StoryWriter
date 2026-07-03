@@ -1,8 +1,8 @@
-package gitstore
-
 // BDD Scenario: 7.5.1 - Record causal and dependency trailers
 // Requirements: M7-R13, M7-R14
 // Test purpose: Pure commit message formatting and validation before Git execution.
+
+package gitstore
 
 import (
 	"strings"

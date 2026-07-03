@@ -67,7 +67,8 @@ func (s *Service) PreviewContext(ctx context.Context, request TaggedRunRequest) 
 	if err != nil {
 		return ContextPreviewResult{}, err
 	}
-	if compatible, err := s.styleCompatible(ctx, agentDefinition, styleDefinition); err != nil {
+	compatible, providerContextLimit, err := s.styleCompatibility(ctx, agentDefinition, styleDefinition)
+	if err != nil {
 		return ContextPreviewResult{}, err
 	} else if !compatible {
 		return ContextPreviewResult{}, fmt.Errorf("style %q is incompatible with agent %q: %w", styleDefinition.ID, agentDefinition.ID, ErrProviderInvalid)
@@ -75,7 +76,7 @@ func (s *Service) PreviewContext(ctx context.Context, request TaggedRunRequest) 
 	if err := validateAgentScope(agentDefinition, request.Target); err != nil {
 		return ContextPreviewResult{}, err
 	}
-	materialResult, err := s.loadMaterial(ctx, request.Target)
+	materialResult, err := s.loadPreviewMaterial(ctx, request.Target)
 	if err != nil {
 		return ContextPreviewResult{}, err
 	}
@@ -86,7 +87,7 @@ func (s *Service) PreviewContext(ctx context.Context, request TaggedRunRequest) 
 	_, manifest, err := s.builder.Build(contextpack.BuildRequest{
 		Scope:     request.Target.Scope,
 		Policy:    agentPolicy(agentDefinition),
-		Budget:    agentBudget(agentDefinition),
+		Budget:    agentBudget(agentDefinition, providerContextLimit),
 		RAGMode:   contextpack.RAGMode(agentDefinition.RAGPolicy.Mode),
 		Material:  material,
 		Estimator: contextpack.ByteEstimator{},
@@ -95,6 +96,13 @@ func (s *Service) PreviewContext(ctx context.Context, request TaggedRunRequest) 
 		return ContextPreviewResult{}, err
 	}
 	return ContextPreviewResult{Manifest: manifest, TargetRevision: materialResult.TargetRevision}, nil
+}
+
+func (s *Service) loadPreviewMaterial(ctx context.Context, target TaggedTarget) (story.ContextMaterialResult, error) {
+	if target.Scope == contextpack.ScopeChapterReview {
+		return s.material.LoadChapterMaterial(ctx, target.Chapter.ChapterID)
+	}
+	return s.loadMaterial(ctx, target)
 }
 
 func (s *Service) loadMaterial(ctx context.Context, target TaggedTarget) (story.ContextMaterialResult, error) {
@@ -175,10 +183,11 @@ func filterKnownPacks(packs []contextpack.Pack) []contextpack.Pack {
 	return filtered
 }
 
-func agentBudget(agentDefinition agent.Agent) contextpack.Budget {
+func agentBudget(agentDefinition agent.Agent, providerContextLimit int) contextpack.Budget {
 	budget := contextpack.Budget{
 		MaxInputEstimatedTokens:       agentDefinition.ContextBudget.MaxInputEstimatedTokens,
 		ReservedOutputEstimatedTokens: agentDefinition.ContextBudget.ReservedOutputEstimatedTokens,
+		ProviderMaxInputTokens:        providerContextLimit,
 	}
 	if budget.MaxInputEstimatedTokens == 0 {
 		budget.MaxInputEstimatedTokens = max(agentDefinition.ModelRequirements.MinContextTokens*2, 8000)

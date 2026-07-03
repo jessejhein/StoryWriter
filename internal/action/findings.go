@@ -38,6 +38,13 @@ type FindingsResponse struct {
 	Findings []Finding `json:"findings"`
 }
 
+type findingWire struct {
+	Title            *string   `json:"title"`
+	Explanation      *string   `json:"explanation"`
+	SceneIDs         *[]string `json:"scene_ids"`
+	FollowUpAgentIDs *[]string `json:"follow_up_agent_ids"`
+}
+
 // ParseFindings validates one strict Chapter Review JSON response.
 func ParseFindings(raw string, allowedFollowUps map[string]struct{}, allowedSceneIDs map[string]struct{}) (FindingsResponse, error) {
 	trimmed := strings.TrimSpace(raw)
@@ -45,16 +52,26 @@ func ParseFindings(raw string, allowedFollowUps map[string]struct{}, allowedScen
 		return FindingsResponse{}, fmt.Errorf("fenced findings response: %w", ErrInvalidFindings)
 	}
 	var envelope struct {
-		Findings *[]Finding `json:"findings"`
+		Findings *[]findingWire `json:"findings"`
 	}
 	decoder := json.NewDecoder(strings.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {
 		return FindingsResponse{}, fmt.Errorf("findings JSON: %w: %w", err, ErrInvalidFindings)
 	}
 	if envelope.Findings == nil {
 		return FindingsResponse{}, fmt.Errorf("findings must not be null: %w", ErrInvalidFindings)
 	}
-	response := FindingsResponse{Findings: *envelope.Findings}
+	response := FindingsResponse{Findings: make([]Finding, 0, len(*envelope.Findings))}
+	for _, rawFinding := range *envelope.Findings {
+		if rawFinding.Title == nil || rawFinding.Explanation == nil || rawFinding.SceneIDs == nil || rawFinding.FollowUpAgentIDs == nil {
+			return FindingsResponse{}, fmt.Errorf("finding fields must be present and non-null: %w", ErrInvalidFindings)
+		}
+		response.Findings = append(response.Findings, Finding{
+			Title: *rawFinding.Title, Explanation: *rawFinding.Explanation,
+			SceneIDs: *rawFinding.SceneIDs, FollowUpAgentIDs: *rawFinding.FollowUpAgentIDs,
+		})
+	}
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		if err == nil {
 			return FindingsResponse{}, fmt.Errorf("trailing JSON: %w", ErrInvalidFindings)

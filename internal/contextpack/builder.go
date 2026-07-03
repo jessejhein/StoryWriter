@@ -24,6 +24,9 @@ func NewBuilder() *Builder {
 
 // Build validates policy, applies deterministic budgeting, and returns one packet variant.
 func (b *Builder) Build(request BuildRequest) (Packet, Manifest, error) {
+	if request.Material.Scope != request.Scope {
+		return nil, Manifest{}, fmt.Errorf("material scope %q does not match request scope %q: %w", request.Material.Scope, request.Scope, ErrInvalidTarget)
+	}
 	policy := clonePolicy(request.Policy)
 	if err := validatePolicy(policy, request.Scope, request.RAGMode); err != nil {
 		return nil, Manifest{}, err
@@ -69,13 +72,14 @@ func (b *Builder) Build(request BuildRequest) (Packet, Manifest, error) {
 	}
 	usedTokens += targetTokens
 
-	var activeCodex []CodexEntryState
+	var activeCodex activeCodexResult
 	if slices.Contains(policy.Required, PackActiveCodex) {
 		activeCodex, err = resolveActiveCodexForScope(request)
 		if err != nil {
 			return nil, Manifest{}, err
 		}
-		for _, entry := range activeCodex {
+		manifest.PacksUsed = appendIfMissing(manifest.PacksUsed, PackActiveCodex)
+		for _, entry := range activeCodex.states() {
 			entryTokens, err := request.Estimator.SumChecked([]string{codexEstimateText(entry)})
 			if err != nil {
 				return nil, Manifest{}, err
@@ -84,7 +88,6 @@ func (b *Builder) Build(request BuildRequest) (Packet, Manifest, error) {
 				return nil, Manifest{}, fmt.Errorf("required codex exceeds input budget: %w", ErrBudgetOverflow)
 			}
 			usedTokens += entryTokens
-			manifest.PacksUsed = appendIfMissing(manifest.PacksUsed, PackActiveCodex)
 			manifest.ActiveCodex = append(manifest.ActiveCodex, ManifestCodexRefFromState(entry))
 		}
 	}
@@ -127,15 +130,15 @@ func (b *Builder) Build(request BuildRequest) (Packet, Manifest, error) {
 		return ScenePacket{
 			SceneMarkdown:    request.Material.SceneMarkdown,
 			Style:            request.Material.Style,
-			ActiveCodex:      cloneCodexEntryStates(activeCodex),
+			ActiveCodex:      cloneCodexEntryStates(activeCodex.scene),
 			OutlineNeighbors: cloneOutlineNeighbors(outlineNeighbors),
 		}, manifest, nil
 	case ScopeChapterReview:
 		return ChapterReviewPacket{
-			ChapterID:        chapterIDFromMaterial(request.Material),
+			ChapterID:        request.Material.ChapterID,
 			Style:            request.Material.Style,
 			ChapterScenes:    cloneChapterScenes(request.Material.ChapterScenes),
-			ActiveCodex:      cloneCodexEntryStates(activeCodex),
+			ActiveCodex:      cloneChapterCodexStates(activeCodex.chapter),
 			OutlineNeighbors: cloneOutlineNeighbors(outlineNeighbors),
 		}, manifest, nil
 	default:
@@ -212,23 +215,39 @@ func targetTextForScope(request BuildRequest) (string, Pack, error) {
 	}
 }
 
-func resolveActiveCodexForScope(request BuildRequest) ([]CodexEntryState, error) {
+type activeCodexResult struct {
+	scene   []CodexEntryState
+	chapter []ChapterCodexState
+}
+
+func (result activeCodexResult) states() []CodexEntryState {
+	if len(result.scene) > 0 {
+		return result.scene
+	}
+	states := make([]CodexEntryState, len(result.chapter))
+	for index, item := range result.chapter {
+		states[index] = item.State
+	}
+	return states
+}
+
+func resolveActiveCodexForScope(request BuildRequest) (activeCodexResult, error) {
 	switch request.Scope {
 	case ScopeScene:
 		targetSceneID, err := targetSceneIDFromMaterial(request.Material)
 		if err != nil {
-			return nil, err
+			return activeCodexResult{}, err
 		}
 		ranked := RankLexicalRelevance(request.Material.SceneMarkdown, request.Material.CodexCandidates)
 		states := make([]CodexEntryState, 0, len(ranked))
 		for _, item := range ranked {
 			state, err := resolveActiveState(item.Candidate, request.Material.SceneOrder, targetSceneID)
 			if err != nil {
-				return nil, err
+				return activeCodexResult{}, err
 			}
 			states = append(states, state)
 		}
-		return states, nil
+		return activeCodexResult{scene: states}, nil
 	case ScopeChapterReview:
 		sceneCodex := make([]ChapterSceneCodex, 0, len(request.Material.ChapterScenes))
 		for _, scene := range request.Material.ChapterScenes {
@@ -245,15 +264,15 @@ func resolveActiveCodexForScope(request BuildRequest) ([]CodexEntryState, error)
 		}
 		groups, err := DeduplicateChapterCodexStates(sceneCodex, request.Material.SceneOrder)
 		if err != nil {
-			return nil, err
+			return activeCodexResult{}, err
 		}
-		states := make([]CodexEntryState, 0, len(groups))
+		states := make([]ChapterCodexState, 0, len(groups))
 		for _, group := range groups {
-			states = append(states, group.State)
+			states = append(states, ChapterCodexState{State: group.State, SceneIDs: cloneStringSlice(group.SceneIDs)})
 		}
-		return states, nil
+		return activeCodexResult{chapter: states}, nil
 	default:
-		return nil, fmt.Errorf("active codex is unsupported for scope %q", request.Scope)
+		return activeCodexResult{}, fmt.Errorf("active codex is unsupported for scope %q", request.Scope)
 	}
 }
 
@@ -273,18 +292,6 @@ func targetSceneIDFromMaterial(material Material) (string, error) {
 		return "", fmt.Errorf("scene order is required for active codex resolution")
 	}
 	return material.SceneOrder[len(material.SceneOrder)-1].ID, nil
-}
-
-func chapterIDFromMaterial(material Material) string {
-	for _, neighbor := range material.OutlineNeighbors {
-		if neighbor.Kind == "chapter" {
-			return neighbor.ID
-		}
-	}
-	if len(material.ChapterScenes) > 0 {
-		return ""
-	}
-	return ""
 }
 
 func appendIfMissing(values []Pack, pack Pack) []Pack {

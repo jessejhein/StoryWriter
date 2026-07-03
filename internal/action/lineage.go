@@ -106,10 +106,23 @@ func ResolveParentRun(runs *RunStore, run Run) (*Run, error) {
 	if run.ParentRunID == "" {
 		return nil, nil
 	}
-	parent, ok := runs.Get(run.ParentRunID)
-	if !ok {
-		return nil, fmt.Errorf("parent run %q is unknown: %w", run.ParentRunID, ErrLineageConflict)
+	seen := map[string]struct{}{run.RunID: {}}
+	parentID := run.ParentRunID
+	var directParent *Run
+	for parentID != "" {
+		if _, exists := seen[parentID]; exists {
+			return nil, fmt.Errorf("operation lineage cycle at %q: %w", parentID, ErrLineageConflict)
+		}
+		seen[parentID] = struct{}{}
+		parent, ok := runs.Get(parentID)
+		if !ok {
+			return nil, fmt.Errorf("parent run %q is unknown: %w", parentID, ErrLineageConflict)
+		}
+		if directParent == nil {
+			parentCopy := parent
+			directParent = &parentCopy
+		}
+		parentID = parent.ParentRunID
 	}
-	parentCopy := parent
-	return &parentCopy, nil
+	return directParent, nil
 }

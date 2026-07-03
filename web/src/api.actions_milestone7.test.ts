@@ -1,3 +1,7 @@
+// BDD Scenario: 7.1.1 - Preview minimal Line Polish context
+// Requirements: M7-R09, M7-R17
+// Test purpose: verify exact preview, run, and invitation transport contracts.
+
 import { afterEach, expect, test, vi } from 'vitest'
 import {
   previewActionContext,

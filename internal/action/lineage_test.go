@@ -107,6 +107,25 @@ func TestLineageRejectsUnknownNonAcceptedSelfAndCycleBeforeWrite(t *testing.T) {
 	}
 }
 
+// Test: resolving a parent rejects cycles anywhere in the bounded in-memory lineage.
+// Requirements: M7-R13, M7-R15.
+func TestResolveParentRunRejectsIndirectCycle(t *testing.T) {
+	t.Parallel()
+
+	runs := NewRunStore()
+	child := Run{RunID: "run_cccccccccccccccccccc", Status: RunPending, ParentRunID: "run_bbbbbbbbbbbbbbbbbbbb"}
+	parent := Run{RunID: "run_bbbbbbbbbbbbbbbbbbbb", Status: RunAccepted, ParentRunID: "run_aaaaaaaaaaaaaaaaaaaa"}
+	root := Run{RunID: "run_aaaaaaaaaaaaaaaaaaaa", Status: RunAccepted, ParentRunID: child.RunID}
+	for _, run := range []Run{child, parent, root} {
+		if err := runs.Insert(run); err != nil {
+			t.Fatalf("Insert(%s) error = %v", run.RunID, err)
+		}
+	}
+	if _, err := ResolveParentRun(runs, child); !errors.Is(err, ErrLineageConflict) {
+		t.Fatalf("ResolveParentRun() error = %v, want ErrLineageConflict", err)
+	}
+}
+
 // Test: checkpoint failure leaves run retryable.
 // Requirements: M7-R15.
 func TestLineageCheckpointFailureRestoresAndLeavesRunRetryable(t *testing.T) {

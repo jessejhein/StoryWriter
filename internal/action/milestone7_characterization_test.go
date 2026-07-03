@@ -1,9 +1,9 @@
-package action
-
 // BDD Scenario: 7.1.1 - Preview minimal Line Polish context
 // Requirements: M7-R02, M7-R10
 // Test purpose: Lock existing Line Polish provider context to selected text and
 // style instructions only before Milestone 7 refactors context assembly.
+
+package action
 
 // BDD Scenario: 7.1.2 - Run with the previewed scope
 // Requirements: M7-R02, M7-R10, M7-R15

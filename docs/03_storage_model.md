@@ -290,5 +290,6 @@ Implemented trailers:
 - `Storywork-Depends-On` (semantic dependency; omitted for trigger-only children)
 
 Trailers are validated before write. Invalid IDs, injection, cycles, or
-self-dependencies are rejected before canonical bytes change. Git notes are not
-used for operation lineage in Milestone 7.
+self-dependencies are rejected before canonical bytes change. A child trailer's
+accepted parent operation must also exist in current branch ancestry. Git notes
+are not used for operation lineage in Milestone 7.

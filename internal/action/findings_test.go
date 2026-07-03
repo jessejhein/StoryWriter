@@ -45,7 +45,19 @@ func TestParseFindingsRejectsUnknownMissingNullWrongAndTrailing(t *testing.T) {
 	t.Parallel()
 
 	for _, raw := range []string{
+		`{"findings":[],"unknown":true}`,
+		`{}`,
 		`{"findings":[{"title":"Pacing","explanation":"x","scene_ids":["scn_missingaaaaaaaaaaaa"],"follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":"Pacing","explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[],"unknown":true}]}`,
+		`{"findings":[{"explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":null,"explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":"Pacing","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":"Pacing","explanation":null,"scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":"Pacing","explanation":"x","follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":"Pacing","explanation":"x","scene_ids":null,"follow_up_agent_ids":[]}]}`,
+		`{"findings":[{"title":"Pacing","explanation":"x","scene_ids":["scn_0123456789abcdef0123"]}]}`,
+		`{"findings":[{"title":"Pacing","explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":null}]}`,
+		`{"findings":[{"title":7,"explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]}`,
 		`{"findings":[{"title":"","explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]}`,
 		`{"findings":null}`,
 		`{"findings":[{"title":"Pacing","explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":[]}]} {}`,
@@ -79,5 +91,20 @@ func TestParseFindingsValidatesSceneAndFollowUpReferences(t *testing.T) {
 	raw := `{"findings":[{"title":"Pacing","explanation":"x","scene_ids":["scn_0123456789abcdef0123"],"follow_up_agent_ids":["unknown_agent"]}]}`
 	if _, err := ParseFindings(raw, map[string]struct{}{"scene_rewrite": {}}, map[string]struct{}{"scn_0123456789abcdef0123": {}}); !errors.Is(err, ErrInvalidFindings) {
 		t.Fatalf("follow-up error = %v", err)
+	}
+}
+
+// Test: each affected scene receives its own allowed scene follow-up invitation.
+// Requirements: M7-R04, M7-R11.
+func TestFindingsInvitationsCoverEveryAffectedScene(t *testing.T) {
+	t.Parallel()
+
+	prepared := findingsInvitations(FindingsResponse{Findings: []Finding{{
+		Title: "Pacing", Explanation: "Both transitions drag.",
+		SceneIDs:         []string{"scn_aaaaaaaaaaaaaaaaaaaa", "scn_bbbbbbbbbbbbbbbbbbbb"},
+		FollowUpAgentIDs: []string{"scene_rewrite"},
+	}}})
+	if len(prepared) != 2 || prepared[0].SceneID != "scn_aaaaaaaaaaaaaaaaaaaa" || prepared[1].SceneID != "scn_bbbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("prepared invitations = %#v", prepared)
 	}
 }

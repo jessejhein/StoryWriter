@@ -1,8 +1,8 @@
-package contextpack
-
 // BDD Scenario: 7.2.2 - Exclude irrelevant Codex entries
 // Requirements: M7-R08
 // Test purpose: Estimated tokens use one conservative byte-based definition across budgeting.
+
+package contextpack
 
 import (
 	"errors"

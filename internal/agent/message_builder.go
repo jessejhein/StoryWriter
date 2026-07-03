@@ -5,6 +5,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"storywork/internal/contextpack"
@@ -84,6 +85,7 @@ func sceneMessages(agentDefinition Agent, style Style, packet contextpack.SceneP
 			builder.WriteString(": ")
 			builder.WriteString(entry.Description)
 			builder.WriteString("\n")
+			writeCodexDetails(&builder, entry)
 		}
 	}
 	for _, neighbor := range packet.OutlineNeighbors {
@@ -112,6 +114,30 @@ func chapterReviewMessages(agentDefinition Agent, style Style, packet contextpac
 		builder.WriteString(scene.Markdown)
 		builder.WriteString("\n")
 	}
+	if len(packet.ActiveCodex) > 0 {
+		builder.WriteString("\nTimeline-active facts:\n")
+		for _, item := range packet.ActiveCodex {
+			builder.WriteString("- Entry ")
+			builder.WriteString(item.State.EntryID)
+			builder.WriteString(" (")
+			builder.WriteString(item.State.Name)
+			builder.WriteString("): ")
+			builder.WriteString(item.State.Description)
+			builder.WriteString("\n  Applies to scenes: ")
+			builder.WriteString(strings.Join(item.SceneIDs, ", "))
+			builder.WriteString("\n")
+			writeCodexDetails(&builder, item.State)
+		}
+	}
+	for _, neighbor := range packet.OutlineNeighbors {
+		builder.WriteString("\nNeighbor ")
+		builder.WriteString(neighbor.Kind)
+		builder.WriteString(" ")
+		builder.WriteString(neighbor.ID)
+		builder.WriteString(":\n")
+		builder.WriteString(neighbor.Text)
+		builder.WriteString("\n")
+	}
 	schema, _ := json.Marshal(map[string]any{
 		"findings": []map[string]any{{
 			"title": "string", "explanation": "string",
@@ -123,5 +149,25 @@ func chapterReviewMessages(agentDefinition Agent, style Style, packet contextpac
 	return []ChatMessage{
 		{Role: "system", Content: style.SystemPrompt},
 		{Role: "user", Content: builder.String()},
+	}
+}
+
+func writeCodexDetails(builder *strings.Builder, entry contextpack.CodexEntryState) {
+	keys := make([]string, 0, len(entry.Metadata))
+	for key := range entry.Metadata {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		builder.WriteString("  ")
+		builder.WriteString(key)
+		builder.WriteString("=")
+		builder.WriteString(entry.Metadata[key])
+		builder.WriteString("\n")
+	}
+	if len(entry.AppliedProgressionIDs) > 0 {
+		builder.WriteString("  Applied progressions: ")
+		builder.WriteString(strings.Join(entry.AppliedProgressionIDs, ", "))
+		builder.WriteString("\n")
 	}
 }

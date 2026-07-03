@@ -1,8 +1,8 @@
-package agent
-
 // BDD Scenario: 7.2.3 - Review and accept one scene replacement
 // Requirements: M7-R01, M7-R03, M7-R04
 // Test purpose: Version-3 agent definitions accept only supported scopes, outputs, budgets, and follow-up transitions.
+
+package agent
 
 import (
 	"errors"

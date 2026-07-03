@@ -257,6 +257,12 @@ func stateKey(state CodexEntryState) string {
 	}
 	sort.Strings(metadataKeys)
 	var builder strings.Builder
+	builder.WriteString(state.EntryID)
+	builder.WriteString("|")
+	builder.WriteString(state.EntryType)
+	builder.WriteString("|")
+	builder.WriteString(state.Name)
+	builder.WriteString("|")
 	builder.WriteString(state.Description)
 	for _, key := range metadataKeys {
 		builder.WriteString("|")

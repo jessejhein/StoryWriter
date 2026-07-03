@@ -1,8 +1,8 @@
-package story
-
 // BDD Scenario: 7.5.1 - Record causal and dependency trailers
 // Requirements: M7-R13, M7-R14, M7-R15
 // Test purpose: Accepted scene patches write validated Git operation trailers without weakening rollback safety.
+
+package story
 
 import (
 	"context"
@@ -19,7 +19,7 @@ import (
 func TestAcceptScenePatchCommitsValidatedOperationMetadata(t *testing.T) {
 	t.Parallel()
 
-	git := &fakeGitStore{clean: true}
+	git := &fakeGitStore{clean: true, operationExists: true}
 	service := NewService(
 		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
 		patchFileStore(t), git, &fakeIndexStore{}, &fakeIDGenerator{},
@@ -50,6 +50,37 @@ func TestAcceptScenePatchCommitsValidatedOperationMetadata(t *testing.T) {
 	}
 	if git.commitMessages[0] != want {
 		t.Fatalf("commit message = %q, want %q", git.commitMessages[0], want)
+	}
+}
+
+// Test: dependent operation metadata requires its accepted parent in branch ancestry.
+// Requirements: M7-R13, M7-R15.
+func TestAcceptScenePatchRejectsParentMissingFromAncestryBeforeWrite(t *testing.T) {
+	t.Parallel()
+
+	files := patchFileStore(t)
+	git := &fakeGitStore{clean: true, operationExists: false}
+	service := NewService(
+		&fakeSession{current: project.Project{Path: "/tmp/story"}, ok: true},
+		files, git, &fakeIndexStore{}, &fakeIDGenerator{},
+	)
+	request := patchRequest()
+	request.Operation = &SceneOperationMetadata{
+		OperationID: "run_0123456789abcdef0123",
+		TriggeredBy: "run_aaaaaaaaaaaaaaaaaaaa",
+		DependsOn:   "run_aaaaaaaaaaaaaaaaaaaa",
+		Scope:       "selection:scn_00000000000000000001",
+	}
+
+	_, err := service.AcceptScenePatch(context.Background(), request)
+	if err == nil {
+		t.Fatal("AcceptScenePatch() error = nil, want ancestry rejection")
+	}
+	if files.writeCalls != 0 || git.commitMessageCalls != 0 {
+		t.Fatalf("write/commit calls = %d/%d, want 0/0", files.writeCalls, git.commitMessageCalls)
+	}
+	if len(git.operationLookups) != 1 || git.operationLookups[0] != request.Operation.TriggeredBy {
+		t.Fatalf("operation lookups = %#v", git.operationLookups)
 	}
 }
 

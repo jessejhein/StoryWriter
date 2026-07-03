@@ -1,3 +1,7 @@
+// BDD Scenario: 7.1.1 - Preview minimal Line Polish context
+// Requirements: M7-R09, M7-R17
+// Test purpose: verify stale preview, run, and invitation responses are ignored.
+
 import { expect, test } from 'vitest'
 import {
   actionUsesBrowserStorage,
