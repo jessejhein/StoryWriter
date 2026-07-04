@@ -59,10 +59,11 @@ func TestApplyPathsAndCommitPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	newHead, err := store.CommitPromotion(ctx, dir, gitstore.PromotionCommitInput{
-		ExperimentID: "brn_0123456789abcdef0123",
-		SourceCommit: experimentHead,
-		BaseCommit:   mainHead,
-		Paths:        []string{"outline.yaml"},
+		ExperimentID:     "brn_0123456789abcdef0123",
+		SourceCommit:     experimentHead,
+		BaseCommit:       mainHead,
+		ExpectedMainHead: mainHead,
+		Paths:            []string{"outline.yaml"},
 	})
 	if err != nil {
 		t.Fatalf("CommitPromotion() error = %v", err)

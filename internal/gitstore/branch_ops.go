@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -47,10 +48,11 @@ type PathSnapshot struct {
 
 // PromotionCommitInput is validated provenance for one promotion commit.
 type PromotionCommitInput struct {
-	ExperimentID string
-	SourceCommit string
-	BaseCommit   string
-	Paths        []string
+	ExperimentID     string
+	SourceCommit     string
+	BaseCommit       string
+	ExpectedMainHead string
+	Paths            []string
 }
 
 // Status returns active branch, cleanliness, and current main head.
@@ -297,7 +299,18 @@ func (s *Store) ReadTextBlob(ctx context.Context, repoPath, commit, projectPath 
 	if !exists {
 		return TextBlob{Exists: false}, nil
 	}
-	output, err := s.runBytes(ctx, "-C", repoPath, "cat-file", "blob", objectID)
+	sizeOutput, err := s.run(ctx, "-C", repoPath, "cat-file", "-s", objectID)
+	if err != nil {
+		return TextBlob{}, fmt.Errorf("inspect blob size %q at %s: %w", projectPath, commit, err)
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(sizeOutput), 10, 64)
+	if err != nil {
+		return TextBlob{}, fmt.Errorf("parse blob size %q at %s: %w", projectPath, commit, err)
+	}
+	if size > 5<<20 {
+		return TextBlob{}, ErrBlobTooLarge
+	}
+	output, err := s.runBytesLimited(ctx, 5<<20, "-C", repoPath, "cat-file", "blob", objectID)
 	if err != nil {
 		return TextBlob{}, fmt.Errorf("read blob %q at %s: %w", projectPath, commit, err)
 	}
@@ -456,27 +469,53 @@ func (s *Store) CommitPromotion(ctx context.Context, repoPath string, input Prom
 	if len(input.Paths) == 0 {
 		return "", errors.New("paths are required")
 	}
-	command := []string{"-C", repoPath, "-c", "user.name=AI Story Workshop", "-c", "user.email=storywork@localhost", "commit", "-F", "-"}
-	command = append(command, "--")
+	if err := validateCommitID(input.ExpectedMainHead); err != nil {
+		return "", err
+	}
 	for _, projectPath := range input.Paths {
 		if err := validateProjectPath(projectPath); err != nil {
 			return "", err
 		}
-		command = append(command, projectPath)
+	}
+	treeOutput, err := s.run(ctx, "-C", repoPath, "write-tree")
+	if err != nil {
+		return "", fmt.Errorf("write promotion tree: %w", err)
+	}
+	treeID := strings.TrimSpace(treeOutput)
+	if err := validateCommitID(treeID); err != nil {
+		return "", err
+	}
+	command := []string{
+		"-C", repoPath,
+		"-c", "user.name=AI Story Workshop",
+		"-c", "user.email=storywork@localhost",
+		"commit-tree", treeID,
+		"-p", input.ExpectedMainHead,
+		"-m", message,
 	}
 	cmd := exec.CommandContext(ctx, s.executable, command...)
-	cmd.Stdin = strings.NewReader(message)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("%s: %w: %s", strings.Join(cmd.Args, " "), err, strings.TrimSpace(string(output)))
 	}
-	headOutput, err := s.run(ctx, "-C", repoPath, "rev-parse", "HEAD")
-	if err != nil {
-		return "", fmt.Errorf("resolve HEAD after promotion: %w", err)
-	}
-	head := strings.TrimSpace(headOutput)
+	head := strings.TrimSpace(string(output))
 	if err := validateCommitID(head); err != nil {
 		return "", err
+	}
+	if _, err := s.run(ctx, "-C", repoPath, "update-ref", "refs/heads/main", head, input.ExpectedMainHead); err != nil {
+		return "", fmt.Errorf("publish promotion commit: %w", err)
+	}
+	if clean, err := s.IsClean(ctx, repoPath); err != nil {
+		return "", fmt.Errorf("verify promotion cleanliness: %w", err)
+	} else if !clean {
+		return "", errors.New("promotion left worktree dirty")
+	}
+	active, detached, err := s.activeBranch(ctx, repoPath)
+	if err != nil {
+		return "", fmt.Errorf("verify promotion head: %w", err)
+	}
+	if detached || active != canonBranch {
+		return "", errors.New("promotion did not leave main active")
 	}
 	return head, nil
 }

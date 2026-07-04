@@ -331,6 +331,12 @@ func (s *Service) DiscardExperiment(ctx context.Context, experimentID string, ex
 	if !status.IsClean {
 		return RepositoryStatus{}, ErrDirtyWorktree
 	}
+	if status.IsDetached {
+		return RepositoryStatus{}, ErrDetachedHEAD
+	}
+	if !status.IsCanon && !status.IsManaged {
+		return RepositoryStatus{}, ErrUnmanagedBranch
+	}
 	experiments, err := s.repo.ListExperiments(ctx, path)
 	if err != nil {
 		return RepositoryStatus{}, err

@@ -217,6 +217,12 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchError(writer, err)
 			return
 		}
+		body.ProfileID = strings.TrimSpace(body.ProfileID)
+		body.Model = strings.TrimSpace(body.Model)
+		if body.ProfileID == "" || body.Model == "" {
+			writeBranchError(writer, branch.ErrInvalidAnalysis)
+			return
+		}
 		result, err := branches.AnalyzeRamifications(request.Context(), request.PathValue("experiment_id"), branch.AnalysisRequest{
 			Goal:                   body.Goal,
 			ProfileID:              body.ProfileID,

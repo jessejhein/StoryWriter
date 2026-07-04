@@ -92,14 +92,22 @@ func promoteSelectedFiles(ctx context.Context, s *Service, request PromotionRequ
 		return PromotionResult{}, JoinErrors(mapRepositoryError(err), rollbackErr)
 	}
 	newHead, err := s.repo.CommitPromotion(ctx, path, PromotionCommit{
-		ExperimentID: comparison.ExperimentID,
-		SourceCommit: comparison.ExperimentHead,
-		BaseCommit:   comparison.BaseHead,
-		Paths:        selected,
+		ExperimentID:     comparison.ExperimentID,
+		SourceCommit:     comparison.ExperimentHead,
+		BaseCommit:       comparison.BaseHead,
+		ExpectedMainHead: comparison.MainHead,
+		Paths:            selected,
 	})
 	if err != nil {
 		rollbackErr := s.rollbackPromotion(ctx, path, snapshots, selected)
 		return PromotionResult{}, JoinErrors(mapRepositoryError(err), rollbackErr)
+	}
+	finalStatus, err := s.repo.Status(ctx, path)
+	if err != nil {
+		return PromotionResult{}, JoinErrors(errors.New("promotion verification failed"), mapRepositoryError(err))
+	}
+	if finalStatus.ActiveBranch != CanonBranchName || finalStatus.IsDetached || !finalStatus.IsCanon || !finalStatus.IsClean || finalStatus.MainHead != newHead {
+		return PromotionResult{}, errors.New("promotion verification failed")
 	}
 	return PromotionResult{MainHead: newHead, PromotedPaths: selected, ExperimentID: comparison.ExperimentID}, nil
 }

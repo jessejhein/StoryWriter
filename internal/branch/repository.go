@@ -199,10 +199,11 @@ func (r *GitRepository) CommitPromotion(ctx context.Context, repoPath string, co
 		paths[i] = string(path)
 	}
 	head, err := r.Store.CommitPromotion(ctx, repoPath, gitstore.PromotionCommitInput{
-		ExperimentID: string(commit.ExperimentID),
-		SourceCommit: string(commit.SourceCommit),
-		BaseCommit:   string(commit.BaseCommit),
-		Paths:        paths,
+		ExperimentID:     string(commit.ExperimentID),
+		SourceCommit:     string(commit.SourceCommit),
+		BaseCommit:       string(commit.BaseCommit),
+		ExpectedMainHead: string(commit.ExpectedMainHead),
+		Paths:            paths,
 	})
 	if err != nil {
 		return "", err
@@ -293,6 +294,8 @@ func mapRepositoryError(err error) error {
 		return errors.Join(ErrDirtyWorktree, err)
 	case errors.Is(err, gitstore.ErrStaleExperimentHead):
 		return errors.Join(ErrStaleRef, err)
+	case errors.Is(err, gitstore.ErrBlobTooLarge):
+		return errors.Join(ErrFileTooLarge, err)
 	case errors.Is(err, gitstore.ErrDiffTooLarge):
 		return errors.Join(ErrAnalysisBudget, err)
 	default:

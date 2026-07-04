@@ -5,7 +5,9 @@
 import { expect, test } from 'vitest'
 import type { BranchContextKey, ChangedFile, ComparisonResponse, RamificationFinding } from './branchTypes'
 import {
+  applyComparisonFailure,
   applyComparisonSuccess,
+  applyFileComparisonFailure,
   applyFileComparisonSuccess,
   applyRamificationSuccess,
   branchUsesBrowserStorage,
@@ -114,6 +116,29 @@ test('ignores stale comparison file and ramification responses', () => {
     staleComparison.requestVersion + 99,
   )
   expect(staleVersion.ramification).toBeNull()
+})
+
+// Test: stale comparison and file failures cannot overwrite current state or
+// clear newer loading contexts.
+// Requirements: M8-R18.
+test('ignores stale comparison and file failures', () => {
+  const state = applyComparisonSuccess(
+    { ...initialBranchWorkbenchState(projectID), requestVersion: 2 },
+    comparison,
+    context(),
+    2,
+  )
+
+  const staleComparisonFailure = applyComparisonFailure(state, experimentID, 'stale comparison', 1)
+  expect(staleComparisonFailure.comparisonError).toBeNull()
+
+  const staleFileFailure = applyFileComparisonFailure(
+    state,
+    context({ selectedPath: 'scenes/scn_added.md' }),
+    2,
+    'stale file',
+  )
+  expect(staleFileFailure.fileError).toBeNull()
 })
 
 // Test: promotion selection contains only current changed promotable paths.

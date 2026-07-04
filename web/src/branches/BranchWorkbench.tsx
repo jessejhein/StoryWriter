@@ -26,7 +26,9 @@ import type {
   ExperimentSummary,
 } from './branchTypes'
 import {
+  applyComparisonFailure,
   applyComparisonSuccess,
+  applyFileComparisonFailure,
   applyFileComparisonSuccess,
   applyRamificationSuccess,
   buildBranchContextKey,
@@ -140,14 +142,15 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
       ))
       setStatusMessage(`Loaded comparison for ${comparison.branch_name}.`)
     } catch (requestError) {
-      setWorkbench((state) => ({
-        ...state,
-        comparisonLoading: false,
-        comparisonError: requestError instanceof Error ? requestError.message : 'Failed to load comparison.',
-      }))
-      setError(requestError instanceof Error ? requestError.message : 'Failed to load comparison.')
+      const message = requestError instanceof Error ? requestError.message : 'Failed to load comparison.'
+      setWorkbench((state) => applyComparisonFailure(state, experimentID, message, requestVersion))
+      if (requestVersionRef.current === requestVersion) {
+        setError(message)
+      }
     } finally {
-      setBusy(null)
+      if (requestVersionRef.current === requestVersion) {
+        setBusy(null)
+      }
     }
   }, [project.project_id])
 
@@ -191,11 +194,8 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
         if (!current) {
           return
         }
-        setWorkbench((state) => ({
-          ...state,
-          fileLoading: false,
-          fileError: requestError instanceof Error ? requestError.message : 'Failed to load file comparison.',
-        }))
+        const message = requestError instanceof Error ? requestError.message : 'Failed to load file comparison.'
+        setWorkbench((state) => applyFileComparisonFailure(state, context, requestVersion, message))
       })
       .finally(() => {
         if (current) {

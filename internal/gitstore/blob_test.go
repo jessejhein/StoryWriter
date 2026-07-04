@@ -6,11 +6,14 @@ package gitstore_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"storywork/internal/gitstore"
 )
 
 // Test: existing and missing blobs at explicit commits.
@@ -63,5 +66,47 @@ func TestReadTextBlobRejectsNonRegularEntriesAndDoesNotHideGitErrors(t *testing.
 	}
 	if _, err := store.ReadTextBlob(context.Background(), filepath.Join(dir, "missing"), head, "outline.yaml"); err == nil {
 		t.Fatal("ReadTextBlob(invalid repository) error = nil")
+	}
+}
+
+// Test: blob reads enforce the 5 MiB boundary before returning content and do
+// not return partial oversized data.
+// Requirements: M8-R07.
+func TestReadTextBlobEnforcesByteBudget(t *testing.T) {
+	t.Parallel()
+	ctx, dir, store := initTestRepo(t)
+	withinLimit := strings.Repeat("a", 5<<20)
+	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte(withinLimit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitAll(ctx, dir, "within limit"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := store.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := store.ReadTextBlob(ctx, dir, head, "outline.yaml")
+	if err != nil {
+		t.Fatalf("ReadTextBlob(within) error = %v", err)
+	}
+	if len(blob.Bytes) != len(withinLimit) {
+		t.Fatalf("len(blob.Bytes) = %d, want %d", len(blob.Bytes), len(withinLimit))
+	}
+
+	overLimit := strings.Repeat("b", (5<<20)+1)
+	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte(overLimit), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitAll(ctx, dir, "over limit"); err != nil {
+		t.Fatal(err)
+	}
+	head, err = store.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.ReadTextBlob(ctx, dir, head, "outline.yaml")
+	if !errors.Is(err, gitstore.ErrBlobTooLarge) {
+		t.Fatalf("ReadTextBlob(over) error = %v", err)
 	}
 }

@@ -119,10 +119,11 @@ type PromotionResult struct {
 
 // PromotionCommit is validated provenance for one promotion checkpoint.
 type PromotionCommit struct {
-	ExperimentID ExperimentID
-	SourceCommit CommitID
-	BaseCommit   CommitID
-	Paths        []ProjectPath
+	ExperimentID     ExperimentID
+	SourceCommit     CommitID
+	BaseCommit       CommitID
+	ExpectedMainHead CommitID
+	Paths            []ProjectPath
 }
 
 // AnalysisRequest is an explicit ramification analysis call.

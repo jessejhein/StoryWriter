@@ -122,6 +122,43 @@ export function buildCurrentContext(state: BranchWorkbenchState): BranchContextK
   })
 }
 
+export function applyComparisonFailure(
+  state: BranchWorkbenchState,
+  experimentID: string,
+  message: string,
+  requestVersion: number,
+): BranchWorkbenchState {
+  if (state.requestVersion !== requestVersion) {
+    return state
+  }
+  const currentExperimentID = state.comparison?.experiment_id ?? experimentID
+  if (currentExperimentID !== experimentID) {
+    return state
+  }
+  return {
+    ...state,
+    comparisonLoading: false,
+    comparisonError: message,
+  }
+}
+
+export function applyFileComparisonFailure(
+  state: BranchWorkbenchState,
+  expected: BranchContextKey,
+  requestVersion: number,
+  message: string,
+): BranchWorkbenchState {
+  const current = buildCurrentContext(state)
+  if (!shouldAcceptResponse(expected, current, requestVersion, state.requestVersion)) {
+    return state
+  }
+  return {
+    ...state,
+    fileLoading: false,
+    fileError: message,
+  }
+}
+
 export function applyComparisonSuccess(
   state: BranchWorkbenchState,
   comparison: ComparisonResponse,

@@ -41,6 +41,16 @@ const mainHead = `sha256:${'a'.repeat(64)}`
 const experimentHead = `sha256:${'b'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(api.getProviderProfiles).mockResolvedValue({ profiles: [], revision: null })
@@ -144,4 +154,23 @@ test('ignores stale file comparison responses after path changes', async () => {
 
   await waitFor(() => expect(screen.queryByText('stale canon')).not.toBeInTheDocument())
   await waitFor(() => expect(screen.getByText('fresh added line')).toBeInTheDocument())
+})
+
+// Test: a late file-comparison failure after unmount cannot publish an
+// obsolete error.
+// Requirements: M8-R18.
+test('ignores stale file comparison failures after unmount', async () => {
+  const pending = deferred<never>()
+  vi.mocked(api.getBranchFileComparison).mockImplementationOnce(() => pending.promise)
+
+  const { unmount } = render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
+  await waitFor(() => expect(api.getBranchFileComparison).toHaveBeenCalledWith(
+    experimentID,
+    'scenes/scn_0123456789abcdef0123.md',
+  ))
+
+  unmount()
+  pending.reject(new Error('stale failure'))
+  await Promise.resolve()
+  expect(screen.queryByText('stale failure')).not.toBeInTheDocument()
 })

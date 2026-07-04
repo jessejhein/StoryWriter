@@ -44,14 +44,13 @@ Backend:
 - Index rebuild is idempotent.
 - Health endpoint returns ok.
 
-Manual:
+Named automated evidence:
 
-1. Start backend.
-2. Start frontend.
-3. Create project from UI or API.
-4. Confirm files on disk.
-5. Confirm Git repo exists.
-6. Confirm index exists.
+- `internal/project/service_test.go`: project creation, opening, Git initialization,
+  and idempotent index rebuild coverage.
+- `internal/api/health_handler_test.go`: health endpoint contract.
+- `internal/app/milestone0_integration_test.go`: real-adapter project creation,
+  canonical files on disk, Git repository presence, and disposable index creation.
 
 ### Milestone 1
 
@@ -377,8 +376,9 @@ Frontend:
 - `web/src/branches/BranchWorkbench.discard.test.tsx`: confirmation, dirty guard, stale
   conflicts, pending disabled state
 
-Verification: full `make check`, `go test -race ./...`, 48 frontend test files,
-115 frontend tests.
+Verification: full `make check` (including `go test -race ./...`,
+`git diff --check`, and tracked-artifact leak detection), 48 frontend test
+files, 115 frontend tests.
 
 ### Milestone 9
 

@@ -22,12 +22,22 @@ type statusErrorBranchStore struct {
 	err error
 }
 
+type spyBranchStore struct {
+	branchServiceStub
+	analysisCalls int
+}
+
 func (s statusErrorBranchStore) Status(context.Context) (branch.RepositoryStatus, error) {
 	return branch.RepositoryStatus{}, s.err
 }
 
 func handlerWithBranches(store api.BranchStore) http.Handler {
 	return api.NewHandler(api.HandlerDependencies{Projects: &projectStoreStub{}, Session: &activeProjectSessionStub{}, Stories: &storyServiceStub{}, Actions: &storyServiceStub{}, Providers: &storyServiceStub{}, Imports: &storyServiceStub{}, Branches: store, Version: "test"})
+}
+
+func (s *spyBranchStore) AnalyzeRamifications(context.Context, string, branch.AnalysisRequest) (branch.AnalysisResult, error) {
+	s.analysisCalls++
+	return branch.AnalysisResult{}, nil
 }
 
 // Test: typed domain errors map to the exact public status classes.
@@ -79,6 +89,8 @@ func TestBranchRoutesRejectMalformedCallsBeforeService(t *testing.T) {
 		{name: "main expected head forbidden", method: http.MethodPost, path: "/api/branches/switch", body: `{"target":"main","expected_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, status: 400},
 		{name: "experiment expected head required", method: http.MethodPost, path: "/api/branches/switch", body: `{"target":"brn_0123456789abcdef0123"}`, status: 400},
 		{name: "malformed route id", method: http.MethodPost, path: "/api/branches/not-an-id/discard", body: `{"expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`, status: 400},
+		{name: "analysis empty profile id", method: http.MethodPost, path: "/api/branches/brn_0123456789abcdef0123/ramifications", body: `{"goal":"test","profile_id":"","model":"ok","expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`, status: 400},
+		{name: "analysis empty model", method: http.MethodPost, path: "/api/branches/brn_0123456789abcdef0123/ramifications", body: `{"goal":"test","profile_id":"local_test","model":"","expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`, status: 400},
 		{name: "malformed fingerprint", method: http.MethodPost, path: "/api/branches/brn_0123456789abcdef0123/promote", body: `{"paths":["outline.yaml"],"expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:short"}`, status: 400},
 		{name: "duplicate promotion path", method: http.MethodPost, path: "/api/branches/brn_0123456789abcdef0123/promote", body: `{"paths":["outline.yaml","outline.yaml"],"expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`, status: 400},
 		{name: "unknown comparison query", method: http.MethodGet, path: "/api/branches/brn_0123456789abcdef0123/comparison?extra=true", status: 400},
@@ -92,6 +104,22 @@ func TestBranchRoutesRejectMalformedCallsBeforeService(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 		})
+	}
+}
+
+// Test: malformed branch analysis requests are rejected before the service is
+// invoked.
+// Requirements: M8-R09, M8-R20.
+func TestBranchRoutesRejectMalformedAnalysisBeforeService(t *testing.T) {
+	t.Parallel()
+	store := &spyBranchStore{}
+	response := httptest.NewRecorder()
+	handlerWithBranches(store).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/branches/brn_0123456789abcdef0123/ramifications", strings.NewReader(`{"goal":"test","profile_id":"","model":"ok","expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.analysisCalls != 0 {
+		t.Fatalf("analysisCalls=%d", store.analysisCalls)
 	}
 }
 

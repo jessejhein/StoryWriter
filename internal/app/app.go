@@ -140,6 +140,7 @@ func NewHandler(version string) http.Handler {
 		WithExtractor(extract.NewRemoteExtractor(providerService, nil)).
 		WithStoryMutator(stories)
 	branchRepo := &branch.GitRepository{Store: git}
+	branchAnalyzerClient := modelchat.PrepareHTTPClient(nil)
 	branchAnalyzer := &branch.ModelchatAnalyzer{
 		Resolver: func(ctx context.Context, profileID string) (modelchat.Request, error) {
 			resolved, ok, err := providerService.Resolve(ctx, profileID)
@@ -149,9 +150,13 @@ func NewHandler(version string) http.Handler {
 			if !ok {
 				return modelchat.Request{}, branch.ErrProviderUnavailable
 			}
+			if resolved.Readiness != provider.ReadinessReady || !resolved.Capabilities.Chat {
+				return modelchat.Request{}, branch.ErrProviderUnavailable
+			}
 			return modelchat.Request{Profile: resolved}, nil
 		},
 		Completer: modelchat.NewHTTPClient(),
+		Client:    branchAnalyzerClient,
 	}
 	branchService := branch.NewService(
 		branchRepo,

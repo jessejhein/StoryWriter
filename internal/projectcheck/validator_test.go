@@ -129,3 +129,46 @@ func TestValidateProjectRejectsOrphanProgressionsAndMalformedRawImports(t *testi
 		}
 	})
 }
+
+// Test: raw import snapshots and review candidates fail closed on unexpected
+// tracked artifacts outside the owning schemas.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectRejectsUnexpectedImportArtifacts(t *testing.T) {
+	t.Parallel()
+	base := map[string]string{
+		"project.yaml": "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+		"outline.yaml": "version: 1\nroot:\n  arcs: []\n",
+		"imports/raw/imp_0123456789abcdef0123/manifest.yaml":        "version: 1\nid: imp_0123456789abcdef0123\ncreated_at: \"2026-07-03T00:00:00Z\"\nfiles:\n  - path: notes/scene.md\n    bytes: 6\n    sha256: 5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03\n",
+		"imports/raw/imp_0123456789abcdef0123/files/notes/scene.md": "hello\n",
+	}
+	t.Run("extra raw snapshot file", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "styles"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		files := maps.Clone(base)
+		files["imports/raw/imp_0123456789abcdef0123/files/notes/extra.md"] = "extra\n"
+		writeFixture(t, root, files)
+		if err := projectcheck.New().ValidateProject(context.Background(), root); err == nil || !strings.Contains(err.Error(), "raw import") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("non yaml review artifact", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(root, "styles"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		files := maps.Clone(base)
+		files["imports/review/unexpected.txt"] = "not yaml\n"
+		writeFixture(t, root, files)
+		if err := projectcheck.New().ValidateProject(context.Background(), root); err == nil || !strings.Contains(err.Error(), "candidate") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}

@@ -198,3 +198,33 @@ func TestAnalyzeRamificationsPassesExactDiffBudget(t *testing.T) {
 		t.Fatalf("diffBudget = %d, want %d", repo.diffBudget, expectedBudget)
 	}
 }
+
+// Test: malformed profile identifiers and model values fail before provider
+// execution or repository diff work.
+// Requirements: M8-R09, M8-R11.
+func TestAnalyzeRamificationsRejectsInvalidProfileAndModelBeforeProvider(t *testing.T) {
+	t.Parallel()
+	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &analysisRepo{
+		fakeRepo: &fakeRepo{
+			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			mainHead:     mainHead,
+			compareFiles: files,
+		},
+	}
+	analyzer := &captureAnalyzer{}
+	service := branch.NewService(repo, &fakeIndex{}, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, analyzer, &staticIDs{id: "brn_0123456789abcdef0123"})
+	_, err = service.AnalyzeRamifications(context.Background(), "brn_0123456789abcdef0123", branch.AnalysisRequest{
+		Goal: "Review", ProfileID: "bad-profile-id", Model: "",
+		ExpectedMainHead: mainHead, ExpectedExperimentHead: experimentHead, ExpectedFingerprint: fingerprint,
+	})
+	if !errors.Is(err, branch.ErrInvalidAnalysis) || analyzer.calls != 0 || repo.diffBudget != 0 {
+		t.Fatalf("error=%v calls=%d diffBudget=%d", err, analyzer.calls, repo.diffBudget)
+	}
+}

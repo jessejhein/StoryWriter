@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"regexp"
 	"strings"
 	"unicode/utf8"
 
@@ -31,7 +33,10 @@ type AnalysisPacket struct {
 type ModelchatAnalyzer struct {
 	Resolver  func(context.Context, string) (modelchat.Request, error)
 	Completer modelchat.Completer
+	Client    *http.Client
 }
+
+var analysisProfileIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,63}$`)
 
 // Analyze sends the bounded packet to the configured provider.
 func (a *ModelchatAnalyzer) Analyze(ctx context.Context, packet AnalysisPacket) (AnalysisResult, error) {
@@ -47,7 +52,7 @@ func (a *ModelchatAnalyzer) Analyze(ctx context.Context, packet AnalysisPacket) 
 		{Role: "system", Content: "Return one strict JSON object with summary and findings only."},
 		{Role: "user", Content: buildRamificationPrompt(packet)},
 	}
-	response, err := a.Completer.Complete(ctx, nil, base)
+	response, err := a.Completer.Complete(ctx, a.Client, base)
 	if err != nil {
 		return AnalysisResult{}, mapAnalyzerError(err)
 	}
@@ -319,6 +324,11 @@ type RamificationService struct {
 func (r *RamificationService) Run(ctx context.Context, experimentID string, request AnalysisRequest) (AnalysisResult, error) {
 	goal := strings.TrimSpace(request.Goal)
 	if goal == "" || len(goal) > MaxGoalBytes || !utf8.ValidString(goal) || strings.ContainsRune(goal, 0) {
+		return AnalysisResult{}, ErrInvalidAnalysis
+	}
+	request.ProfileID = strings.TrimSpace(request.ProfileID)
+	request.Model = strings.TrimSpace(request.Model)
+	if !analysisProfileIDPattern.MatchString(request.ProfileID) || !utf8.ValidString(request.Model) || strings.ContainsRune(request.Model, 0) || request.Model == "" || len(request.Model) > 200 {
 		return AnalysisResult{}, ErrInvalidAnalysis
 	}
 	id, err := ValidateExperimentID(experimentID)

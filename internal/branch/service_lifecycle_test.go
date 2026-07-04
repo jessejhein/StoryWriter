@@ -46,10 +46,15 @@ func (f *fakeRepo) Switch(_ context.Context, _ string, ref branch.BranchRef) err
 	}
 	return nil
 }
-func (f *fakeRepo) DeleteExperiment(context.Context, string, branch.ExperimentRef, branch.CommitID) error {
-	if len(f.experiments) > 0 {
-		f.experiments = f.experiments[:len(f.experiments)-1]
+func (f *fakeRepo) DeleteExperiment(_ context.Context, _ string, ref branch.ExperimentRef, _ branch.CommitID) error {
+	filtered := f.experiments[:0]
+	for _, experiment := range f.experiments {
+		if experiment.ID == ref.ID {
+			continue
+		}
+		filtered = append(filtered, experiment)
 	}
+	f.experiments = filtered
 	return nil
 }
 func (f *fakeRepo) CompareTrees(context.Context, string, branch.CommitID, branch.CommitID) ([]branch.ChangedFile, error) {
@@ -86,7 +91,17 @@ func (f *fakeRepo) RestoreSnapshots(context.Context, string, []branch.PathSnapsh
 	return nil
 }
 func (f *fakeRepo) CommitPromotion(context.Context, string, branch.PromotionCommit) (branch.CommitID, error) {
-	return "", nil
+	head := branch.CommitID("dddddddddddddddddddddddddddddddddddddddd")
+	f.status.ActiveBranch = branch.CanonBranchName
+	f.status.IsCanon = true
+	f.status.IsManaged = false
+	f.status.IsDetached = false
+	f.status.IsClean = true
+	f.status.ExperimentID = ""
+	f.status.ExperimentHead = ""
+	f.status.MainHead = head
+	f.mainHead = head
+	return head, nil
 }
 func (f *fakeRepo) ResolveCommit(context.Context, string, string) (branch.CommitID, error) {
 	return f.mainHead, nil

@@ -149,10 +149,16 @@ func (v *Validator) validateImportArtifacts(ctx context.Context, projectPath str
 	}
 	store := importer.NewCandidateStore()
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
-			continue
+		if entry.IsDir() {
+			return fmt.Errorf("import candidate %q invalid: %w", entry.Name(), importer.ErrInvalidCandidate)
+		}
+		if !strings.HasSuffix(entry.Name(), ".yaml") {
+			return fmt.Errorf("import candidate %q invalid: %w", entry.Name(), importer.ErrInvalidCandidate)
 		}
 		id := strings.TrimSuffix(entry.Name(), ".yaml")
+		if err := importer.ValidateCandidateID(id); err != nil {
+			return fmt.Errorf("import candidate %q invalid: %w", id, err)
+		}
 		if _, err := store.Load(projectPath, id); err != nil {
 			return fmt.Errorf("import candidate %q invalid: %w", id, err)
 		}

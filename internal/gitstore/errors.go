@@ -13,3 +13,6 @@ var ErrStaleExperimentHead = errors.New("stale experiment head")
 // ErrDiffTooLarge is returned when a unified diff output exceeds the supplied
 // byte budget.
 var ErrDiffTooLarge = errors.New("diff exceeds byte budget")
+
+// ErrBlobTooLarge is returned when a blob exceeds the supplied display budget.
+var ErrBlobTooLarge = errors.New("blob exceeds byte budget")

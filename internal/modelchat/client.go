@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"time"
 
 	"storywork/internal/provider"
 )
@@ -22,6 +23,23 @@ func NewHTTPClient() *HTTPClient {
 	return &HTTPClient{}
 }
 
+// PrepareHTTPClient copies the supplied client and applies the safe transport
+// policy used by Storywork model consumers.
+func PrepareHTTPClient(client *http.Client) *http.Client {
+	if client == nil {
+		client = &http.Client{}
+	}
+	copyClient := *client
+	client = &copyClient
+	if client.Timeout == 0 {
+		client.Timeout = 60 * time.Second
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return client
+}
+
 // Complete performs chat completion for a resolved profile.
 func (c *HTTPClient) Complete(ctx context.Context, client *http.Client, request Request) (Response, error) {
 	return Complete(ctx, client, request)
@@ -30,7 +48,7 @@ func (c *HTTPClient) Complete(ctx context.Context, client *http.Client, request 
 // Complete performs chat completion using the default HTTP completer.
 func Complete(ctx context.Context, client *http.Client, request Request) (Response, error) {
 	if client == nil {
-		client = &http.Client{}
+		client = PrepareHTTPClient(nil)
 	}
 	switch request.Profile.Type {
 	case provider.TypeOpenAICompatible:

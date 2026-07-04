@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"storywork/internal/modelchat"
@@ -118,18 +117,7 @@ type RemoteExtractor struct {
 }
 
 func NewRemoteExtractor(resolver profileResolver, client *http.Client) *RemoteExtractor {
-	if client == nil {
-		client = &http.Client{}
-	}
-	clientCopy := *client
-	client = &clientCopy
-	if client.Timeout == 0 {
-		client.Timeout = 60 * time.Second
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	return &RemoteExtractor{resolver: resolver, client: client}
+	return &RemoteExtractor{resolver: resolver, client: modelchat.PrepareHTTPClient(client)}
 }
 
 func (e *RemoteExtractor) Extract(ctx context.Context, request Request) (Result, error) {

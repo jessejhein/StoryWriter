@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"storywork/internal/provider"
 )
@@ -216,5 +217,27 @@ func TestM8ModelchatHTTPClientCompleter(t *testing.T) {
 	}
 	if response.Content != "ok" {
 		t.Fatalf("content = %q", response.Content)
+	}
+}
+
+// Test: PrepareHTTPClient clones the caller client, adds the default timeout,
+// and refuses redirects for provider traffic.
+// Requirements: M8-R11.
+func TestM8PrepareHTTPClientAppliesSafeDefaults(t *testing.T) {
+	t.Parallel()
+
+	source := &http.Client{}
+	prepared := PrepareHTTPClient(source)
+	if prepared == source {
+		t.Fatal("PrepareHTTPClient() returned original client")
+	}
+	if prepared.Timeout != 60*time.Second {
+		t.Fatalf("timeout = %v", prepared.Timeout)
+	}
+	if err := prepared.CheckRedirect(&http.Request{}, nil); !errors.Is(err, http.ErrUseLastResponse) {
+		t.Fatalf("CheckRedirect() = %v", err)
+	}
+	if source.Timeout != 0 || source.CheckRedirect != nil {
+		t.Fatalf("source mutated: %#v", source)
 	}
 }

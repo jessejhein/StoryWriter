@@ -64,7 +64,17 @@ func (r *promotionRepo) CommitPromotion(_ context.Context, _ string, commit bran
 	if err := r.record("commit"); err != nil {
 		return "", err
 	}
-	return "dddddddddddddddddddddddddddddddddddddddd", nil
+	head := branch.CommitID("dddddddddddddddddddddddddddddddddddddddd")
+	r.status.ActiveBranch = branch.CanonBranchName
+	r.status.IsCanon = true
+	r.status.IsManaged = false
+	r.status.IsDetached = false
+	r.status.IsClean = true
+	r.status.ExperimentID = ""
+	r.status.ExperimentHead = ""
+	r.status.MainHead = head
+	r.mainHead = head
+	return head, nil
 }
 
 type promotionValidator struct {
