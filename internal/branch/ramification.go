@@ -75,20 +75,35 @@ func indexComparisonPaths(files []ChangedFile) map[ProjectPath]struct{} {
 	return allowed
 }
 
+const (
+	promptLabelGoal         = "Goal: "
+	promptLabelChangedFiles = "\nChanged files:\n"
+	promptLabelDiff         = "\nDiff:\n"
+)
+
 func buildRamificationPrompt(packet AnalysisPacket) string {
 	var builder strings.Builder
-	builder.WriteString("Goal: ")
+	builder.WriteString(promptLabelGoal)
 	builder.WriteString(packet.Goal)
-	builder.WriteString("\nChanged files:\n")
+	builder.WriteString(promptLabelChangedFiles)
 	for _, file := range packet.Comparison.Files {
 		builder.WriteString(string(file.Status))
 		builder.WriteByte(' ')
 		builder.WriteString(string(file.Path))
 		builder.WriteByte('\n')
 	}
-	builder.WriteString("\nDiff:\n")
+	builder.WriteString(promptLabelDiff)
 	builder.WriteString(packet.DiffText)
 	return builder.String()
+}
+
+func AnalysisPromptOverhead(goal string, files []ChangedFile) int {
+	overhead := len(promptLabelGoal) + len(goal) + len(promptLabelChangedFiles)
+	for _, file := range files {
+		overhead += len(file.Status) + 1 + len(file.Path) + 1
+	}
+	overhead += len(promptLabelDiff)
+	return overhead
 }
 
 // BuildAnalysisPacket constructs the bounded diff packet under a read lock.
@@ -104,11 +119,13 @@ func BuildAnalysisPacket(goal string, comparison Comparison, diffText string) (A
 	for _, file := range comparison.Files {
 		included = append(included, file.Path)
 	}
-	packetSize := len(goal) + len(diffText)
-	for _, file := range comparison.Files {
-		packetSize += len(file.Path) + len(file.Status) + 2
+	packet := AnalysisPacket{
+		Goal:       goal,
+		Comparison: comparison,
+		DiffText:   diffText,
 	}
-	if packetSize > MaxAnalysisPacket {
+	rendered := buildRamificationPrompt(packet)
+	if len(rendered) > MaxAnalysisPacket {
 		return AnalysisPacket{}, RedactedManifest{}, ErrAnalysisBudget
 	}
 	manifest := RedactedManifest{
@@ -117,13 +134,9 @@ func BuildAnalysisPacket(goal string, comparison Comparison, diffText string) (A
 		Fingerprint:      comparison.Fingerprint,
 		ChangedFileCount: len(comparison.Files),
 		IncludedPaths:    SortProjectPaths(included),
-		EstimatedBytes:   packetSize,
+		EstimatedBytes:   len(rendered),
 	}
-	return AnalysisPacket{
-		Goal:       goal,
-		Comparison: comparison,
-		DiffText:   diffText,
-	}, manifest, nil
+	return packet, manifest, nil
 }
 
 // ParseRamificationOutput validates strict provider JSON output.
@@ -355,10 +368,7 @@ func (r *RamificationService) buildAnalysisSnapshot(ctx context.Context, path st
 	for _, file := range comparison.Files {
 		included = append(included, file.Path)
 	}
-	overhead := len(goal)
-	for _, file := range comparison.Files {
-		overhead += len(file.Path) + len(file.Status) + 2
-	}
+	overhead := AnalysisPromptOverhead(goal, comparison.Files)
 	diffBudget := MaxAnalysisPacket - overhead
 	if diffBudget <= 0 {
 		return AnalysisPacket{}, RedactedManifest{}, ErrAnalysisBudget

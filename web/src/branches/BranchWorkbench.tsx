@@ -377,16 +377,22 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
         comparison_fingerprint: comparison.fingerprint,
       })
       setWorkbench((state) => applyRamificationSuccess(state, response, context, requestVersion))
-      setStatusMessage('Ramification analysis complete.')
+      if (requestVersionRef.current === requestVersion) {
+        setStatusMessage('Ramification analysis complete.')
+      }
     } catch (requestError) {
-      setWorkbench((state) => ({
-        ...state,
-        ramificationLoading: false,
-        ramificationError: requestError instanceof Error ? requestError.message : 'Ramification analysis failed.',
-      }))
-      setError(requestError instanceof Error ? requestError.message : 'Ramification analysis failed.')
+      if (requestVersionRef.current === requestVersion) {
+        setWorkbench((state) => ({
+          ...state,
+          ramificationLoading: false,
+          ramificationError: requestError instanceof Error ? requestError.message : 'Ramification analysis failed.',
+        }))
+        setError(requestError instanceof Error ? requestError.message : 'Ramification analysis failed.')
+      }
     } finally {
-      setBusy(null)
+      if (requestVersionRef.current === requestVersion) {
+        setBusy(null)
+      }
     }
   }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -552,6 +553,39 @@ func (s *Store) runBytes(ctx context.Context, arguments ...string) ([]byte, erro
 	return output, nil
 }
 
+// runBytesLimited executes a command, reading at most maxBytes+1 bytes from
+// stdout. If more than maxBytes are produced, the child process is killed and
+// reaped, and ErrDiffTooLarge is returned with no partial output.
+func (s *Store) runBytesLimited(ctx context.Context, maxBytes int, arguments ...string) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, ErrDiffTooLarge
+	}
+	command := exec.CommandContext(ctx, s.executable, arguments...)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	if err := command.Start(); err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	limited := io.LimitReader(stdout, int64(maxBytes)+1)
+	data, readErr := io.ReadAll(limited)
+	if readErr != nil {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), readErr)
+	}
+	if len(data) > maxBytes {
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		return nil, ErrDiffTooLarge
+	}
+	if err := command.Wait(); err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	return data, nil
+}
+
 // UnifiedDiff produces a real unified diff between two commits for the given
 // validated paths, bounded by maxBytes. Rename detection and external diff
 // drivers are disabled.
@@ -569,12 +603,9 @@ func (s *Store) UnifiedDiff(ctx context.Context, repoPath, leftCommit, rightComm
 	}
 	args := []string{"-C", repoPath, "diff", "--no-renames", "--no-ext-diff", "--unified=3", "--text", leftCommit, rightCommit, "--"}
 	args = append(args, paths...)
-	output, err := s.runBytes(ctx, args...)
+	output, err := s.runBytesLimited(ctx, maxBytes, args...)
 	if err != nil {
 		return "", fmt.Errorf("unified diff: %w", err)
-	}
-	if len(output) > maxBytes {
-		return "", ErrDiffTooLarge
 	}
 	return string(output), nil
 }

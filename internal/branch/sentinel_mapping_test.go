@@ -83,6 +83,9 @@ func TestMapRepositoryErrorDirtyWorktreeSentinel(t *testing.T) {
 	if !errors.Is(err, branch.ErrDirtyWorktree) {
 		t.Fatalf("err = %v, want errors.Is branch.ErrDirtyWorktree", err)
 	}
+	if !errors.Is(err, gitstore.ErrDirtyWorktree) {
+		t.Fatalf("err = %v, want errors.Is gitstore.ErrDirtyWorktree (original cause preserved)", err)
+	}
 }
 
 // Test: a wrapped gitstore.ErrStaleExperimentHead with differing text maps to
@@ -93,5 +96,37 @@ func TestMapRepositoryErrorStaleHeadSentinel(t *testing.T) {
 	_, err := newErrorService(wrapped).Status(context.Background())
 	if !errors.Is(err, branch.ErrStaleRef) {
 		t.Fatalf("err = %v, want errors.Is branch.ErrStaleRef", err)
+	}
+	if !errors.Is(err, gitstore.ErrStaleExperimentHead) {
+		t.Fatalf("err = %v, want errors.Is gitstore.ErrStaleExperimentHead (original cause preserved)", err)
+	}
+}
+
+// Test: gitstore.ErrDiffTooLarge maps to branch.ErrAnalysisBudget while
+// preserving the original gitstore sentinel.
+func TestMapRepositoryErrorDiffTooLargeBothIdentities(t *testing.T) {
+	t.Parallel()
+	wrapped := fmt.Errorf("adapter: %w", gitstore.ErrDiffTooLarge)
+	_, err := newErrorService(wrapped).Status(context.Background())
+	if !errors.Is(err, branch.ErrAnalysisBudget) {
+		t.Fatalf("err = %v, want errors.Is branch.ErrAnalysisBudget", err)
+	}
+	if !errors.Is(err, gitstore.ErrDiffTooLarge) {
+		t.Fatalf("err = %v, want errors.Is gitstore.ErrDiffTooLarge (original cause preserved)", err)
+	}
+}
+
+// Test: a generic repository error satisfies both branch.ErrRepositoryState
+// and the original cause.
+func TestMapRepositoryErrorGenericPreservesCause(t *testing.T) {
+	t.Parallel()
+	original := errors.New("some internal git error")
+	wrapped := fmt.Errorf("adapter: %w", original)
+	_, err := newErrorService(wrapped).Status(context.Background())
+	if !errors.Is(err, branch.ErrRepositoryState) {
+		t.Fatalf("err = %v, want errors.Is branch.ErrRepositoryState", err)
+	}
+	if !errors.Is(err, original) {
+		t.Fatalf("err = %v, want errors.Is original error (cause preserved)", err)
 	}
 }

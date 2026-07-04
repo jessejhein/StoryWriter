@@ -3,7 +3,7 @@
 // Test purpose: verify pure branch state keys, stale protection, selection, and invalidation.
 
 import { expect, test } from 'vitest'
-import type { BranchContextKey, ChangedFile, ComparisonResponse } from './branchTypes'
+import type { BranchContextKey, ChangedFile, ComparisonResponse, RamificationFinding } from './branchTypes'
 import {
   applyComparisonSuccess,
   applyFileComparisonSuccess,
@@ -205,4 +205,119 @@ test('rejects stale responses per individual context field', () => {
     expect(shouldAcceptResponse(base, stale, 2, 2), `field ${field}`).toBe(false)
   }
   expect(shouldAcceptResponse(base, base, 1, 2), 'requestVersion').toBe(false)
+})
+
+// Test: applyRamificationSuccess rejects independently for each mismatched
+// context field including project, both heads, and selected path.
+// Requirements: M8-R18.
+test('applyRamificationSuccess rejects stale responses per context field', () => {
+  const initialState = { ...initialBranchWorkbenchState(projectID), requestVersion: 1 }
+  const state = applyComparisonSuccess(
+    initialState,
+    comparison,
+    context(),
+    1,
+  )
+  const ramification = {
+    summary: 'Summary',
+    findings: [] as RamificationFinding[],
+    provider: { profile_id: 'local', type: 'ollama' as const, model: 'qwen2.5:7b' },
+    manifest: {
+      main_head: mainHead,
+      experiment_head: experimentHead,
+      fingerprint,
+      changed_file_count: 1,
+      included_paths: ['scenes/scn_0123456789abcdef0123.md'],
+      estimated_input_bytes: 120,
+    },
+  }
+  const result = applyRamificationSuccess(state, ramification, context(), 1)
+  expect(result.ramification).not.toBeNull()
+
+  const mismatches: Array<[string, Partial<BranchContextKey>]> = [
+    ['projectID', { projectID: 'other' }],
+    ['experimentID', { experimentID: 'brn_other' }],
+    ['mainHead', { mainHead: `sha256:${'f'.repeat(64)}` }],
+    ['experimentHead', { experimentHead: `sha256:${'f'.repeat(64)}` }],
+    ['fingerprint', { fingerprint: `sha256:${'f'.repeat(64)}` }],
+    ['selectedPath', { selectedPath: 'scenes/other.md' }],
+  ]
+  for (const [field, override] of mismatches) {
+    const stale = context(override)
+    const rejected = applyRamificationSuccess(state, ramification, stale, 1)
+    expect(rejected.ramification, `field ${field}`).toBeNull()
+  }
+  const wrongVersion = applyRamificationSuccess(state, ramification, context(), 99)
+  expect(wrongVersion.ramification, 'requestVersion').toBeNull()
+})
+
+// Test: applyRamificationSuccess rejects when manifest identity fields
+// disagree with the captured request context.
+// Requirements: M8-R18.
+test('applyRamificationSuccess rejects mismatched manifest identity', () => {
+  const initialState = { ...initialBranchWorkbenchState(projectID), requestVersion: 1 }
+  const state = applyComparisonSuccess(
+    initialState,
+    comparison,
+    context(),
+    1,
+  )
+  const baseManifest = {
+    main_head: mainHead,
+    experiment_head: experimentHead,
+    fingerprint,
+    changed_file_count: 1,
+    included_paths: ['scenes/scn_0123456789abcdef0123.md'],
+    estimated_input_bytes: 120,
+  }
+  const base = {
+    summary: 'Summary',
+    findings: [] as RamificationFinding[],
+    provider: { profile_id: 'local', type: 'ollama' as const, model: 'qwen2.5:7b' },
+    manifest: baseManifest,
+  }
+
+  for (const [field, override] of [
+    ['main_head', { main_head: `sha256:${'f'.repeat(64)}` }],
+    ['experiment_head', { experiment_head: `sha256:${'f'.repeat(64)}` }],
+    ['fingerprint', { fingerprint: `sha256:${'e'.repeat(64)}` }],
+  ] as const) {
+    const mismatched = {
+      ...base,
+      manifest: { ...baseManifest, ...override },
+    }
+    const rejected = applyRamificationSuccess(state, mismatched, context(), 1)
+    expect(rejected.ramification, `manifest ${field}`).toBeNull()
+  }
+})
+
+// Test: applyRamificationSuccess accepts a matching response and clears
+// loading/error state.
+// Requirements: M8-R18.
+test('applyRamificationSuccess accepts matching response', () => {
+  const initialState = { ...initialBranchWorkbenchState(projectID), requestVersion: 1 }
+  const state = applyComparisonSuccess(
+    initialState,
+    comparison,
+    context(),
+    1,
+  )
+  const ramification = {
+    summary: 'Summary',
+    findings: [] as RamificationFinding[],
+    provider: { profile_id: 'local', type: 'ollama' as const, model: 'qwen2.5:7b' },
+    manifest: {
+      main_head: mainHead,
+      experiment_head: experimentHead,
+      fingerprint,
+      changed_file_count: 1,
+      included_paths: ['scenes/scn_0123456789abcdef0123.md'],
+      estimated_input_bytes: 120,
+    },
+  }
+  const loading = { ...state, ramificationLoading: true, ramificationError: 'old error' }
+  const result = applyRamificationSuccess(loading, ramification, context(), 1)
+  expect(result.ramification).toBe(ramification)
+  expect(result.ramificationLoading).toBe(false)
+  expect(result.ramificationError).toBeNull()
 })

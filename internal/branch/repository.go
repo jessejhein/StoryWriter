@@ -227,7 +227,15 @@ func (r *GitRepository) UnifiedDiff(ctx context.Context, repoPath string, mainHe
 	for i, path := range paths {
 		raw[i] = string(path)
 	}
-	return r.Store.UnifiedDiff(ctx, repoPath, string(mainHead), string(experimentHead), raw, maxBytes)
+	diff, err := r.Store.UnifiedDiff(ctx, repoPath, string(mainHead), string(experimentHead), raw, maxBytes)
+	if err != nil {
+		return "", mapRepositoryError(err)
+	}
+	text, err := ValidateStrictUTF8([]byte(diff))
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrInvalidAnalysis, err)
+	}
+	return text, nil
 }
 
 // Repository is the Git boundary consumed by branch orchestration.
@@ -282,12 +290,12 @@ func mapRepositoryError(err error) error {
 	}
 	switch {
 	case errors.Is(err, gitstore.ErrDirtyWorktree):
-		return fmt.Errorf("%w", ErrDirtyWorktree)
+		return errors.Join(ErrDirtyWorktree, err)
 	case errors.Is(err, gitstore.ErrStaleExperimentHead):
-		return fmt.Errorf("%w", ErrStaleRef)
+		return errors.Join(ErrStaleRef, err)
 	case errors.Is(err, gitstore.ErrDiffTooLarge):
-		return ErrAnalysisBudget
+		return errors.Join(ErrAnalysisBudget, err)
 	default:
-		return fmt.Errorf("%w: %s", ErrRepositoryState, err)
+		return errors.Join(ErrRepositoryState, err)
 	}
 }

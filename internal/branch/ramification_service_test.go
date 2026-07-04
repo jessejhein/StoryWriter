@@ -29,10 +29,11 @@ func (a *captureAnalyzer) Analyze(_ context.Context, packet branch.AnalysisPacke
 
 type analysisRepo struct {
 	*fakeRepo
-	blobs    map[branch.CommitID]branch.TextSide
-	reads    int
-	diffText string
-	diffErr  error
+	blobs      map[branch.CommitID]branch.TextSide
+	reads      int
+	diffText   string
+	diffErr    error
+	diffBudget int
 }
 
 func (r *analysisRepo) ReadTextBlob(_ context.Context, _ string, commit branch.CommitID, _ branch.ProjectPath) (branch.TextSide, error) {
@@ -40,7 +41,8 @@ func (r *analysisRepo) ReadTextBlob(_ context.Context, _ string, commit branch.C
 	return r.blobs[commit], nil
 }
 
-func (r *analysisRepo) UnifiedDiff(_ context.Context, _ string, _, _ branch.CommitID, _ []branch.ProjectPath, _ int) (string, error) {
+func (r *analysisRepo) UnifiedDiff(_ context.Context, _ string, _, _ branch.CommitID, _ []branch.ProjectPath, maxBytes int) (string, error) {
+	r.diffBudget = maxBytes
 	return r.diffText, r.diffErr
 }
 
@@ -156,5 +158,43 @@ func TestAnalyzeRamificationsRejectsFileBudgetBeforeReadingBlobs(t *testing.T) {
 	_, err = service.AnalyzeRamifications(context.Background(), "brn_0123456789abcdef0123", branch.AnalysisRequest{Goal: "Review", ProfileID: "local", Model: "model", ExpectedMainHead: mainHead, ExpectedExperimentHead: experimentHead, ExpectedFingerprint: fingerprint})
 	if !errors.Is(err, branch.ErrAnalysisBudget) || repo.reads != 0 || analyzer.calls != 0 {
 		t.Fatalf("error=%v reads=%d calls=%d", err, repo.reads, analyzer.calls)
+	}
+}
+
+// Test: UnifiedDiff receives the exact remaining budget after prompt overhead.
+// Requirements: M8-R09, M8-R20.
+func TestAnalyzeRamificationsPassesExactDiffBudget(t *testing.T) {
+	t.Parallel()
+	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	files := []branch.ChangedFile{
+		{Path: "outline.yaml", Status: branch.StatusModified},
+		{Path: "scenes/scn_001.md", Status: branch.StatusAdded},
+	}
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	goal := "Review the changes"
+	repo := &analysisRepo{
+		fakeRepo: &fakeRepo{
+			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			mainHead:     mainHead,
+			compareFiles: files,
+		},
+		diffText: "--- a/outline.yaml\n+++ b/outline.yaml\n@@ +1,1 -1,1 @@\n-old\n+new\n",
+	}
+	analyzer := &captureAnalyzer{}
+	service := branch.NewService(repo, &fakeIndex{}, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, analyzer, &staticIDs{id: "brn_0123456789abcdef0123"})
+	_, err = service.AnalyzeRamifications(context.Background(), "brn_0123456789abcdef0123", branch.AnalysisRequest{
+		Goal: goal, ProfileID: "local", Model: "model",
+		ExpectedMainHead: mainHead, ExpectedExperimentHead: experimentHead, ExpectedFingerprint: fingerprint,
+	})
+	if err != nil {
+		t.Fatalf("AnalyzeRamifications() error = %v", err)
+	}
+	expectedBudget := branch.MaxAnalysisPacket - branch.AnalysisPromptOverhead(goal, files)
+	if repo.diffBudget != expectedBudget {
+		t.Fatalf("diffBudget = %d, want %d", repo.diffBudget, expectedBudget)
 	}
 }

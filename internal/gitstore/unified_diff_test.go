@@ -5,11 +5,14 @@
 package gitstore_test
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"storywork/internal/gitstore"
 )
@@ -190,5 +193,74 @@ func TestUnifiedDiffExceedsMaxBytes(t *testing.T) {
 	}
 	if !errors.Is(err, gitstore.ErrDiffTooLarge) {
 		t.Fatalf("UnifiedDiff() err = %v, want gitstore.ErrDiffTooLarge", err)
+	}
+}
+
+// Test: the bounded reader kills the child process after maxBytes and returns
+// ErrDiffTooLarge with no partial output. A marker file proves the process
+// was stopped before writing the marker.
+func TestUnifiedDiffStopsReadingAtByteLimit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell script test is not supported on Windows")
+	}
+	t.Parallel()
+
+	// Build a shell script that writes more than maxBytes to stdout, then
+	// sleeps, and then creates a marker file. If the process is killed
+	// after the bounded read, the marker will not exist.
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "fake-git.sh")
+	markerPath := filepath.Join(tmpDir, "marker.txt")
+	overflow := strings.Repeat("A", 200)
+	script := "#!/bin/sh\nprintf '" + overflow + "'\nsleep 10\ntouch '" + markerPath + "'\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	store := gitstore.New(scriptPath)
+	ctx := context.Background()
+
+	// Use valid 40-char commit IDs and a valid project path so argument
+	// validation passes. The script ignores all arguments.
+	left := strings.Repeat("a", 40)
+	right := strings.Repeat("b", 40)
+	repoPath := t.TempDir()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := store.UnifiedDiff(ctx, repoPath, left, right, []string{"outline.yaml"}, 100)
+		if !errors.Is(err, gitstore.ErrDiffTooLarge) {
+			t.Errorf("UnifiedDiff() err = %v, want gitstore.ErrDiffTooLarge", err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("UnifiedDiff() did not return within 5 seconds; child process may not have been killed")
+	}
+
+	// The marker must not exist because the process was killed before
+	// reaching the touch command.
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("marker file exists; child process was not killed after bounded read: %v", err)
+	}
+}
+
+// Test: maxBytes <= 0 is rejected before starting any process.
+func TestUnifiedDiffRejectsNonPositiveMaxBytes(t *testing.T) {
+	t.Parallel()
+	ctx, dir, store := initTestRepo(t)
+	mainHead, err := store.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.UnifiedDiff(ctx, dir, mainHead, mainHead, []string{"outline.yaml"}, 0)
+	if !errors.Is(err, gitstore.ErrDiffTooLarge) {
+		t.Fatalf("UnifiedDiff(maxBytes=0) err = %v, want gitstore.ErrDiffTooLarge", err)
+	}
+	_, err = store.UnifiedDiff(ctx, dir, mainHead, mainHead, []string{"outline.yaml"}, -1)
+	if !errors.Is(err, gitstore.ErrDiffTooLarge) {
+		t.Fatalf("UnifiedDiff(maxBytes=-1) err = %v, want gitstore.ErrDiffTooLarge", err)
 	}
 }

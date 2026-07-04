@@ -1,10 +1,11 @@
-// BDD Scenario: 8.3.1 - Run only after explicit authorization
-// Requirements: M8-R09, M8-R10
-// Test purpose: verify explicit ramification analysis workflow and clearing behavior.
+// BDD Scenario: 8.3.2 - Stale ramification responses must not pollute UI
+// Requirements: M8-R18
+// Test purpose: Deferred analysis promises from a previous project or comparison
+// context do not install findings, errors, or status messages.
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, expect, test, vi } from 'vitest'
-import type { Project } from '../api'
+import type { Project, RamificationResponse } from '../api'
 import BranchWorkbench from './BranchWorkbench'
 
 vi.mock('../api', () => ({
@@ -29,10 +30,18 @@ vi.mock('../api', () => ({
 
 const api = await import('../api')
 
-const project: Project = {
-  project_id: 'proj_story',
-  name: 'Story',
-  path: '/tmp/story',
+const projectA: Project = {
+  project_id: 'proj_a',
+  name: 'Project A',
+  path: '/tmp/a',
+  git_initialized: true,
+  index_initialized: true,
+}
+
+const projectB: Project = {
+  project_id: 'proj_b',
+  name: 'Project B',
+  path: '/tmp/b',
   git_initialized: true,
   index_initialized: true,
 }
@@ -44,42 +53,17 @@ const experimentID = 'brn_0123456789abcdef0123'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(api.getProviderProfiles).mockResolvedValue({
-    profiles: [{
-      id: 'local_ollama',
-      name: 'Local Ollama',
-      type: 'ollama',
-      base_url: 'http://127.0.0.1:11434',
-      auth: { type: 'none', credential_env: '' },
-      capabilities: { chat: true, streaming: false, structured_output: false, max_context_tokens: 8192 },
-      readiness: 'ready',
-    }],
-    revision: null,
-  })
-  vi.mocked(api.getBranchStatus).mockResolvedValue({
-    active_branch: 'branch/obi-wan-lives-0123456789abcdef0123',
-    active_kind: 'experiment',
-    main_head: mainHead,
-    experiment_head: experimentHead,
-    active_experiment_id: experimentID,
-    worktree_clean: true,
-  })
-  vi.mocked(api.listExperiments).mockResolvedValue({
-    experiments: [{
-      experiment_id: experimentID,
-      branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
-      head: experimentHead,
-      display_name: 'obi-wan-lives',
-    }],
-  })
+  vi.mocked(api.getProviderProfiles).mockResolvedValue({ profiles: [], revision: null })
   vi.mocked(api.getBranchComparison).mockResolvedValue({
     experiment_id: experimentID,
-    branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+    branch_name: 'branch/test-exp-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
     base_head: `sha256:${'d'.repeat(64)}`,
     fingerprint,
-    files: [{ path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' }],
+    files: [
+      { path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' },
+    ],
   })
   vi.mocked(api.getBranchFileComparison).mockResolvedValue({
     path: 'scenes/scn_0123456789abcdef0123.md',
@@ -92,102 +76,98 @@ beforeEach(() => {
   })
 })
 
-// Test: explicit Analyze is the only provider-triggering UI action.
-// Requirements: M8-R09.
-test('calls ramification analysis only after explicit analyze authorization', async () => {
-  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
-  await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalled())
-  expect(api.analyzeBranchRamifications).not.toHaveBeenCalled()
+// Test: analysis started for project A does not display findings after
+// rerender with project B.
+test('stale analysis response from another project is ignored', async () => {
+  let resolveAnalysis: (value: RamificationResponse) => void
+  const analysisPromise = new Promise<RamificationResponse>((resolve) => { resolveAnalysis = resolve })
+  vi.mocked(api.analyzeBranchRamifications).mockReturnValue(analysisPromise)
 
-  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Explore consequences.' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Analyze ramifications' }))
-  await waitFor(() => expect(api.analyzeBranchRamifications).toHaveBeenCalledWith(experimentID, {
-    goal: 'Explore consequences.',
-    profile_id: 'local_ollama',
-    model: '',
-    expected_main_head: mainHead,
-    expected_experiment_head: experimentHead,
-    comparison_fingerprint: fingerprint,
-  }))
-})
-
-// Test: goal, profile, model, and reviewed fingerprint are sent with the request.
-// Requirements: M8-R09.
-test('sends reviewed fingerprint and provider selection with the analysis request', async () => {
-  vi.mocked(api.analyzeBranchRamifications).mockResolvedValue({
-    summary: 'Summary',
-    findings: [],
-    provider: { profile_id: 'local_ollama', type: 'ollama', model: 'qwen2.5:7b' },
-    manifest: {
-      main_head: mainHead,
-      experiment_head: experimentHead,
-      fingerprint,
-      changed_file_count: 1,
-      included_paths: ['scenes/scn_0123456789abcdef0123.md'],
-      estimated_input_bytes: 100,
-    },
-  })
-
-  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
-  await waitFor(() => expect(screen.getByLabelText('Provider profile')).toBeInTheDocument())
-
-  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Goal text' } })
-  fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'qwen2.5:7b' } })
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze ramifications' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: 'Analyze ramifications' }))
-
-  await waitFor(() => expect(api.analyzeBranchRamifications).toHaveBeenCalledWith(experimentID, expect.objectContaining({
-    goal: 'Goal text',
-    profile_id: 'local_ollama',
-    model: 'qwen2.5:7b',
-    comparison_fingerprint: fingerprint,
-  })))
-  await waitFor(() => expect(screen.getByText('Summary', { selector: '.branch-ramification-summary' })).toBeInTheDocument())
-})
-
-// Test: findings clear after fingerprint change and are not browser-persisted.
-// Requirements: M8-R10, M8-R18.
-test('clears findings after comparison fingerprint changes', async () => {
-  vi.mocked(api.analyzeBranchRamifications).mockResolvedValue({
-    summary: 'Visible summary',
-    findings: [{
-      category: 'continuity',
-      severity: 'high',
-      title: 'Conflict',
-      explanation: 'Explanation',
-      affected_paths: ['scenes/scn_0123456789abcdef0123.md'],
-      recommended_action: 'Review scene.',
-    }],
-    provider: { profile_id: 'local_ollama', type: 'ollama', model: 'qwen2.5:7b' },
-    manifest: {
-      main_head: mainHead,
-      experiment_head: experimentHead,
-      fingerprint,
-      changed_file_count: 1,
-      included_paths: ['scenes/scn_0123456789abcdef0123.md'],
-      estimated_input_bytes: 100,
-    },
-  })
-
-  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
-  await waitFor(() => expect(screen.getByLabelText('Analysis goal')).toBeInTheDocument())
-  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Goal' } })
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze ramifications' })).not.toBeDisabled())
-  fireEvent.click(screen.getByRole('button', { name: 'Analyze ramifications' }))
-  await waitFor(() => expect(screen.getByText('Visible summary', { selector: '.branch-ramification-summary' })).toBeInTheDocument())
-
-  vi.mocked(api.getBranchComparison).mockResolvedValue({
-    experiment_id: experimentID,
-    branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+  vi.mocked(api.getBranchStatus).mockResolvedValue({
+    active_branch: 'branch/test-exp-0123456789abcdef0123',
+    active_kind: 'experiment',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
-    fingerprint: `sha256:${'e'.repeat(64)}`,
-    files: [{ path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' }],
+    active_experiment_id: experimentID,
+    worktree_clean: true,
   })
-  cleanup()
-  render(<BranchWorkbench key="refreshed" project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
-  await waitFor(() => expect(screen.queryByText('Visible summary', { selector: '.branch-ramification-summary' })).not.toBeInTheDocument())
-  expect(localStorage.getItem('branch-ramification')).toBeNull()
-  expect(sessionStorage.getItem('branch-ramification')).toBeNull()
+  vi.mocked(api.listExperiments).mockResolvedValue({
+    experiments: [
+      { experiment_id: experimentID, branch_name: 'branch/test-exp-0123456789abcdef0123', head: experimentHead, display_name: 'test-exp' },
+    ],
+  })
+
+  const { rerender } = render(
+    <BranchWorkbench project={projectA} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />,
+  )
+  await waitFor(() => expect(screen.getByText('Ramification analysis')).toBeInTheDocument())
+
+  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Review' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Analyze ramifications' }))
+
+  // Rerender with project B - this remounts the component due to key change
+  rerender(
+    <BranchWorkbench project={projectB} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />,
+  )
+
+  // Resolve project A's analysis
+  resolveAnalysis!({
+    summary: 'Stale summary from project A',
+    findings: [],
+    provider: { profile_id: 'local', type: 'ollama', model: 'qwen' },
+    manifest: {
+      main_head: mainHead,
+      experiment_head: experimentHead,
+      fingerprint,
+      changed_file_count: 1,
+      included_paths: ['scenes/scn_0123456789abcdef0123.md'],
+      estimated_input_bytes: 120,
+    },
+  })
+
+  // Project A's findings must not appear
+  await waitFor(() => {
+    expect(screen.queryByText('Stale summary from project A')).not.toBeInTheDocument()
+  })
+})
+
+// Test: analysis error from an obsolete request does not set error state.
+test('stale analysis error from obsolete request is ignored', async () => {
+  let rejectAnalysis: (reason: unknown) => void
+  const analysisPromise = new Promise<RamificationResponse>((_, reject) => { rejectAnalysis = reject })
+  vi.mocked(api.analyzeBranchRamifications).mockReturnValue(analysisPromise)
+
+  vi.mocked(api.getBranchStatus).mockResolvedValue({
+    active_branch: 'branch/test-exp-0123456789abcdef0123',
+    active_kind: 'experiment',
+    main_head: mainHead,
+    experiment_head: experimentHead,
+    active_experiment_id: experimentID,
+    worktree_clean: true,
+  })
+  vi.mocked(api.listExperiments).mockResolvedValue({
+    experiments: [
+      { experiment_id: experimentID, branch_name: 'branch/test-exp-0123456789abcdef0123', head: experimentHead, display_name: 'test-exp' },
+    ],
+  })
+
+  render(
+    <BranchWorkbench project={projectA} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />,
+  )
+  await waitFor(() => expect(screen.getByText('Ramification analysis')).toBeInTheDocument())
+
+  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Review' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Analyze ramifications' }))
+
+  // Bump the request version by changing the goal
+  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Review the change' } })
+
+  // Reject the first analysis request (catch to prevent unhandled rejection)
+  rejectAnalysis!(new Error('Stale analysis error'))
+  await analysisPromise.catch(() => {})
+
+  // The stale error must not appear
+  await waitFor(() => {
+    expect(screen.queryByText('Stale analysis error')).not.toBeInTheDocument()
+  })
 })

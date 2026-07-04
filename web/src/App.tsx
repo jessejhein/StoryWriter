@@ -177,6 +177,7 @@ export default function App() {
             <ImportReviewWorkbench key={branchEpoch} onDirtyChange={setDirty} />
           ) : shellView.view.mode === 'branches' ? (
             <BranchWorkbench
+              key={`${branchEpoch}:${project.project_id}`}
               appDirty={dirty}
               onBranchChanged={handleBranchChanged}
               onDirtyChange={setDirty}

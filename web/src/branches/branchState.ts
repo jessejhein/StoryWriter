@@ -111,6 +111,17 @@ export function canProceedWithBranchChange(
   return 'allowed'
 }
 
+export function buildCurrentContext(state: BranchWorkbenchState): BranchContextKey {
+  return buildBranchContextKey({
+    projectID: state.projectID,
+    experimentID: state.comparison?.experiment_id ?? null,
+    mainHead: state.comparison?.main_head ?? '',
+    experimentHead: state.comparison?.experiment_head ?? null,
+    fingerprint: state.comparison?.fingerprint ?? '',
+    selectedPath: state.selectedPath,
+  })
+}
+
 export function applyComparisonSuccess(
   state: BranchWorkbenchState,
   comparison: ComparisonResponse,
@@ -188,12 +199,21 @@ export function applyRamificationSuccess(
   context: BranchContextKey,
   requestVersion: number,
 ): BranchWorkbenchState {
-  if (state.requestVersion !== requestVersion) {
+  const current: BranchContextKey = {
+    projectID: state.projectID,
+    experimentID: state.comparison?.experiment_id ?? null,
+    mainHead: state.comparison?.main_head ?? '',
+    experimentHead: state.comparison?.experiment_head ?? null,
+    fingerprint: state.comparison?.fingerprint ?? '',
+    selectedPath: state.selectedPath,
+  }
+  if (!shouldAcceptResponse(context, current, requestVersion, state.requestVersion)) {
     return state
   }
   if (
-    context.experimentID !== state.comparison?.experiment_id ||
-    context.fingerprint !== state.comparison.fingerprint
+    ramification.manifest.main_head !== context.mainHead ||
+    ramification.manifest.experiment_head !== context.experimentHead ||
+    ramification.manifest.fingerprint !== context.fingerprint
   ) {
     return state
   }
