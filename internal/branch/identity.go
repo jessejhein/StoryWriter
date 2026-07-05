@@ -14,10 +14,13 @@ const (
 )
 
 var (
-	experimentIDPattern  = regexp.MustCompile(`^brn_[0-9a-f]{20}$`)
-	experimentHexPattern = regexp.MustCompile(`^[0-9a-f]{20}$`)
-	slugPattern          = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	refInjectionPattern  = regexp.MustCompile(`[\x00-\x1f\x7f~^:?*[]`)
+	experimentIDPattern     = regexp.MustCompile(`^brn_[0-9a-f]{20}$`)
+	experimentHexPattern    = regexp.MustCompile(`^[0-9a-f]{20}$`)
+	slugPattern             = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	refInjectionPattern     = regexp.MustCompile(`[\x00-\x1f\x7f~^:?*[]`)
+	reservedExperimentSlugs = map[string]struct{}{
+		"main": {},
+	}
 )
 
 // IDGenerator creates experiment identifiers for tests and production.
@@ -80,6 +83,9 @@ func NormalizeSlug(name string) (string, error) {
 	if !slugPattern.MatchString(slug) {
 		return "", fmt.Errorf("normalized experiment name %q is invalid: %w", slug, ErrInvalidExperimentName)
 	}
+	if _, reserved := reservedExperimentSlugs[slug]; reserved {
+		return "", fmt.Errorf("normalized experiment name %q is reserved: %w", slug, ErrInvalidExperimentName)
+	}
 	return slug, nil
 }
 
@@ -87,6 +93,9 @@ func NormalizeSlug(name string) (string, error) {
 func ValidateSlug(slug string) error {
 	if !slugPattern.MatchString(slug) || len(slug) == 0 || len(slug) > slugMaxBytes {
 		return fmt.Errorf("slug %q: %w", slug, ErrInvalidExperimentName)
+	}
+	if _, reserved := reservedExperimentSlugs[slug]; reserved {
+		return fmt.Errorf("slug %q is reserved: %w", slug, ErrInvalidExperimentName)
 	}
 	return nil
 }

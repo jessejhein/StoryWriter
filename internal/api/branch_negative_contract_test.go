@@ -108,6 +108,7 @@ func TestBranchRoutesRejectMalformedCallsBeforeService(t *testing.T) {
 		{name: "create missing", method: http.MethodPost, path: "/api/branches", body: `{}`, status: 400},
 		{name: "create null", method: http.MethodPost, path: "/api/branches", body: `{"name":null}`, status: 400},
 		{name: "create unknown", method: http.MethodPost, path: "/api/branches", body: `{"name":"x","extra":true}`, status: 400},
+		{name: "create reserved", method: http.MethodPost, path: "/api/branches", body: `{"name":"main"}`, status: 400},
 		{name: "create trailing", method: http.MethodPost, path: "/api/branches", body: `{"name":"x"}{}`, status: 400},
 		{name: "create duplicate key", method: http.MethodPost, path: "/api/branches", body: `{"name":"x","name":"y"}`, status: 400},
 		{name: "main expected head forbidden", method: http.MethodPost, path: "/api/branches/switch", body: `{"target":"main","expected_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`, status: 400},
@@ -139,6 +140,21 @@ func TestBranchRoutesRejectMalformedAnalysisBeforeService(t *testing.T) {
 	store := &spyBranchStore{}
 	response := httptest.NewRecorder()
 	handlerWithBranches(store).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/branches/brn_0123456789abcdef0123/ramifications", strings.NewReader(`{"goal":"test","profile_id":"","model":"ok","expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.analysisCalls != 0 {
+		t.Fatalf("analysisCalls=%d", store.analysisCalls)
+	}
+}
+
+// Test: malformed analysis goals are rejected before the branch service is invoked.
+// Requirements: M8-R09, M8-R20.
+func TestBranchRoutesRejectAnalysisGoalsWithNULBeforeService(t *testing.T) {
+	t.Parallel()
+	store := &spyBranchStore{}
+	response := httptest.NewRecorder()
+	handlerWithBranches(store).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/branches/brn_0123456789abcdef0123/ramifications", strings.NewReader(`{"goal":"review\u0000goal","profile_id":"local_test","model":"ok","expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`)))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}

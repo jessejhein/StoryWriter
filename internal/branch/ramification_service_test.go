@@ -233,6 +233,47 @@ func TestAnalyzeRamificationsRejectsInvalidProfileAndModelBeforeProvider(t *test
 	}
 }
 
+// Test: invalid goals are rejected before the service reaches provider work.
+// Requirements: M8-R09.
+func TestAnalyzeRamificationsRejectsInvalidGoalsBeforeProvider(t *testing.T) {
+	t.Parallel()
+	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []string{
+		"",
+		"   ",
+		strings.Repeat("x", branch.MaxGoalBytes+1),
+		string([]byte{0xff, 0xfe}),
+		"review\x00goal",
+	}
+	for _, goal := range tests {
+		t.Run(fmt.Sprintf("%q", goal), func(t *testing.T) {
+			t.Parallel()
+			repo := &analysisRepo{
+				fakeRepo: &fakeRepo{
+					experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+					mainHead:     mainHead,
+					compareFiles: files,
+				},
+			}
+			analyzer := &captureAnalyzer{}
+			service := branch.NewService(repo, &fakeIndex{}, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, analyzer, &staticIDs{id: "brn_0123456789abcdef0123"})
+			_, err := service.AnalyzeRamifications(context.Background(), "brn_0123456789abcdef0123", branch.AnalysisRequest{
+				Goal: goal, ProfileID: "local", Model: "model",
+				ExpectedMainHead: mainHead, ExpectedExperimentHead: experimentHead, ExpectedFingerprint: fingerprint,
+			})
+			if !errors.Is(err, branch.ErrInvalidAnalysis) || analyzer.calls != 0 {
+				t.Fatalf("goal=%q err=%v calls=%d", goal, err, analyzer.calls)
+			}
+		})
+	}
+}
+
 // Test: analyzer cancellation and deadline expiry map to provider-unavailable
 // instead of leaking as internal failures.
 // Requirements: M8-R09.

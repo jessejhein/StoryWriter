@@ -72,6 +72,31 @@ func TestBuildAnalysisPacketExactBoundary(t *testing.T) {
 	}
 }
 
+// Test: invalid goals are rejected before packet construction.
+func TestBuildAnalysisPacketRejectsInvalidGoals(t *testing.T) {
+	t.Parallel()
+	comparison := Comparison{
+		ExperimentID:   "brn_0123456789abcdef0123",
+		BranchName:     "branch/test-exp-0123456789abcdef0123",
+		MainHead:       CommitID(strings.Repeat("a", 40)),
+		ExperimentHead: CommitID(strings.Repeat("b", 40)),
+		BaseHead:       CommitID(strings.Repeat("c", 40)),
+		Fingerprint:    "sha256:" + strings.Repeat("d", 64),
+		Files:          []ChangedFile{{Path: "outline.yaml", Status: StatusModified}},
+	}
+	for _, goal := range []string{
+		"",
+		"   ",
+		strings.Repeat("x", MaxGoalBytes+1),
+		string([]byte{0xff, 0xfe}),
+		"review\x00goal",
+	} {
+		if _, _, err := BuildAnalysisPacket(goal, comparison, "diff"); err == nil {
+			t.Fatalf("BuildAnalysisPacket(%q) = nil, want error", goal)
+		}
+	}
+}
+
 // Test: analysisPromptOverhead matches the labels in buildRamificationPrompt.
 func TestAnalysisPromptOverheadMatchesLabels(t *testing.T) {
 	t.Parallel()

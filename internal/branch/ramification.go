@@ -111,10 +111,19 @@ func AnalysisPromptOverhead(goal string, files []ChangedFile) int {
 	return overhead
 }
 
+// ValidateAnalysisGoal trims and validates a ramification analysis goal.
+func ValidateAnalysisGoal(goal string) (string, error) {
+	goal = strings.TrimSpace(goal)
+	if goal == "" || len(goal) > MaxGoalBytes || !utf8.ValidString(goal) || strings.ContainsRune(goal, 0) {
+		return "", ErrInvalidAnalysis
+	}
+	return goal, nil
+}
+
 // BuildAnalysisPacket constructs the bounded diff packet under a read lock.
 func BuildAnalysisPacket(goal string, comparison Comparison, diffText string) (AnalysisPacket, RedactedManifest, error) {
-	goal = strings.TrimSpace(goal)
-	if goal == "" || len(goal) > MaxGoalBytes {
+	validGoal, err := ValidateAnalysisGoal(goal)
+	if err != nil {
 		return AnalysisPacket{}, RedactedManifest{}, ErrInvalidAnalysis
 	}
 	if len(comparison.Files) > MaxAnalysisFiles {
@@ -125,7 +134,7 @@ func BuildAnalysisPacket(goal string, comparison Comparison, diffText string) (A
 		included = append(included, file.Path)
 	}
 	packet := AnalysisPacket{
-		Goal:       goal,
+		Goal:       validGoal,
 		Comparison: comparison,
 		DiffText:   diffText,
 	}
@@ -322,9 +331,9 @@ type RamificationService struct {
 }
 
 func (r *RamificationService) Run(ctx context.Context, experimentID string, request AnalysisRequest) (AnalysisResult, error) {
-	goal := strings.TrimSpace(request.Goal)
-	if goal == "" || len(goal) > MaxGoalBytes || !utf8.ValidString(goal) || strings.ContainsRune(goal, 0) {
-		return AnalysisResult{}, ErrInvalidAnalysis
+	goal, err := ValidateAnalysisGoal(request.Goal)
+	if err != nil {
+		return AnalysisResult{}, err
 	}
 	request.ProfileID = strings.TrimSpace(request.ProfileID)
 	request.Model = strings.TrimSpace(request.Model)

@@ -110,6 +110,10 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchBodyError(writer, err)
 			return
 		}
+		if _, err := branch.NormalizeSlug(body.Name); err != nil {
+			writeBranchError(writer, err)
+			return
+		}
 		status, err := branches.CreateExperiment(request.Context(), body.Name)
 		if err != nil {
 			writeBranchError(writer, err)
@@ -229,6 +233,11 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchError(writer, err)
 			return
 		}
+		goal, err := branch.ValidateAnalysisGoal(body.Goal)
+		if err != nil {
+			writeBranchError(writer, err)
+			return
+		}
 		body.ProfileID = strings.TrimSpace(body.ProfileID)
 		body.Model = strings.TrimSpace(body.Model)
 		if body.ProfileID == "" || body.Model == "" {
@@ -236,7 +245,7 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			return
 		}
 		result, err := branches.AnalyzeRamifications(request.Context(), request.PathValue("experiment_id"), branch.AnalysisRequest{
-			Goal:                   body.Goal,
+			Goal:                   goal,
 			ProfileID:              body.ProfileID,
 			Model:                  body.Model,
 			ExpectedMainHead:       mainHead,

@@ -109,6 +109,17 @@ func TestNormalizeSlugRejectsEmptyAndUnsupportedNames(t *testing.T) {
 	}
 }
 
+// Test: reserved experiment names are rejected during slug normalization.
+// Requirements: M8-R01.
+func TestNormalizeSlugRejectsReservedNames(t *testing.T) {
+	t.Parallel()
+	for _, value := range []string{"main"} {
+		if _, err := branch.NormalizeSlug(value); !errors.Is(err, branch.ErrInvalidExperimentName) {
+			t.Fatalf("NormalizeSlug(%q) = %v, want ErrInvalidExperimentName", value, err)
+		}
+	}
+}
+
 // Test: branch/<slug>-<hex> round trip and managed-ref recognition.
 // Requirements: M8-R01.
 func TestBuildAndParseManagedBranchRefRoundTrip(t *testing.T) {
@@ -150,6 +161,26 @@ func TestBuildBranchRefAcceptsOnlyNormalizedSlugs(t *testing.T) {
 		if _, err := branch.BuildBranchRef(raw, id); !errors.Is(err, branch.ErrInvalidExperimentName) {
 			t.Fatalf("BuildBranchRef(%q) = %v, want ErrInvalidExperimentName", raw, err)
 		}
+	}
+}
+
+// Test: reserved slugs are rejected during branch ref construction.
+// Requirements: M8-R01.
+func TestBuildBranchRefRejectsReservedSlugs(t *testing.T) {
+	t.Parallel()
+	id := branch.ExperimentID("brn_0123456789abcdef0123")
+	if _, err := branch.BuildBranchRef("main", id); !errors.Is(err, branch.ErrInvalidExperimentName) {
+		t.Fatalf("BuildBranchRef(main) = %v, want ErrInvalidExperimentName", err)
+	}
+}
+
+// Test: reserved experiment names are rejected before managed ref generation.
+// Requirements: M8-R01.
+func TestBranchRefFromNameRejectsReservedNames(t *testing.T) {
+	t.Parallel()
+	id := branch.ExperimentID("brn_0123456789abcdef0123")
+	if _, err := branch.BranchRefFromName("main", id); !errors.Is(err, branch.ErrInvalidExperimentName) {
+		t.Fatalf("BranchRefFromName(main) = %v, want ErrInvalidExperimentName", err)
 	}
 }
 
