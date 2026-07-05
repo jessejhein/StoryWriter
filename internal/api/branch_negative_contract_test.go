@@ -25,6 +25,10 @@ type statusErrorBranchStore struct {
 type spyBranchStore struct {
 	branchServiceStub
 	analysisCalls int
+	createCalls   int
+	switchCalls   int
+	promoteCalls  int
+	discardCalls  int
 }
 
 func (s statusErrorBranchStore) Status(context.Context) (branch.RepositoryStatus, error) {
@@ -38,6 +42,26 @@ func handlerWithBranches(store api.BranchStore) http.Handler {
 func (s *spyBranchStore) AnalyzeRamifications(context.Context, string, branch.AnalysisRequest) (branch.AnalysisResult, error) {
 	s.analysisCalls++
 	return branch.AnalysisResult{}, nil
+}
+
+func (s *spyBranchStore) CreateExperiment(context.Context, string) (branch.RepositoryStatus, error) {
+	s.createCalls++
+	return branch.RepositoryStatus{}, nil
+}
+
+func (s *spyBranchStore) SwitchTarget(context.Context, string, *branch.CommitID) (branch.RepositoryStatus, error) {
+	s.switchCalls++
+	return branch.RepositoryStatus{}, nil
+}
+
+func (s *spyBranchStore) PromoteSelectedFiles(context.Context, branch.PromotionRequest) (branch.PromotionResult, error) {
+	s.promoteCalls++
+	return branch.PromotionResult{}, nil
+}
+
+func (s *spyBranchStore) DiscardExperiment(context.Context, string, branch.CommitID) (branch.RepositoryStatus, error) {
+	s.discardCalls++
+	return branch.RepositoryStatus{}, nil
 }
 
 // Test: typed domain errors map to the exact public status classes.
@@ -120,6 +144,35 @@ func TestBranchRoutesRejectMalformedAnalysisBeforeService(t *testing.T) {
 	}
 	if store.analysisCalls != 0 {
 		t.Fatalf("analysisCalls=%d", store.analysisCalls)
+	}
+}
+
+// Test: POST branch routes reject unexpected query parameters before touching
+// the branch service.
+// Requirements: M8-R20.
+func TestBranchPostRoutesRejectUnexpectedQueryBeforeService(t *testing.T) {
+	t.Parallel()
+	store := &spyBranchStore{}
+	handler := handlerWithBranches(store)
+	tests := []struct {
+		path string
+		body string
+	}{
+		{path: "/api/branches?extra=1", body: `{"name":"test"}`},
+		{path: "/api/branches/switch?extra=1", body: `{"target":"main"}`},
+		{path: "/api/branches/brn_0123456789abcdef0123/ramifications?extra=1", body: `{"goal":"test","profile_id":"local_test","model":"ok","expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`},
+		{path: "/api/branches/brn_0123456789abcdef0123/promote?extra=1", body: `{"paths":["outline.yaml"],"expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`},
+		{path: "/api/branches/brn_0123456789abcdef0123/discard?extra=1", body: `{"expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`},
+	}
+	for _, testCase := range tests {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, testCase.path, strings.NewReader(testCase.body)))
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d body=%s", testCase.path, response.Code, response.Body.String())
+		}
+	}
+	if store.createCalls != 0 || store.switchCalls != 0 || store.analysisCalls != 0 || store.promoteCalls != 0 || store.discardCalls != 0 {
+		t.Fatalf("service calls: create=%d switch=%d analysis=%d promote=%d discard=%d", store.createCalls, store.switchCalls, store.analysisCalls, store.promoteCalls, store.discardCalls)
 	}
 }
 

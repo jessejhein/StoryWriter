@@ -9,13 +9,14 @@ import type { DiffRow, LineDiffResult } from './branchTypes'
 export const LINE_DIFF_MAX_LINES = 2000
 export const LINE_DIFF_MAX_CELLS = 2_000_000
 const FALLBACK_MESSAGE = 'Line highlighting is unavailable for this file. Both complete texts are shown without row alignment.'
+export const NO_NEWLINE_MARKER = 'No newline at end of file'
 
 export function splitLines(text: string): string[] {
   if (text.length === 0) {
     return []
   }
   const lines = text.split('\n')
-  if (lines.at(-1) === '') {
+  if (text.endsWith('\n')) {
     lines.pop()
   }
   return lines
@@ -34,7 +35,19 @@ export function alignLines(canonText: string, branchText: string): LineDiffResul
   }
 
   const rawRows = buildRawRows(canonLines, branchLines)
-  return { mode: 'highlighted', rows: pairModifiedRows(rawRows) }
+  const rows = pairModifiedRows(rawRows)
+  if (canonText.endsWith('\n') !== branchText.endsWith('\n') && (canonText.length > 0 || branchText.length > 0)) {
+    if (canonText.endsWith('\n')) {
+      rows.push({ kind: 'added', canonLine: null, canonText: null, branchLine: branchLines.length + 1, branchText: NO_NEWLINE_MARKER })
+    } else {
+      rows.push({ kind: 'deleted', canonLine: canonLines.length + 1, canonText: NO_NEWLINE_MARKER, branchLine: null, branchText: null })
+    }
+  }
+  return { mode: 'highlighted', rows }
+}
+
+export function isNoNewlineMarker(text: string | null): boolean {
+  return text === NO_NEWLINE_MARKER
 }
 
 function buildRawRows(canonLines: string[], branchLines: string[]): DiffRow[] {

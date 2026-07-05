@@ -40,6 +40,7 @@ const project: Project = {
 const mainHead = `sha256:${'a'.repeat(64)}`
 const experimentHead = `sha256:${'b'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
+const inactiveExperimentID = 'brn_0123456789abcdef0124'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -63,12 +64,20 @@ beforeEach(() => {
     worktree_clean: true,
   })
   vi.mocked(api.listExperiments).mockResolvedValue({
-    experiments: [{
-      experiment_id: experimentID,
-      branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
-      head: experimentHead,
-      display_name: 'obi-wan-lives',
-    }],
+    experiments: [
+      {
+        experiment_id: experimentID,
+        branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+        head: experimentHead,
+        display_name: 'obi-wan-lives',
+      },
+      {
+        experiment_id: inactiveExperimentID,
+        branch_name: 'branch/yoda-lives-0123456789abcdef0124',
+        head: `sha256:${'e'.repeat(64)}`,
+        display_name: 'yoda-lives',
+      },
+    ],
   })
   vi.mocked(api.getBranchComparison).mockResolvedValue({
     experiment_id: experimentID,
@@ -91,6 +100,37 @@ beforeEach(() => {
     canon: { exists: true, text: 'alpha\nbeta' },
     experiment: { exists: true, text: 'alpha\ngamma' },
   })
+})
+
+// Test: selecting an inactive experiment for review loads comparison without a checkout.
+// Requirements: M8-R05, M8-R17.
+test('reviews an inactive experiment without switching branches', async () => {
+  vi.mocked(api.getBranchComparison)
+    .mockResolvedValueOnce({
+      experiment_id: experimentID,
+      branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+      main_head: mainHead,
+      experiment_head: experimentHead,
+      base_head: `sha256:${'d'.repeat(64)}`,
+      fingerprint: `sha256:${'c'.repeat(64)}`,
+      files: [],
+    })
+    .mockResolvedValueOnce({
+      experiment_id: inactiveExperimentID,
+      branch_name: 'branch/yoda-lives-0123456789abcdef0124',
+      main_head: mainHead,
+      experiment_head: `sha256:${'e'.repeat(64)}`,
+      base_head: `sha256:${'d'.repeat(64)}`,
+      fingerprint: `sha256:${'f'.repeat(64)}`,
+      files: [],
+    })
+
+  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
+  await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalledWith(experimentID))
+
+  fireEvent.click(screen.getByRole('button', { name: 'yoda-lives' }))
+  await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalledWith(inactiveExperimentID))
+  expect(api.switchBranch).not.toHaveBeenCalled()
 })
 
 // Test: changed-file status list, selection, and file fetch.

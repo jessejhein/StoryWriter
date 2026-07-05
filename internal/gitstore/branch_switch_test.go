@@ -5,11 +5,14 @@
 package gitstore_test
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"storywork/internal/gitstore"
 )
 
 // Test: create at main while another branch is active and switch back.
@@ -82,5 +85,48 @@ func TestCreateAndSwitchRejectsDirtyWorktree(t *testing.T) {
 	}
 	if err := store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", mainHead); err == nil {
 		t.Fatal("CreateAndSwitch() on dirty worktree = nil, want error")
+	}
+}
+
+// Test: switching to an experiment with a stale expected head fails before
+// changing the active branch.
+// Requirements: M8-R03, M8-R17.
+func TestSwitchExperimentRejectsStaleExpectedHead(t *testing.T) {
+	t.Parallel()
+	ctx, dir, store := initTestRepo(t)
+	mainHead, err := store.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "branch/test-exp-0123456789abcdef0123"
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+		t.Fatal(err)
+	}
+	experimentHead, err := store.ResolveCommit(ctx, dir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Switch(ctx, dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 9\nroot:\n  arcs: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitAll(ctx, dir, "advance main"); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "-C", dir, "branch", "-f", ref, "HEAD").CombinedOutput(); err != nil {
+		t.Fatalf("git branch -f: %v: %s", err, output)
+	}
+	err = store.SwitchExperiment(ctx, dir, ref, experimentHead)
+	if !errors.Is(err, gitstore.ErrStaleExperimentHead) {
+		t.Fatalf("SwitchExperiment() err = %v", err)
+	}
+	active, commandErr := exec.Command("git", "-C", dir, "symbolic-ref", "--short", "HEAD").Output()
+	if commandErr != nil {
+		t.Fatal(commandErr)
+	}
+	if strings.TrimSpace(string(active)) != "main" {
+		t.Fatalf("active branch = %q, want main", active)
 	}
 }

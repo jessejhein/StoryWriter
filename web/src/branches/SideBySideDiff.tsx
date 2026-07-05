@@ -6,7 +6,7 @@
 
 import { useEffect, useMemo, useRef } from 'react'
 import type { ChangedFileStatus, FileSide } from './branchTypes'
-import { alignLines } from './lineDiff'
+import { alignLines, isNoNewlineMarker, NO_NEWLINE_MARKER } from './lineDiff'
 
 type Props = {
   path: string
@@ -32,6 +32,16 @@ function screenReaderLabel(kind: string): string {
     default:
       return 'Unchanged line'
   }
+}
+
+function renderDiffText(text: string | null, missingLabel: string): string {
+  if (text === null) {
+    return missingLabel
+  }
+  if (isNoNewlineMarker(text)) {
+    return NO_NEWLINE_MARKER
+  }
+  return text
 }
 
 export default function SideBySideDiff({
@@ -127,7 +137,7 @@ export default function SideBySideDiff({
               {diff.rows.map((row, index) => (
                 <div className={`branch-diff-row branch-diff-row-${row.kind}`} key={`canon-${index}`}>
                   <span className="branch-diff-line-number">{row.canonLine ?? ''}</span>
-                  <span className="branch-diff-text">{row.canonText ?? (row.kind === 'added' ? 'Missing on canon' : '')}</span>
+                  <span className="branch-diff-text">{renderDiffText(row.canonText, row.kind === 'added' ? 'Missing on canon' : '')}</span>
                   <span className="sr-only">{screenReaderLabel(row.kind)}</span>
                 </div>
               ))}
@@ -142,7 +152,7 @@ export default function SideBySideDiff({
               {diff.rows.map((row, index) => (
                 <div className={`branch-diff-row branch-diff-row-${row.kind}`} key={`experiment-${index}`}>
                   <span className="branch-diff-line-number">{row.branchLine ?? ''}</span>
-                  <span className="branch-diff-text">{row.branchText ?? (row.kind === 'deleted' ? 'Missing on experiment' : '')}</span>
+                  <span className="branch-diff-text">{renderDiffText(row.branchText, row.kind === 'deleted' ? 'Missing on experiment' : '')}</span>
                   <span className="sr-only">{screenReaderLabel(row.kind)}</span>
                 </div>
               ))}

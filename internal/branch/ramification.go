@@ -383,7 +383,7 @@ func (r *RamificationService) buildAnalysisSnapshot(ctx context.Context, path st
 	if diffBudget <= 0 {
 		return AnalysisPacket{}, RedactedManifest{}, ErrAnalysisBudget
 	}
-	diffText, err := r.Service.repo.UnifiedDiff(ctx, path, comparison.MainHead, comparison.ExperimentHead, included, diffBudget)
+	diffText, err := r.Service.analysis.UnifiedDiff(ctx, path, comparison.MainHead, comparison.ExperimentHead, included, diffBudget)
 	if err != nil {
 		return AnalysisPacket{}, RedactedManifest{}, mapRepositoryError(err)
 	}
@@ -392,6 +392,8 @@ func (r *RamificationService) buildAnalysisSnapshot(ctx context.Context, path st
 
 func mapAnalyzerError(err error) error {
 	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return ErrProviderUnavailable
 	case errors.Is(err, modelchat.ErrProviderRejected):
 		return ErrProviderRejected
 	case errors.Is(err, modelchat.ErrProviderOffline), errors.Is(err, modelchat.ErrProviderInvalid):

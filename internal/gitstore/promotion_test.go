@@ -135,3 +135,65 @@ func TestApplyPathsHandlesAdditionsAndDeletions(t *testing.T) {
 		t.Fatalf("staged=%q", staged)
 	}
 }
+
+// Test: promotion publication rejects unrelated staged index content and keeps
+// main at the expected head.
+// Requirements: M8-R13, M8-R15.
+func TestCommitPromotionRejectsUnexpectedStagedPaths(t *testing.T) {
+	t.Parallel()
+	ctx, dir, store := initTestRepo(t)
+	mainHead, err := store.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "branch/test-exp-0123456789abcdef0123"
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 2\nroot:\n  arcs: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitAll(ctx, dir, "experiment"); err != nil {
+		t.Fatal(err)
+	}
+	experimentHead, err := store.ResolveCommit(ctx, dir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := store.CompareTrees(ctx, dir, mainHead, experimentHead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Switch(ctx, dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApplyPaths(ctx, dir, experimentHead, changes, []string{"outline.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.StagePaths(ctx, dir, []string{"outline.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "rogue.txt"), []byte("unexpected\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("git", "-C", dir, "add", "rogue.txt").CombinedOutput(); err != nil {
+		t.Fatalf("git add rogue.txt: %v: %s", err, output)
+	}
+	_, err = store.CommitPromotion(ctx, dir, gitstore.PromotionCommitInput{
+		ExperimentID:     "brn_0123456789abcdef0123",
+		SourceCommit:     experimentHead,
+		BaseCommit:       mainHead,
+		ExpectedMainHead: mainHead,
+		Paths:            []string{"outline.yaml"},
+	})
+	if err == nil {
+		t.Fatal("CommitPromotion() error = nil")
+	}
+	currentMain, err := store.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentMain != mainHead {
+		t.Fatalf("main head changed: %q -> %q", mainHead, currentMain)
+	}
+}

@@ -31,7 +31,7 @@ func promoteSelectedFiles(ctx context.Context, s *Service, request PromotionRequ
 	s.coordinator.Lock()
 	defer s.coordinator.Unlock()
 
-	status, err := s.repo.Status(ctx, path)
+	status, err := s.statusRepo.Status(ctx, path)
 	if err != nil {
 		return PromotionResult{}, mapRepositoryError(err)
 	}
@@ -57,25 +57,27 @@ func promoteSelectedFiles(ctx context.Context, s *Service, request PromotionRequ
 			return PromotionResult{}, fmt.Errorf("path %q is not changed: %w", path, ErrInvalidPromotion)
 		}
 	}
-	mainChanged, err := s.repo.PathsChanged(ctx, path, comparison.BaseHead, comparison.MainHead)
+	mainChanged, err := s.comparison.PathsChanged(ctx, path, comparison.BaseHead, comparison.MainHead)
 	if err != nil {
 		return PromotionResult{}, mapRepositoryError(err)
 	}
 	if conflicts := PromotionConflicts(selected, mainChanged); len(conflicts) > 0 {
 		return PromotionResult{}, promotionConflictError(conflicts)
 	}
-	snapshots, err := s.repo.SnapshotMainPaths(ctx, path, comparison.MainHead, selected)
+	snapshots, err := s.promotion.SnapshotMainPaths(ctx, path, comparison.MainHead, selected)
 	if err != nil {
 		return PromotionResult{}, mapRepositoryError(err)
 	}
-	if err := s.repo.Switch(ctx, path, CanonBranchName); err != nil {
-		recoveryErr := s.repo.Switch(ctx, path, BranchRef(status.ActiveBranch))
-		if rebuildErr := s.index.Rebuild(ctx, path); rebuildErr != nil {
+	if err := s.experiments.Switch(ctx, path, CanonBranchName); err != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		recoveryErr := s.switchByStatus(cleanupCtx, path, status)
+		if rebuildErr := s.index.Rebuild(cleanupCtx, path); rebuildErr != nil {
 			recoveryErr = errors.Join(recoveryErr, rebuildErr)
 		}
 		return PromotionResult{}, JoinErrors(mapRepositoryError(err), recoveryErr)
 	}
-	if err := s.repo.ApplyPaths(ctx, path, comparison.ExperimentHead, comparison.Files, selected); err != nil {
+	if err := s.promotion.ApplyPaths(ctx, path, comparison.ExperimentHead, comparison.Files, selected); err != nil {
 		rollbackErr := s.rollbackPromotion(ctx, path, snapshots, selected)
 		return PromotionResult{}, JoinErrors(mapRepositoryError(err), rollbackErr)
 	}
@@ -87,11 +89,11 @@ func promoteSelectedFiles(ctx context.Context, s *Service, request PromotionRequ
 		rollbackErr := s.rollbackPromotion(ctx, path, snapshots, selected)
 		return PromotionResult{}, JoinErrors(fmt.Errorf("index rebuild failed: %w", err), rollbackErr)
 	}
-	if err := s.repo.StagePaths(ctx, path, selected); err != nil {
+	if err := s.promotion.StagePaths(ctx, path, selected); err != nil {
 		rollbackErr := s.rollbackPromotion(ctx, path, snapshots, selected)
 		return PromotionResult{}, JoinErrors(mapRepositoryError(err), rollbackErr)
 	}
-	newHead, err := s.repo.CommitPromotion(ctx, path, PromotionCommit{
+	newHead, err := s.promotion.CommitPromotion(ctx, path, PromotionCommit{
 		ExperimentID:     comparison.ExperimentID,
 		SourceCommit:     comparison.ExperimentHead,
 		BaseCommit:       comparison.BaseHead,
@@ -102,20 +104,15 @@ func promoteSelectedFiles(ctx context.Context, s *Service, request PromotionRequ
 		rollbackErr := s.rollbackPromotion(ctx, path, snapshots, selected)
 		return PromotionResult{}, JoinErrors(mapRepositoryError(err), rollbackErr)
 	}
-	finalStatus, err := s.repo.Status(ctx, path)
-	if err != nil {
-		return PromotionResult{}, JoinErrors(errors.New("promotion verification failed"), mapRepositoryError(err))
-	}
-	if finalStatus.ActiveBranch != CanonBranchName || finalStatus.IsDetached || !finalStatus.IsCanon || !finalStatus.IsClean || finalStatus.MainHead != newHead {
-		return PromotionResult{}, errors.New("promotion verification failed")
-	}
 	return PromotionResult{MainHead: newHead, PromotedPaths: selected, ExperimentID: comparison.ExperimentID}, nil
 }
 
 func (s *Service) rollbackPromotion(ctx context.Context, path string, snapshots []PathSnapshot, selected []ProjectPath) error {
-	restoreErr := s.repo.RestoreSnapshots(ctx, path, snapshots)
-	unstageErr := s.repo.UnstagePaths(ctx, path, selected)
-	indexErr := s.index.Rebuild(ctx, path)
+	cleanupCtx, cancel := cleanupContext(ctx)
+	defer cancel()
+	restoreErr := s.promotion.RestoreSnapshots(cleanupCtx, path, snapshots)
+	unstageErr := s.promotion.UnstagePaths(cleanupCtx, path, selected)
+	indexErr := s.index.Rebuild(cleanupCtx, path)
 	return errors.Join(restoreErr, unstageErr, indexErr)
 }
 

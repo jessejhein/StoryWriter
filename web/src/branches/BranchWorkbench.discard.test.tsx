@@ -40,6 +40,8 @@ const project: Project = {
 const mainHead = `sha256:${'a'.repeat(64)}`
 const experimentHead = `sha256:${'b'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
+const inactiveExperimentID = 'brn_0123456789abcdef0124'
+const inactiveExperimentHead = `sha256:${'e'.repeat(64)}`
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -53,12 +55,20 @@ beforeEach(() => {
     worktree_clean: true,
   })
   vi.mocked(api.listExperiments).mockResolvedValue({
-    experiments: [{
-      experiment_id: experimentID,
-      branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
-      head: experimentHead,
-      display_name: 'obi-wan-lives',
-    }],
+    experiments: [
+      {
+        experiment_id: experimentID,
+        branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+        head: experimentHead,
+        display_name: 'obi-wan-lives',
+      },
+      {
+        experiment_id: inactiveExperimentID,
+        branch_name: 'branch/yoda-lives-0123456789abcdef0124',
+        head: inactiveExperimentHead,
+        display_name: 'yoda-lives',
+      },
+    ],
   })
   vi.mocked(api.getBranchComparison).mockResolvedValue({
     experiment_id: experimentID,
@@ -128,4 +138,44 @@ test('disables pending controls while discard is in flight', async () => {
 
   resolveDiscard!({ main_head: mainHead })
   await waitFor(() => expect(screen.getByRole('button', { name: 'Discard experiment' })).not.toBeDisabled())
+})
+
+// Test: discarding a reviewed inactive experiment uses the selected experiment
+// head and performs no branch switch.
+// Requirements: M8-R17, M8-R18.
+test('discards an inactive reviewed experiment without switching branches', async () => {
+  vi.mocked(api.discardExperiment).mockResolvedValue({ main_head: mainHead })
+  vi.mocked(api.getBranchComparison)
+    .mockResolvedValueOnce({
+      experiment_id: experimentID,
+      branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+      main_head: mainHead,
+      experiment_head: experimentHead,
+      base_head: `sha256:${'d'.repeat(64)}`,
+      fingerprint: `sha256:${'c'.repeat(64)}`,
+      files: [],
+    })
+    .mockResolvedValueOnce({
+      experiment_id: inactiveExperimentID,
+      branch_name: 'branch/yoda-lives-0123456789abcdef0124',
+      main_head: mainHead,
+      experiment_head: inactiveExperimentHead,
+      base_head: `sha256:${'d'.repeat(64)}`,
+      fingerprint: `sha256:${'f'.repeat(64)}`,
+      files: [],
+    })
+
+  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
+  await waitFor(() => expect(screen.getByText('yoda-lives')).toBeInTheDocument())
+
+  fireEvent.click(screen.getByRole('button', { name: 'yoda-lives' }))
+  await waitFor(() => expect(api.getBranchComparison).toHaveBeenLastCalledWith(inactiveExperimentID))
+  fireEvent.click(screen.getByRole('button', { name: 'Discard experiment' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard experiment?' })).toBeInTheDocument())
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Discard experiment?' })).getByRole('button', { name: 'Discard experiment' }))
+
+  await waitFor(() => expect(api.discardExperiment).toHaveBeenCalledWith(inactiveExperimentID, {
+    expected_experiment_head: inactiveExperimentHead,
+  }))
+  expect(api.switchBranch).not.toHaveBeenCalled()
 })

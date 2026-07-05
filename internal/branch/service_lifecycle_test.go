@@ -46,6 +46,9 @@ func (f *fakeRepo) Switch(_ context.Context, _ string, ref branch.BranchRef) err
 	}
 	return nil
 }
+func (f *fakeRepo) SwitchExperiment(ctx context.Context, path string, ref branch.ExperimentRef) error {
+	return f.Switch(ctx, path, ref.BranchName)
+}
 func (f *fakeRepo) DeleteExperiment(_ context.Context, _ string, ref branch.ExperimentRef, _ branch.CommitID) error {
 	filtered := f.experiments[:0]
 	for _, experiment := range f.experiments {
@@ -122,6 +125,50 @@ func (f *fakeIndex) Rebuild(context.Context, string) error {
 	return nil
 }
 
+type cancelAwareIndex struct{ rebuilds int }
+
+func (i *cancelAwareIndex) Rebuild(ctx context.Context, _ string) error {
+	i.rebuilds++
+	if i.rebuilds == 1 {
+		return context.Canceled
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+type cancelAwareRepo struct {
+	*fakeRepo
+	cancel func()
+}
+
+func (r *cancelAwareRepo) CreateAndSwitch(ctx context.Context, path string, ref branch.ExperimentRef, start branch.CommitID) error {
+	if err := r.fakeRepo.CreateAndSwitch(ctx, path, ref, start); err != nil {
+		return err
+	}
+	r.cancel()
+	return nil
+}
+
+func (r *cancelAwareRepo) Switch(ctx context.Context, path string, ref branch.BranchRef) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.fakeRepo.Switch(ctx, path, ref)
+}
+
+func (r *cancelAwareRepo) SwitchExperiment(ctx context.Context, path string, ref branch.ExperimentRef) error {
+	return r.Switch(ctx, path, ref.BranchName)
+}
+
+func (r *cancelAwareRepo) DeleteExperiment(ctx context.Context, path string, ref branch.ExperimentRef, head branch.CommitID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.fakeRepo.DeleteExperiment(ctx, path, ref, head)
+}
+
 type staticIDs struct{ id branch.ExperimentID }
 
 func (s *staticIDs) NextExperimentID() (branch.ExperimentID, error) { return s.id, nil }
@@ -166,6 +213,32 @@ func TestCreateExperimentRecoversOnIndexFailure(t *testing.T) {
 	}
 	if index.rebuilds != 2 {
 		t.Fatalf("index rebuilds = %d, want failed attempt plus recovery", index.rebuilds)
+	}
+}
+
+// Test: cancellation after checkout still restores the prior branch, removes
+// the new ref, and rebuilds the index using cleanup-only contexts.
+// Requirements: M8-R04.
+func TestCreateExperimentRecoversAfterRequestCancellation(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	repo := &cancelAwareRepo{
+		fakeRepo: &fakeRepo{
+			status:   branch.RepositoryStatus{ActiveBranch: "main", IsCanon: true, IsClean: true, MainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			mainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		cancel: cancel,
+	}
+	index := &cancelAwareIndex{}
+	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	if _, err := service.CreateExperiment(ctx, "Test Exp"); err == nil {
+		t.Fatal("CreateExperiment() = nil, want cancellation")
+	}
+	if repo.status.ActiveBranch != "main" || len(repo.experiments) != 0 {
+		t.Fatalf("status=%#v experiments=%#v", repo.status, repo.experiments)
+	}
+	if index.rebuilds != 2 {
+		t.Fatalf("index rebuilds = %d, want failed attempt plus cleanup rebuild", index.rebuilds)
 	}
 }
 

@@ -69,6 +69,10 @@ func (r *GitRepository) Switch(ctx context.Context, repoPath string, ref BranchR
 	return r.Store.Switch(ctx, repoPath, string(ref))
 }
 
+func (r *GitRepository) SwitchExperiment(ctx context.Context, repoPath string, ref ExperimentRef) error {
+	return r.Store.SwitchExperiment(ctx, repoPath, string(ref.BranchName), string(ref.Head))
+}
+
 func (r *GitRepository) DeleteExperiment(ctx context.Context, repoPath string, ref ExperimentRef, expected CommitID) error {
 	return r.Store.DeleteExperiment(ctx, repoPath, string(ref.BranchName), string(expected))
 }
@@ -239,26 +243,47 @@ func (r *GitRepository) UnifiedDiff(ctx context.Context, repoPath string, mainHe
 	return text, nil
 }
 
-// Repository is the Git boundary consumed by branch orchestration.
-type Repository interface {
+type StatusRepository interface {
 	Status(context.Context, string) (RepositoryStatus, error)
+}
+
+type ExperimentRepository interface {
 	ListExperiments(context.Context, string) ([]ExperimentRef, error)
 	CreateAndSwitch(context.Context, string, ExperimentRef, CommitID) error
 	Switch(context.Context, string, BranchRef) error
+	SwitchExperiment(context.Context, string, ExperimentRef) error
 	DeleteExperiment(context.Context, string, ExperimentRef, CommitID) error
+	ResolveCommit(context.Context, string, string) (CommitID, error)
+}
+
+type ComparisonRepository interface {
 	CompareTrees(context.Context, string, CommitID, CommitID) ([]ChangedFile, error)
 	ReadTextBlob(context.Context, string, CommitID, ProjectPath) (TextSide, error)
 	MergeBase(context.Context, string, CommitID, CommitID) (CommitID, error)
 	PathsChanged(context.Context, string, CommitID, CommitID) ([]ProjectPath, error)
+}
+
+type AnalysisRepository interface {
 	UnifiedDiff(context.Context, string, CommitID, CommitID, []ProjectPath, int) (string, error)
+}
+
+type PromotionRepository interface {
 	SnapshotMainPaths(context.Context, string, CommitID, []ProjectPath) ([]PathSnapshot, error)
 	ApplyPaths(context.Context, string, CommitID, []ChangedFile, []ProjectPath) error
 	StagePaths(context.Context, string, []ProjectPath) error
 	UnstagePaths(context.Context, string, []ProjectPath) error
 	RestoreSnapshots(context.Context, string, []PathSnapshot) error
 	CommitPromotion(context.Context, string, PromotionCommit) (CommitID, error)
-	ResolveCommit(context.Context, string, string) (CommitID, error)
 	IsClean(context.Context, string) (bool, error)
+}
+
+// Repository is the concrete Git boundary accepted by NewService.
+type Repository interface {
+	StatusRepository
+	ExperimentRepository
+	ComparisonRepository
+	AnalysisRepository
+	PromotionRepository
 }
 
 // Index rebuilds the disposable active-tree index.
@@ -294,6 +319,8 @@ func mapRepositoryError(err error) error {
 		return errors.Join(ErrDirtyWorktree, err)
 	case errors.Is(err, gitstore.ErrStaleExperimentHead):
 		return errors.Join(ErrStaleRef, err)
+	case errors.Is(err, gitstore.ErrPathListTooLarge):
+		return errors.Join(ErrTooManyChangedPaths, err)
 	case errors.Is(err, gitstore.ErrBlobTooLarge):
 		return errors.Join(ErrFileTooLarge, err)
 	case errors.Is(err, gitstore.ErrDiffTooLarge):

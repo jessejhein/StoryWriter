@@ -15,6 +15,7 @@ import type {
 
 export type BranchWorkbenchState = {
   projectID: string
+  requestedExperimentID: string | null
   comparison: ComparisonResponse | null
   comparisonLoading: boolean
   comparisonError: string | null
@@ -32,6 +33,7 @@ export type BranchWorkbenchState = {
 
 export const initialBranchWorkbenchState = (projectID: string): BranchWorkbenchState => ({
   projectID,
+  requestedExperimentID: null,
   comparison: null,
   comparisonLoading: false,
   comparisonError: null,
@@ -80,7 +82,7 @@ export function prunePromotionSelection(selectedPaths: string[], changedFiles: C
   const allowed = new Set(changedFiles.map((file) => file.path))
   return [...selectedPaths]
     .filter((path) => allowed.has(path))
-    .sort((left, right) => left.localeCompare(right))
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
 }
 
 export function togglePromotionPath(
@@ -122,17 +124,36 @@ export function buildCurrentContext(state: BranchWorkbenchState): BranchContextK
   })
 }
 
+export function beginComparisonRequest(
+  state: BranchWorkbenchState,
+  experimentID: string,
+  requestVersion: number,
+): BranchWorkbenchState {
+  return {
+    ...state,
+    requestedExperimentID: experimentID,
+    comparison: null,
+    comparisonLoading: true,
+    comparisonError: null,
+    fileComparison: null,
+    fileLoading: false,
+    fileError: null,
+    selectedPath: null,
+    selectedPaths: [],
+    ramification: null,
+    ramificationLoading: false,
+    ramificationError: null,
+    requestVersion,
+  }
+}
+
 export function applyComparisonFailure(
   state: BranchWorkbenchState,
   experimentID: string,
   message: string,
   requestVersion: number,
 ): BranchWorkbenchState {
-  if (state.requestVersion !== requestVersion) {
-    return state
-  }
-  const currentExperimentID = state.comparison?.experiment_id ?? experimentID
-  if (currentExperimentID !== experimentID) {
+  if (state.requestVersion !== requestVersion || state.requestedExperimentID !== experimentID) {
     return state
   }
   return {
@@ -191,6 +212,7 @@ export function applyComparisonSuccess(
   const firstPath = comparison.files[0]?.path ?? null
   return {
     ...state,
+    requestedExperimentID: comparison.experiment_id,
     comparison,
     comparisonLoading: false,
     comparisonError: null,

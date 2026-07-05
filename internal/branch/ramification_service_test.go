@@ -19,11 +19,15 @@ import (
 type captureAnalyzer struct {
 	calls  int
 	packet branch.AnalysisPacket
+	err    error
 }
 
 func (a *captureAnalyzer) Analyze(_ context.Context, packet branch.AnalysisPacket) (branch.AnalysisResult, error) {
 	a.calls++
 	a.packet = packet
+	if a.err != nil {
+		return branch.AnalysisResult{}, a.err
+	}
 	return branch.AnalysisResult{Summary: "ok", Findings: []branch.RamificationFinding{}}, nil
 }
 
@@ -226,5 +230,38 @@ func TestAnalyzeRamificationsRejectsInvalidProfileAndModelBeforeProvider(t *test
 	})
 	if !errors.Is(err, branch.ErrInvalidAnalysis) || analyzer.calls != 0 || repo.diffBudget != 0 {
 		t.Fatalf("error=%v calls=%d diffBudget=%d", err, analyzer.calls, repo.diffBudget)
+	}
+}
+
+// Test: analyzer cancellation and deadline expiry map to provider-unavailable
+// instead of leaking as internal failures.
+// Requirements: M8-R09.
+func TestAnalyzeRamificationsMapsAnalyzerCancellationToProviderUnavailable(t *testing.T) {
+	t.Parallel()
+	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, analyzerErr := range []error{context.Canceled, context.DeadlineExceeded} {
+		repo := &analysisRepo{
+			fakeRepo: &fakeRepo{
+				experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+				mainHead:     mainHead,
+				compareFiles: files,
+			},
+			diffText: "--- a/outline.yaml\n+++ b/outline.yaml\n",
+		}
+		analyzer := &captureAnalyzer{err: analyzerErr}
+		service := branch.NewService(repo, &fakeIndex{}, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, analyzer, &staticIDs{id: "brn_0123456789abcdef0123"})
+		_, err = service.AnalyzeRamifications(context.Background(), "brn_0123456789abcdef0123", branch.AnalysisRequest{
+			Goal: "Review", ProfileID: "local_test", Model: "model",
+			ExpectedMainHead: mainHead, ExpectedExperimentHead: experimentHead, ExpectedFingerprint: fingerprint,
+		})
+		if !errors.Is(err, branch.ErrProviderUnavailable) {
+			t.Fatalf("analyzerErr=%v err=%v", analyzerErr, err)
+		}
 	}
 }

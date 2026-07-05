@@ -271,7 +271,8 @@ Verification: full `make check`, `go test -race ./...`, 78 frontend tests.
 
 ### Milestone 8
 
-Evidence: `.plans/milestone_8_test_evidence.md` (July 2, 2026).
+Evidence is the current automated suite below. Milestone 8 coverage is claimed
+only where the named tests execute in the repository baseline.
 
 Backend:
 
@@ -285,7 +286,9 @@ Backend:
   `TestComputeFingerprintSensitiveToInputs`
 - `internal/branch/file_comparison_test.go`: `TestIndexChangedFilesRejectsUnknownPath`
 - `internal/branch/service_lifecycle_test.go`: `TestCreateExperimentRebuildsIndex`,
-  `TestCreateExperimentRecoversOnIndexFailure`, `TestCreateExperimentSerializesUnderCoordinator`
+  `TestCreateExperimentRecoversOnIndexFailure`,
+  `TestCreateExperimentRecoversAfterRequestCancellation`,
+  `TestCreateExperimentSerializesUnderCoordinator`
 - `internal/branch/promotion_policy_test.go`: `TestPromotionConflictsDetectsMainDivergence`,
   `TestValidatePromotionPreflightRejectsStaleRefs`
 - `internal/branch/promotion_service_test.go`:
@@ -296,7 +299,8 @@ Backend:
 - `internal/branch/ramification_service_test.go`:
   `TestAnalyzeRamificationsRejectsStaleFingerprint`,
   `TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket`,
-  `TestAnalyzeRamificationsRejectsFileBudgetBeforeReadingBlobs`
+  `TestAnalyzeRamificationsRejectsFileBudgetBeforeReadingBlobs`,
+  `TestAnalyzeRamificationsMapsAnalyzerCancellationToProviderUnavailable`
 - `internal/branch/promotion_service_test.go`:
   `TestPromoteSelectedFilesOrdersTransactionAndReturnsResult`,
   `TestPromoteSelectedFilesRollsBackEveryFailureBoundary`,
@@ -306,6 +310,7 @@ Backend:
 - `internal/api/branch_negative_contract_test.go`:
   `TestBranchRouteMapsEveryContractErrorClass`,
   `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
   `TestBranchRoutesRejectOversizedBodies`,
   `TestEveryBranchRouteReturnsMethodSpecificAllow`
 - `internal/gitstore/blob_test.go` and `tree_comparison_test.go`:
@@ -329,12 +334,14 @@ Backend:
   `TestValidateProjectRejectsMalformedOutline`
 - `internal/gitstore/branch_status_test.go`: `TestStatusReportsActiveBranchAndCleanliness`
 - `internal/gitstore/branch_switch_test.go`: `TestCreateAndSwitchFromMain`,
-  `TestCreateAndSwitchRejectsDirtyWorktree`
+  `TestCreateAndSwitchRejectsDirtyWorktree`,
+  `TestSwitchExperimentRejectsStaleExpectedHead`
 - `internal/gitstore/tree_comparison_test.go`:
   `TestCompareTreesReportsAddedModifiedDeleted`
 - `internal/gitstore/blob_test.go`: `TestReadTextBlobWithoutCheckout`
 - `internal/gitstore/promotion_message_test.go`: `TestFormatPromotionMessageExactBytes`
-- `internal/gitstore/promotion_test.go`: `TestApplyPathsAndCommitPromotion`
+- `internal/gitstore/promotion_test.go`: `TestApplyPathsAndCommitPromotion`,
+  `TestCommitPromotionRejectsUnexpectedStagedPaths`
 - `internal/gitstore/branch_delete_test.go`: `TestDeleteExperimentLeavesMainUntouched`
 - `internal/story/milestone8_branch_characterization_test.go`:
   `TestMilestone8SceneSaveCommitsToCheckedOutExperimentBranch`,
@@ -361,24 +368,25 @@ Frontend:
 
 - `web/src/api.branches.test.ts`: `uses the documented branch routes and JSON bodies`
 - `web/src/branches/branchState.test.ts`: stale keys, selection pruning, branch-change
-  invalidation, dirty guard, no browser persistence
-- `web/src/branches/lineDiff.test.ts`: aligned rows, modified pairing, complexity fallback
+  invalidation, requested-comparison tracking, dirty guard, no browser persistence
+- `web/src/branches/lineDiff.test.ts`: aligned rows, final-newline markers, modified pairing,
+  complexity fallback
 - `web/src/branches/SideBySideDiff.test.tsx`: labels, accessible indicators, read-only panes
 - `web/src/branches/BranchWorkbench.lifecycle.test.tsx`: create/switch badges, dirty guard,
   state invalidation
-- `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, no analysis on
-  compare, stale file responses ignored
+- `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, inactive review
+  without checkout, no analysis on compare, stale file responses ignored
 - `web/src/branches/BranchWorkbench.ramification.test.tsx`: explicit Analyze only,
   reviewed fingerprint request, findings cleared on fingerprint change
 - `web/src/branches/RamificationResults.test.tsx`: grouped findings, advisory notice
 - `web/src/branches/BranchWorkbench.promotion.test.tsx`: whole-file summary, confirmation,
   conflict paths, success leaves experiment listed
-- `web/src/branches/BranchWorkbench.discard.test.tsx`: confirmation, dirty guard, stale
-  conflicts, pending disabled state
+- `web/src/branches/BranchWorkbench.discard.test.tsx`: active and inactive discard,
+  dirty guard, stale conflicts, pending disabled state
 
 Verification: full `make check` (including `go test -race ./...`,
-`git diff --check`, and tracked-artifact leak detection), 48 frontend test
-files, 115 frontend tests.
+`git diff --check`, and tracked-artifact leak detection), 49 frontend test
+files, 125 frontend tests.
 
 ### Milestone 9
 

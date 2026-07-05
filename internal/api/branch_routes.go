@@ -99,6 +99,10 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 		writeJSON(writer, http.StatusOK, map[string]any{"experiments": publicExperiments(experiments)})
 	})
 	mux.HandleFunc("POST /api/branches", func(writer http.ResponseWriter, request *http.Request) {
+		if err := validateExactQuery(request); err != nil {
+			writeInvalidBranchRequest(writer)
+			return
+		}
 		var body struct {
 			Name string `json:"name"`
 		}
@@ -114,6 +118,10 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 		writeJSON(writer, http.StatusCreated, publicBranchStatus(status))
 	})
 	mux.HandleFunc("POST /api/branches/switch", func(writer http.ResponseWriter, request *http.Request) {
+		if err := validateExactQuery(request); err != nil {
+			writeInvalidBranchRequest(writer)
+			return
+		}
 		var body struct {
 			Target       string  `json:"target"`
 			ExpectedHead *string `json:"expected_head"`
@@ -184,6 +192,10 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchError(writer, err)
 			return
 		}
+		if err := validateExactQuery(request); err != nil {
+			writeInvalidBranchRequest(writer)
+			return
+		}
 		var body struct {
 			Goal                   string `json:"goal"`
 			ProfileID              string `json:"profile_id"`
@@ -243,6 +255,10 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchError(writer, err)
 			return
 		}
+		if err := validateExactQuery(request); err != nil {
+			writeInvalidBranchRequest(writer)
+			return
+		}
 		var body struct {
 			Paths                  []string `json:"paths"`
 			ExpectedMainHead       string   `json:"expected_main_head"`
@@ -295,6 +311,10 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchError(writer, err)
 			return
 		}
+		if err := validateExactQuery(request); err != nil {
+			writeInvalidBranchRequest(writer)
+			return
+		}
 		var body struct {
 			ExpectedExperimentHead string `json:"expected_experiment_head"`
 		}
@@ -345,7 +365,7 @@ func statusForBranchError(err error) int {
 	switch {
 	case errors.Is(err, branch.ErrNoActiveProject), errors.Is(err, branch.ErrDirtyWorktree), errors.Is(err, branch.ErrStaleRef), errors.Is(err, branch.ErrStaleFingerprint), errors.Is(err, branch.ErrPromotionConflict), errors.Is(err, branch.ErrDetachedHEAD), errors.Is(err, branch.ErrUnmanagedBranch):
 		return http.StatusConflict
-	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget):
+	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
 		return http.StatusBadRequest
 	case errors.Is(err, branch.ErrExperimentNotFound), errors.Is(err, branch.ErrPathNotInComparison):
 		return http.StatusNotFound
@@ -368,7 +388,7 @@ func sanitizeBranchError(err error) error {
 		return err
 	case errors.Is(err, branch.ErrExperimentNotFound), errors.Is(err, branch.ErrPathNotInComparison):
 		return errors.New("branch resource not found")
-	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget):
+	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
 		return errors.New("invalid branch request")
 	case errors.Is(err, branch.ErrProviderRejected), errors.Is(err, branch.ErrInvalidAnalysisOutput):
 		return errors.New("analysis provider returned an invalid response")

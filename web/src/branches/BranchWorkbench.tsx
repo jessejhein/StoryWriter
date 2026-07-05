@@ -31,6 +31,7 @@ import {
   applyFileComparisonFailure,
   applyFileComparisonSuccess,
   applyRamificationSuccess,
+  beginComparisonRequest,
   buildBranchContextKey,
   canProceedWithBranchChange,
   initialBranchWorkbenchState,
@@ -82,11 +83,11 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
     setStatus(statusResponse)
     setExperiments(experimentResponse.experiments)
     setSelectedExperimentID((current) => {
-      if (statusResponse.active_experiment_id) {
-        return statusResponse.active_experiment_id
-      }
       if (current && experimentResponse.experiments.some((experiment) => experiment.experiment_id === current)) {
         return current
+      }
+      if (statusResponse.active_experiment_id) {
+        return statusResponse.active_experiment_id
       }
       return experimentResponse.experiments[0]?.experiment_id ?? null
     })
@@ -124,7 +125,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
   const loadComparison = useCallback(async (experimentID: string, requestVersion: number) => {
     setBusy('comparison')
-    setWorkbench((state) => ({ ...state, comparisonLoading: true, comparisonError: null }))
+    setWorkbench((state) => beginComparisonRequest(state, experimentID, requestVersion))
     try {
       const comparison = await getBranchComparison(experimentID)
       setWorkbench((state) => applyComparisonSuccess(
@@ -160,7 +161,6 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
     }
     requestVersionRef.current += 1
     const requestVersion = requestVersionRef.current
-    setWorkbench((state) => ({ ...state, requestVersion }))
     void loadComparison(selectedExperimentID, requestVersion)
   }, [selectedExperimentID, loadComparison])
 
@@ -222,13 +222,13 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
     setError('')
   }
 
-  async function afterBranchMutation(message: string) {
-    const experimentID = selectedExperimentID
+  async function afterBranchMutation(message: string, nextExperimentID: string | null) {
     resetBranchSensitiveState()
     onBranchChanged()
     await refreshStatus()
-    if (experimentID) {
-      void loadComparison(experimentID, requestVersionRef.current)
+    if (nextExperimentID) {
+      setSelectedExperimentID(nextExperimentID)
+      void loadComparison(nextExperimentID, requestVersionRef.current)
     }
     setStatusMessage(message)
     liveRegionRef.current?.focus()
@@ -263,7 +263,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           ? await switchBranch({ target: 'main' })
           : await switchBranch({ target: action.target, expected_head: action.expectedHead ?? '' })
         setStatus(nextStatus)
-        await afterBranchMutation(`Switched to ${nextStatus.active_branch}.`)
+        await afterBranchMutation(`Switched to ${nextStatus.active_branch}.`, nextStatus.active_experiment_id)
       } else if (action.kind === 'promote') {
         await runPromotion()
       } else if (action.kind === 'discard') {
@@ -292,7 +292,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
       setExperimentName('')
       setStatus(nextStatus)
       setSelectedExperimentID(nextStatus.active_experiment_id)
-      await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`)
+      await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`, nextStatus.active_experiment_id)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Failed to create experiment.')
     } finally {
@@ -313,7 +313,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
         expected_experiment_head: workbench.comparison.experiment_head,
         comparison_fingerprint: workbench.comparison.fingerprint,
       })
-      await afterBranchMutation('Promotion complete. Main is now active.')
+      await afterBranchMutation('Promotion complete. Main is now active.', selectedExperimentID)
       setPromotionMessage(`Promoted ${response.promoted_paths.length} whole file${response.promoted_paths.length === 1 ? '' : 's'} to main.`)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Promotion failed.')
@@ -323,15 +323,19 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
   }
 
   async function runDiscard() {
-    if (!selectedExperimentID || !status?.experiment_head) {
+    if (!selectedExperimentID) {
+      return
+    }
+    const selectedExperiment = experiments.find((experiment) => experiment.experiment_id === selectedExperimentID)
+    if (!selectedExperiment) {
       return
     }
     setBusy('discard')
     setError('')
     try {
-      await discardExperiment(selectedExperimentID, { expected_experiment_head: status.experiment_head })
+      await discardExperiment(selectedExperimentID, { expected_experiment_head: selectedExperiment.head })
       setSelectedExperimentID(null)
-      await afterBranchMutation('Experiment discarded.')
+      await afterBranchMutation('Experiment discarded.', null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Discard failed.')
     } finally {
@@ -441,30 +445,42 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           {experiments.length === 0 ? (
             <p className="branch-message">No experiments yet.</p>
           ) : (
-            <ul className="branch-experiment-list">
-              {experiments.map((experiment) => (
-                <li key={experiment.experiment_id}>
-                  <button
-                    className={selectedExperimentID === experiment.experiment_id ? '' : 'secondary'}
-                    disabled={pending}
-                    onClick={() => {
-                      if (experiment.experiment_id === status?.active_experiment_id) {
-                        setSelectedExperimentID(experiment.experiment_id)
-                        return
-                      }
-                      requestBranchChange({
-                        kind: 'switch',
-                        target: experiment.experiment_id,
-                        expectedHead: experiment.head,
-                      })
-                    }}
-                    type="button"
-                  >
-                    {experiment.display_name}
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="branch-experiment-list">
+                {experiments.map((experiment) => (
+                  <li key={experiment.experiment_id}>
+                    <button
+                      className={selectedExperimentID === experiment.experiment_id ? '' : 'secondary'}
+                      disabled={pending}
+                      onClick={() => setSelectedExperimentID(experiment.experiment_id)}
+                      type="button"
+                    >
+                      {experiment.display_name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              {selectedExperimentID && status?.active_experiment_id !== selectedExperimentID && (
+                <button
+                  className="secondary"
+                  disabled={pending}
+                  onClick={() => {
+                    const selectedExperiment = experiments.find((experiment) => experiment.experiment_id === selectedExperimentID)
+                    if (!selectedExperiment) {
+                      return
+                    }
+                    requestBranchChange({
+                      kind: 'switch',
+                      target: selectedExperiment.experiment_id,
+                      expectedHead: selectedExperiment.head,
+                    })
+                  }}
+                  type="button"
+                >
+                  Switch to reviewed experiment
+                </button>
+              )}
+            </>
           )}
         </section>
 
@@ -565,7 +581,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
             <div className="branch-danger-actions">
               <button
-                disabled={pending || appDirty || !status?.worktree_clean || status.active_experiment_id !== selectedExperimentID}
+                disabled={pending || appDirty || !status?.worktree_clean}
                 onClick={() => setPendingAction({ kind: 'discard' })}
                 type="button"
               >
@@ -585,14 +601,14 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           if (pendingAction?.kind === 'switch' && pendingAction.target === 'create') {
             setPendingAction(null)
             void (async () => {
-              setBusy('create')
-              try {
-                const nextStatus = await createExperiment(experimentName.trim())
-                setExperimentName('')
-                setStatus(nextStatus)
-                setSelectedExperimentID(nextStatus.active_experiment_id)
-                await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`)
-              } catch (requestError) {
+                setBusy('create')
+                try {
+                  const nextStatus = await createExperiment(experimentName.trim())
+                  setExperimentName('')
+                  setStatus(nextStatus)
+                  setSelectedExperimentID(nextStatus.active_experiment_id)
+                  await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`, nextStatus.active_experiment_id)
+                } catch (requestError) {
                 setError(requestError instanceof Error ? requestError.message : 'Failed to create experiment.')
               } finally {
                 setBusy(null)

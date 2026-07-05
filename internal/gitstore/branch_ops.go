@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // BranchStatus reports active branch, cleanliness, and heads.
@@ -91,7 +92,7 @@ func (s *Store) activeBranch(ctx context.Context, repoPath string) (string, bool
 
 // ResolveCommit resolves one validated ref to a full lowercase commit id.
 func (s *Store) ResolveCommit(ctx context.Context, repoPath, ref string) (string, error) {
-	if ref != canonBranch {
+	if ref != canonBranch && ref != "HEAD" {
 		if err := validateBranchRef(ref); err != nil {
 			if err := validateCommitID(ref); err != nil {
 				return "", err
@@ -165,8 +166,10 @@ func (s *Store) CreateAndSwitch(ctx context.Context, repoPath, ref, startCommit 
 		return fmt.Errorf("create branch %q: %w", ref, err)
 	}
 	if _, err := s.run(ctx, "-C", repoPath, "checkout", ref); err != nil {
-		_, switchErr := s.run(ctx, "-C", repoPath, "checkout", previous)
-		_, deleteErr := s.run(ctx, "-C", repoPath, "branch", "-D", ref)
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		_, switchErr := s.run(cleanupCtx, "-C", repoPath, "checkout", previous)
+		_, deleteErr := s.run(cleanupCtx, "-C", repoPath, "branch", "-D", ref)
 		return fmt.Errorf("checkout branch %q: %w", ref, errors.Join(err, switchErr, deleteErr))
 	}
 	return nil
@@ -190,6 +193,58 @@ func (s *Store) Switch(ctx context.Context, repoPath, ref string) error {
 	return nil
 }
 
+// SwitchExperiment checks out one managed experiment exactly at the expected head.
+func (s *Store) SwitchExperiment(ctx context.Context, repoPath, ref, expectedHead string) error {
+	if err := validateBranchRef(ref); err != nil {
+		return err
+	}
+	if err := validateCommitID(expectedHead); err != nil {
+		return err
+	}
+	clean, err := s.IsClean(ctx, repoPath)
+	if err != nil {
+		return err
+	}
+	if !clean {
+		return ErrDirtyWorktree
+	}
+	current, detached, err := s.activeBranch(ctx, repoPath)
+	if err != nil {
+		return err
+	}
+	if detached {
+		return errors.New("detached HEAD is not supported")
+	}
+	before, err := s.ResolveCommit(ctx, repoPath, ref)
+	if err != nil {
+		return fmt.Errorf("resolve experiment head: %w", err)
+	}
+	if before != expectedHead {
+		return ErrStaleExperimentHead
+	}
+	if _, err := s.run(ctx, "-C", repoPath, "checkout", ref); err != nil {
+		return fmt.Errorf("checkout branch %q: %w", ref, err)
+	}
+	activeHead, err := s.ResolveCommit(ctx, repoPath, "HEAD")
+	if err != nil {
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		_, switchErr := s.run(cleanupCtx, "-C", repoPath, "checkout", current)
+		return fmt.Errorf("verify checkout head %q: %w", ref, errors.Join(err, switchErr))
+	}
+	after, err := s.ResolveCommit(ctx, repoPath, ref)
+	if err != nil || activeHead != expectedHead || after != expectedHead {
+		if err == nil {
+			err = ErrStaleExperimentHead
+		}
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		_, switchErr := s.run(cleanupCtx, "-C", repoPath, "checkout", current)
+		return errors.Join(ErrStaleExperimentHead, errors.Join(err, switchErr))
+	}
+	return nil
+}
+
 // DeleteExperiment deletes one managed experiment ref at the expected head.
 func (s *Store) DeleteExperiment(ctx context.Context, repoPath, ref, expectedHead string) error {
 	if err := validateBranchRef(ref); err != nil {
@@ -198,14 +253,10 @@ func (s *Store) DeleteExperiment(ctx context.Context, repoPath, ref, expectedHea
 	if err := validateCommitID(expectedHead); err != nil {
 		return err
 	}
-	current, err := s.ResolveCommit(ctx, repoPath, ref)
-	if err != nil {
-		return fmt.Errorf("resolve experiment head: %w", err)
-	}
-	if current != expectedHead {
-		return ErrStaleExperimentHead
-	}
-	if _, err := s.run(ctx, "-C", repoPath, "branch", "-D", ref); err != nil {
+	if _, err := s.run(ctx, "-C", repoPath, "update-ref", "-d", "refs/heads/"+ref, expectedHead); err != nil {
+		if strings.Contains(err.Error(), "cannot lock ref") {
+			return errors.Join(ErrStaleExperimentHead, err)
+		}
 		return fmt.Errorf("delete branch %q: %w", ref, err)
 	}
 	return nil
@@ -223,7 +274,7 @@ func (s *Store) CompareTrees(ctx context.Context, repoPath, leftTree, rightTree 
 	if err != nil {
 		return nil, fmt.Errorf("compare trees: %w", err)
 	}
-	changes, err := parseNameStatusZ(output)
+	changes, err := parseNameStatusZ(output, maxChangedPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -277,11 +328,11 @@ func (s *Store) PathsChanged(ctx context.Context, repoPath, baseCommit, headComm
 	if err := validateCommitID(headCommit); err != nil {
 		return nil, err
 	}
-	output, err := s.run(ctx, "-C", repoPath, "diff", "--name-only", "-z", baseCommit, headCommit)
+	output, err := s.runLimitedText(ctx, maxPathListBytes, "-C", repoPath, "diff", "--no-renames", "--name-only", "-z", baseCommit, headCommit)
 	if err != nil {
 		return nil, fmt.Errorf("paths changed: %w", err)
 	}
-	return parsePathListZ(output)
+	return parsePathListZ(output, maxChangedPaths)
 }
 
 // ReadTextBlob reads one regular-file blob at commit without checkout.
@@ -435,25 +486,28 @@ func (s *Store) UnstagePaths(ctx context.Context, repoPath string, paths []strin
 
 // RestorePathSnapshots restores selected paths from captured snapshots.
 func (s *Store) RestorePathSnapshots(ctx context.Context, repoPath string, snapshots []PathSnapshot) error {
+	var restoreErr error
 	for _, snapshot := range snapshots {
 		if err := validateProjectPath(snapshot.Path); err != nil {
-			return err
+			restoreErr = errors.Join(restoreErr, err)
+			continue
 		}
 		if err := validateCommitID(snapshot.SourceCommit); err != nil {
-			return err
+			restoreErr = errors.Join(restoreErr, err)
+			continue
 		}
 		if !snapshot.Exists {
 			absolute := filepath.Join(repoPath, filepath.FromSlash(snapshot.Path))
 			if err := os.Remove(absolute); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("restore deletion %q: %w", snapshot.Path, err)
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("restore deletion %q: %w", snapshot.Path, err))
 			}
 			continue
 		}
 		if _, err := s.run(ctx, "-C", repoPath, "restore", "--source="+snapshot.SourceCommit, "--worktree", "--", snapshot.Path); err != nil {
-			return fmt.Errorf("restore %q: %w", snapshot.Path, err)
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("restore %q: %w", snapshot.Path, err))
 		}
 	}
-	return nil
+	return restoreErr
 }
 
 // CommitPromotion creates one provenance commit for selected paths.
@@ -485,6 +539,24 @@ func (s *Store) CommitPromotion(ctx context.Context, repoPath string, input Prom
 	if err := validateCommitID(treeID); err != nil {
 		return "", err
 	}
+	diffOutput, err := s.runLimitedText(ctx, maxPathListBytes, "-C", repoPath, "diff-tree", "--no-renames", "--name-status", "-r", "-z", input.ExpectedMainHead, treeID)
+	if err != nil {
+		return "", fmt.Errorf("audit promotion tree: %w", err)
+	}
+	changes, err := parseNameStatusZ(diffOutput, len(input.Paths))
+	if err != nil {
+		return "", fmt.Errorf("audit promotion tree: %w", err)
+	}
+	if err := validateExactPromotionPaths(changes, input.Paths); err != nil {
+		return "", fmt.Errorf("audit promotion tree: %w", err)
+	}
+	active, detached, err := s.activeBranch(ctx, repoPath)
+	if err != nil {
+		return "", fmt.Errorf("verify promotion head: %w", err)
+	}
+	if detached || active != canonBranch {
+		return "", errors.New("promotion did not leave main active")
+	}
 	command := []string{
 		"-C", repoPath,
 		"-c", "user.name=AI Story Workshop",
@@ -505,22 +577,10 @@ func (s *Store) CommitPromotion(ctx context.Context, repoPath string, input Prom
 	if _, err := s.run(ctx, "-C", repoPath, "update-ref", "refs/heads/main", head, input.ExpectedMainHead); err != nil {
 		return "", fmt.Errorf("publish promotion commit: %w", err)
 	}
-	if clean, err := s.IsClean(ctx, repoPath); err != nil {
-		return "", fmt.Errorf("verify promotion cleanliness: %w", err)
-	} else if !clean {
-		return "", errors.New("promotion left worktree dirty")
-	}
-	active, detached, err := s.activeBranch(ctx, repoPath)
-	if err != nil {
-		return "", fmt.Errorf("verify promotion head: %w", err)
-	}
-	if detached || active != canonBranch {
-		return "", errors.New("promotion did not leave main active")
-	}
 	return head, nil
 }
 
-func parseNameStatusZ(output string) ([]TreeChange, error) {
+func parseNameStatusZ(output string, maxCount int) ([]TreeChange, error) {
 	if strings.TrimSpace(output) == "" {
 		return []TreeChange{}, nil
 	}
@@ -561,11 +621,14 @@ func parseNameStatusZ(output string) ([]TreeChange, error) {
 			return nil, err
 		}
 		changes = append(changes, TreeChange{Path: path, Status: status})
+		if maxCount > 0 && len(changes) > maxCount {
+			return nil, ErrPathListTooLarge
+		}
 	}
 	return changes, nil
 }
 
-func parsePathListZ(output string) ([]string, error) {
+func parsePathListZ(output string, maxCount int) ([]string, error) {
 	if strings.TrimSpace(output) == "" {
 		return []string{}, nil
 	}
@@ -579,8 +642,45 @@ func parsePathListZ(output string) ([]string, error) {
 			return nil, err
 		}
 		paths = append(paths, record)
+		if maxCount > 0 && len(paths) > maxCount {
+			return nil, ErrPathListTooLarge
+		}
 	}
 	return paths, nil
+}
+
+const maxPathListBytes = 512 << 10
+const maxChangedPaths = 500
+
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+}
+
+func (s *Store) runLimitedText(ctx context.Context, maxBytes int, arguments ...string) (string, error) {
+	data, err := s.runBytesLimited(ctx, maxBytes, arguments...)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func validateExactPromotionPaths(changes []TreeChange, selected []string) error {
+	if len(changes) != len(selected) {
+		return errors.New("promotion tree touched unexpected paths")
+	}
+	sortedSelected := append([]string(nil), selected...)
+	sort.Strings(sortedSelected)
+	for index, change := range changes {
+		if sortedSelected[index] != change.Path {
+			return errors.New("promotion tree touched unexpected paths")
+		}
+		switch change.Status {
+		case 'A', 'M', 'D':
+		default:
+			return fmt.Errorf("promotion tree used unsupported status %q", string(change.Status))
+		}
+	}
+	return nil
 }
 
 func (s *Store) runBytes(ctx context.Context, arguments ...string) ([]byte, error) {

@@ -20,9 +20,10 @@ diff-check:
 	git diff --check
 
 artifact-check:
-	@tracked="$$(git ls-files | grep -E '(\.sqlite|\.db|\.db-shm|\.db-wal|\.bin|\.exe)$$|(^|/)(providers\.yaml|findings|prompts)(/|$$)' || true)"; \
-	if [ -n "$$tracked" ]; then \
-		printf '%s\n' "tracked artifact leak detected:" "$$tracked"; \
+	@files="$$( { git ls-files; git ls-files --others --exclude-standard; } | grep -vE '^(\\.gocache/|web/node_modules/|web/dist/|web/coverage/|\\.uv-cache/|\\.uv-python/)' || true)"; \
+	leaks="$$(printf '%s\n' "$$files" | grep -E '(^|/)\.git$$|(^|/)(providers\.yaml|findings|prompts)(/|$$)|(\.sqlite|\.db|\.db-shm|\.db-wal|\.bin|\.exe|\.lock)$$' || true)"; \
+	if [ -n "$$leaks" ]; then \
+		printf '%s\n' "artifact leak detected:" "$$leaks"; \
 		exit 1; \
 	fi
 

@@ -133,14 +133,14 @@ test('shows branch status badges and supports create and switch actions', async 
 test('requires confirmation before switching branches when the app draft is dirty', async () => {
   const onBranchChanged = vi.fn()
   render(<BranchWorkbench project={project} appDirty onDirtyChange={vi.fn()} onBranchChanged={onBranchChanged} />)
-  await waitFor(() => expect(screen.getByRole('button', { name: /obi-wan-lives/i })).toBeInTheDocument())
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Switch to reviewed experiment' })).toBeInTheDocument())
 
-  fireEvent.click(screen.getByRole('button', { name: /obi-wan-lives/i }))
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to reviewed experiment' }))
   await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
   expect(api.switchBranch).not.toHaveBeenCalled()
 
-  fireEvent.click(screen.getByRole('button', { name: /obi-wan-lives/i }))
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to reviewed experiment' }))
   await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
   vi.mocked(api.switchBranch).mockResolvedValue(experimentStatus)
   fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
@@ -148,21 +148,20 @@ test('requires confirmation before switching branches when the app draft is dirt
   expect(onBranchChanged).toHaveBeenCalled()
 })
 
-// Test: successful branch change clears comparison state before refetch.
+// Test: successful switch to the reviewed experiment clears branch-sensitive
+// state and refetches the reviewed comparison under the new active branch.
 // Requirements: M8-R18.
-test('clears comparison state and refetches after a successful branch change', async () => {
-  vi.mocked(api.getBranchStatus).mockResolvedValue(experimentStatus)
+test('clears comparison state and refetches after switching to the reviewed experiment', async () => {
   const onBranchChanged = vi.fn()
   render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={onBranchChanged} />)
 
-  await waitFor(() => expect(screen.getByText('Experiment', { selector: '.branch-badge' })).toBeInTheDocument())
   await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalled())
 
   vi.mocked(api.getBranchComparison).mockClear()
-  vi.mocked(api.switchBranch).mockResolvedValue(canonStatus)
-  vi.mocked(api.getBranchStatus).mockResolvedValue(canonStatus)
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Switch to main' })).toBeInTheDocument())
-  fireEvent.click(screen.getByRole('button', { name: 'Switch to main' }))
+  vi.mocked(api.switchBranch).mockResolvedValue(experimentStatus)
+  vi.mocked(api.getBranchStatus).mockResolvedValue(experimentStatus)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Switch to reviewed experiment' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to reviewed experiment' }))
   await waitFor(() => expect(screen.getByRole('dialog', { name: 'Switch branches?' })).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }))
   await waitFor(() => expect(onBranchChanged).toHaveBeenCalled())

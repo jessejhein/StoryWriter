@@ -10,6 +10,7 @@ import {
   applyFileComparisonFailure,
   applyFileComparisonSuccess,
   applyRamificationSuccess,
+  beginComparisonRequest,
   branchUsesBrowserStorage,
   buildBranchContextKey,
   canProceedWithBranchChange,
@@ -141,6 +142,45 @@ test('ignores stale comparison and file failures', () => {
   expect(staleFileFailure.fileError).toBeNull()
 })
 
+// Test: beginning a new comparison clears stale comparison/file/analysis state
+// and records the explicitly requested experiment id.
+// Requirements: M8-R18.
+test('clears stale state and tracks the requested experiment when loading a comparison', () => {
+  const populated = {
+    ...initialBranchWorkbenchState(projectID),
+    comparison,
+    fileComparison: {
+      path: 'scenes/scn_0123456789abcdef0123.md',
+      status: 'modified' as const,
+      main_head: mainHead,
+      experiment_head: experimentHead,
+      fingerprint,
+      canon: { exists: true, text: 'canon' },
+      experiment: { exists: true, text: 'experiment' },
+    },
+    ramification: {
+      summary: 'Summary',
+      findings: [],
+      provider: { profile_id: 'local', type: 'ollama' as const, model: 'model' },
+      manifest: {
+        main_head: mainHead,
+        experiment_head: experimentHead,
+        fingerprint,
+        changed_file_count: 1,
+        included_paths: ['scenes/scn_0123456789abcdef0123.md'],
+        estimated_input_bytes: 100,
+      },
+    },
+  }
+  const next = beginComparisonRequest(populated, 'brn_other', 7)
+  expect(next.requestedExperimentID).toBe('brn_other')
+  expect(next.comparison).toBeNull()
+  expect(next.fileComparison).toBeNull()
+  expect(next.ramification).toBeNull()
+  expect(next.selectedPath).toBeNull()
+  expect(next.requestVersion).toBe(7)
+})
+
 // Test: promotion selection contains only current changed promotable paths.
 // Requirements: M8-R13, M8-R18.
 test('prunes promotion selection to current changed paths', () => {
@@ -154,6 +194,9 @@ test('prunes promotion selection to current changed paths', () => {
   const toggled = togglePromotionPath([], 'scenes/scn_added.md', changedFiles)
   expect(toggled).toEqual(['scenes/scn_added.md'])
   expect(togglePromotionPath(toggled, 'outline.yaml', changedFiles)).toEqual(toggled)
+
+  const byteSorted = togglePromotionPath(['scenes/scn_added.md'], 'scenes/scn_0123456789abcdef0123.md', changedFiles)
+  expect(byteSorted).toEqual(['scenes/scn_0123456789abcdef0123.md', 'scenes/scn_added.md'])
 })
 
 // Test: branch change clears all branch-sensitive state.

@@ -16,3 +16,7 @@ var ErrDiffTooLarge = errors.New("diff exceeds byte budget")
 
 // ErrBlobTooLarge is returned when a blob exceeds the supplied display budget.
 var ErrBlobTooLarge = errors.New("blob exceeds byte budget")
+
+// ErrPathListTooLarge is returned when machine-safe path/status output exceeds
+// Storywork's changed-path limit.
+var ErrPathListTooLarge = errors.New("changed path list exceeds limit")

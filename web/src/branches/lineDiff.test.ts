@@ -3,7 +3,7 @@
 // Test purpose: verify bounded deterministic line alignment for side-by-side display.
 
 import { expect, test } from 'vitest'
-import { alignLines, LINE_DIFF_MAX_CELLS, LINE_DIFF_MAX_LINES, splitLines } from './lineDiff'
+import { alignLines, LINE_DIFF_MAX_CELLS, LINE_DIFF_MAX_LINES, NO_NEWLINE_MARKER, splitLines } from './lineDiff'
 
 // Test: equal, insert, delete, replace, empty side, newline, and repeated-line cases.
 // Requirements: M8-R08.
@@ -65,6 +65,24 @@ test('aligns equal insert delete replace empty and repeated lines with line numb
     mode: 'highlighted',
     rows: [
       { kind: 'equal', canonLine: 1, canonText: 'alpha', branchLine: 1, branchText: 'alpha' },
+    ],
+  })
+
+  const missingFinalNewline = alignLines('alpha\n', 'alpha')
+  expect(missingFinalNewline).toEqual({
+    mode: 'highlighted',
+    rows: [
+      { kind: 'equal', canonLine: 1, canonText: 'alpha', branchLine: 1, branchText: 'alpha' },
+      { kind: 'added', canonLine: null, canonText: null, branchLine: 2, branchText: NO_NEWLINE_MARKER },
+    ],
+  })
+
+  const addedFinalNewline = alignLines('alpha', 'alpha\n')
+  expect(addedFinalNewline).toEqual({
+    mode: 'highlighted',
+    rows: [
+      { kind: 'equal', canonLine: 1, canonText: 'alpha', branchLine: 1, branchText: 'alpha' },
+      { kind: 'deleted', canonLine: 2, canonText: NO_NEWLINE_MARKER, branchLine: null, branchText: null },
     ],
   })
 
@@ -142,4 +160,7 @@ test('keeps inputs immutable and treats text literally', () => {
       branchText: '&copy; changed',
     })
   }
+
+  expect(splitLines('alpha\r\nbeta\r\n')).toEqual(['alpha\r', 'beta\r'])
+  expect(splitLines('')).toEqual([])
 })

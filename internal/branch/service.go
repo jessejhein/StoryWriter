@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // Service orchestrates branch lifecycle, comparison, promotion, and analysis.
 type Service struct {
-	repo        Repository
+	statusRepo  StatusRepository
+	experiments ExperimentRepository
+	comparison  ComparisonRepository
+	analysis    AnalysisRepository
+	promotion   PromotionRepository
 	index       Index
 	coordinator MutationCoordinator
 	session     ProjectSession
@@ -28,7 +33,11 @@ func NewService(
 	ids IDGenerator,
 ) *Service {
 	return &Service{
-		repo:        repo,
+		statusRepo:  repo,
+		experiments: repo,
+		comparison:  repo,
+		analysis:    repo,
+		promotion:   repo,
 		index:       index,
 		coordinator: coordinator,
 		session:     session,
@@ -46,7 +55,7 @@ func (s *Service) Status(ctx context.Context) (RepositoryStatus, error) {
 	}
 	s.coordinator.RLock()
 	defer s.coordinator.RUnlock()
-	status, err := s.repo.Status(ctx, path)
+	status, err := s.statusRepo.Status(ctx, path)
 	if err != nil {
 		return RepositoryStatus{}, mapRepositoryError(err)
 	}
@@ -67,7 +76,7 @@ func (s *Service) ListExperiments(ctx context.Context) ([]ExperimentRef, error) 
 	}
 	s.coordinator.RLock()
 	defer s.coordinator.RUnlock()
-	return s.repo.ListExperiments(ctx, path)
+	return s.experiments.ListExperiments(ctx, path)
 }
 
 // CreateExperiment creates one experiment from current main and switches to it.
@@ -79,7 +88,7 @@ func (s *Service) CreateExperiment(ctx context.Context, name string) (Repository
 	s.coordinator.Lock()
 	defer s.coordinator.Unlock()
 
-	status, err := s.repo.Status(ctx, path)
+	status, err := s.statusRepo.Status(ctx, path)
 	if err != nil {
 		return RepositoryStatus{}, mapRepositoryError(err)
 	}
@@ -92,7 +101,7 @@ func (s *Service) CreateExperiment(ctx context.Context, name string) (Repository
 	if !status.IsCanon && !status.IsManaged {
 		return RepositoryStatus{}, ErrUnmanagedBranch
 	}
-	mainHead, err := s.repo.ResolveCommit(ctx, path, CanonBranchName)
+	mainHead, err := s.experiments.ResolveCommit(ctx, path, CanonBranchName)
 	if err != nil {
 		return RepositoryStatus{}, ErrMainMissing
 	}
@@ -106,19 +115,27 @@ func (s *Service) CreateExperiment(ctx context.Context, name string) (Repository
 	}
 	experiment := ExperimentRef{ID: id, BranchName: ref, Head: mainHead}
 	previous := status.ActiveBranch
-	if err := s.repo.CreateAndSwitch(ctx, path, experiment, mainHead); err != nil {
+	if err := s.experiments.CreateAndSwitch(ctx, path, experiment, mainHead); err != nil {
 		return RepositoryStatus{}, mapRepositoryError(err)
 	}
 	if err := s.index.Rebuild(ctx, path); err != nil {
-		switchErr := s.repo.Switch(ctx, path, BranchRef(previous))
-		rebuildErr := s.index.Rebuild(ctx, path)
-		deleteErr := s.repo.DeleteExperiment(ctx, path, experiment, mainHead)
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		switchErr := s.switchByStatus(cleanupCtx, path, RepositoryStatus{
+			ActiveBranch:   previous,
+			IsCanon:        previous == CanonBranchName,
+			IsManaged:      status.IsManaged,
+			ExperimentID:   status.ExperimentID,
+			ExperimentHead: status.ExperimentHead,
+		})
+		rebuildErr := s.index.Rebuild(cleanupCtx, path)
+		deleteErr := s.experiments.DeleteExperiment(cleanupCtx, path, experiment, mainHead)
 		return RepositoryStatus{}, JoinErrors(
 			fmt.Errorf("index rebuild failed after checkout: %w", err),
 			errors.Join(switchErr, rebuildErr, deleteErr),
 		)
 	}
-	return s.repo.Status(ctx, path)
+	return s.statusRepo.Status(ctx, path)
 }
 
 // SwitchTarget switches to main or one experiment by id and expected head.
@@ -142,7 +159,7 @@ func (s *Service) SwitchTarget(ctx context.Context, target string, expectedHead 
 	s.coordinator.Lock()
 	defer s.coordinator.Unlock()
 
-	status, err := s.repo.Status(ctx, path)
+	status, err := s.statusRepo.Status(ctx, path)
 	if err != nil {
 		return RepositoryStatus{}, mapRepositoryError(err)
 	}
@@ -155,12 +172,11 @@ func (s *Service) SwitchTarget(ctx context.Context, target string, expectedHead 
 	if !status.IsCanon && !status.IsManaged {
 		return RepositoryStatus{}, ErrUnmanagedBranch
 	}
-	previous := status.ActiveBranch
 	var ref BranchRef
 	if isMain {
 		ref = CanonBranchName
 	} else {
-		experiments, err := s.repo.ListExperiments(ctx, path)
+		experiments, err := s.experiments.ListExperiments(ctx, path)
 		if err != nil {
 			return RepositoryStatus{}, err
 		}
@@ -179,18 +195,26 @@ func (s *Service) SwitchTarget(ctx context.Context, target string, expectedHead 
 		}
 		ref = found.BranchName
 	}
-	if err := s.repo.Switch(ctx, path, ref); err != nil {
-		return RepositoryStatus{}, mapRepositoryError(err)
+	if isMain {
+		if err := s.experiments.Switch(ctx, path, ref); err != nil {
+			return RepositoryStatus{}, mapRepositoryError(err)
+		}
+	} else {
+		if err := s.experiments.SwitchExperiment(ctx, path, ExperimentRef{ID: ExperimentID(resolved), BranchName: ref, Head: *expectedHead}); err != nil {
+			return RepositoryStatus{}, mapRepositoryError(err)
+		}
 	}
 	if err := s.index.Rebuild(ctx, path); err != nil {
-		switchErr := s.repo.Switch(ctx, path, BranchRef(previous))
-		rebuildErr := s.index.Rebuild(ctx, path)
+		cleanupCtx, cancel := cleanupContext(ctx)
+		defer cancel()
+		switchErr := s.switchByStatus(cleanupCtx, path, status)
+		rebuildErr := s.index.Rebuild(cleanupCtx, path)
 		return RepositoryStatus{}, JoinErrors(
 			fmt.Errorf("index rebuild failed after checkout: %w", err),
 			errors.Join(switchErr, rebuildErr),
 		)
 	}
-	return s.repo.Status(ctx, path)
+	return s.statusRepo.Status(ctx, path)
 }
 
 // LoadComparison compares current main and one experiment head read-only.
@@ -209,7 +233,7 @@ func (s *Service) LoadComparison(ctx context.Context, experimentID string) (Comp
 }
 
 func (s *Service) buildComparison(ctx context.Context, path string, id ExperimentID) (Comparison, error) {
-	experiments, err := s.repo.ListExperiments(ctx, path)
+	experiments, err := s.experiments.ListExperiments(ctx, path)
 	if err != nil {
 		return Comparison{}, err
 	}
@@ -223,19 +247,19 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 	if found == nil {
 		return Comparison{}, ErrExperimentNotFound
 	}
-	mainHead, err := s.repo.ResolveCommit(ctx, path, CanonBranchName)
+	mainHead, err := s.experiments.ResolveCommit(ctx, path, CanonBranchName)
 	if err != nil {
 		return Comparison{}, ErrMainMissing
 	}
 	experimentHead := found.Head
-	baseHead, err := s.repo.MergeBase(ctx, path, mainHead, experimentHead)
+	baseHead, err := s.comparison.MergeBase(ctx, path, mainHead, experimentHead)
 	if err != nil {
 		return Comparison{}, mapRepositoryError(err)
 	}
 	if err := s.validateExperimentAncestry(ctx, path, baseHead, experimentHead); err != nil {
 		return Comparison{}, err
 	}
-	files, err := s.repo.CompareTrees(ctx, path, mainHead, experimentHead)
+	files, err := s.comparison.CompareTrees(ctx, path, mainHead, experimentHead)
 	if err != nil {
 		return Comparison{}, mapRepositoryError(err)
 	}
@@ -255,7 +279,7 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 }
 
 func (s *Service) validateExperimentAncestry(ctx context.Context, path string, base, experiment CommitID) error {
-	changed, err := s.repo.PathsChanged(ctx, path, base, experiment)
+	changed, err := s.comparison.PathsChanged(ctx, path, base, experiment)
 	if err != nil {
 		return mapRepositoryError(err)
 	}
@@ -289,11 +313,11 @@ func (s *Service) LoadFileComparison(ctx context.Context, experimentID, rawPath 
 	if !ok {
 		return FileComparison{}, ErrPathNotInComparison
 	}
-	canon, err := s.repo.ReadTextBlob(ctx, projectPath, comparison.MainHead, path)
+	canon, err := s.comparison.ReadTextBlob(ctx, projectPath, comparison.MainHead, path)
 	if err != nil {
 		return FileComparison{}, err
 	}
-	experiment, err := s.repo.ReadTextBlob(ctx, projectPath, comparison.ExperimentHead, path)
+	experiment, err := s.comparison.ReadTextBlob(ctx, projectPath, comparison.ExperimentHead, path)
 	if err != nil {
 		return FileComparison{}, err
 	}
@@ -324,7 +348,7 @@ func (s *Service) DiscardExperiment(ctx context.Context, experimentID string, ex
 	s.coordinator.Lock()
 	defer s.coordinator.Unlock()
 
-	status, err := s.repo.Status(ctx, path)
+	status, err := s.statusRepo.Status(ctx, path)
 	if err != nil {
 		return RepositoryStatus{}, mapRepositoryError(err)
 	}
@@ -337,7 +361,7 @@ func (s *Service) DiscardExperiment(ctx context.Context, experimentID string, ex
 	if !status.IsCanon && !status.IsManaged {
 		return RepositoryStatus{}, ErrUnmanagedBranch
 	}
-	experiments, err := s.repo.ListExperiments(ctx, path)
+	experiments, err := s.experiments.ListExperiments(ctx, path)
 	if err != nil {
 		return RepositoryStatus{}, err
 	}
@@ -354,29 +378,32 @@ func (s *Service) DiscardExperiment(ctx context.Context, experimentID string, ex
 	if found.Head != expectedHead {
 		return RepositoryStatus{}, ErrStaleRef
 	}
-	previous := status.ActiveBranch
 	if status.ExperimentID == id {
-		if err := s.repo.Switch(ctx, path, CanonBranchName); err != nil {
+		if err := s.experiments.Switch(ctx, path, CanonBranchName); err != nil {
 			return RepositoryStatus{}, mapRepositoryError(err)
 		}
 		if err := s.index.Rebuild(ctx, path); err != nil {
-			switchErr := s.repo.Switch(ctx, path, BranchRef(previous))
-			rebuildErr := s.index.Rebuild(ctx, path)
+			cleanupCtx, cancel := cleanupContext(ctx)
+			defer cancel()
+			switchErr := s.switchByStatus(cleanupCtx, path, status)
+			rebuildErr := s.index.Rebuild(cleanupCtx, path)
 			return RepositoryStatus{}, JoinErrors(
 				fmt.Errorf("index rebuild failed after checkout: %w", err),
 				errors.Join(switchErr, rebuildErr),
 			)
 		}
 	}
-	if err := s.repo.DeleteExperiment(ctx, path, *found, expectedHead); err != nil {
+	if err := s.experiments.DeleteExperiment(ctx, path, *found, expectedHead); err != nil {
 		if status.ExperimentID == id {
-			switchErr := s.repo.Switch(ctx, path, found.BranchName)
-			rebuildErr := s.index.Rebuild(ctx, path)
+			cleanupCtx, cancel := cleanupContext(ctx)
+			defer cancel()
+			switchErr := s.experiments.SwitchExperiment(cleanupCtx, path, *found)
+			rebuildErr := s.index.Rebuild(cleanupCtx, path)
 			return RepositoryStatus{}, JoinErrors(mapRepositoryError(err), errors.Join(switchErr, rebuildErr))
 		}
 		return RepositoryStatus{}, mapRepositoryError(err)
 	}
-	return s.repo.Status(ctx, path)
+	return s.statusRepo.Status(ctx, path)
 }
 
 // PromoteSelectedFiles conservatively promotes whole selected files to main.
@@ -411,4 +438,21 @@ func JoinErrors(original, recovery error) error {
 		return recovery
 	}
 	return errors.Join(original, fmt.Errorf("recovery failed: %w", recovery))
+}
+
+const cleanupTimeout = 5 * time.Second
+
+func cleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+}
+
+func (s *Service) switchByStatus(ctx context.Context, projectPath string, status RepositoryStatus) error {
+	if status.IsManaged {
+		return s.experiments.SwitchExperiment(ctx, projectPath, ExperimentRef{
+			ID:         status.ExperimentID,
+			BranchName: BranchRef(status.ActiveBranch),
+			Head:       status.ExperimentHead,
+		})
+	}
+	return s.experiments.Switch(ctx, projectPath, BranchRef(status.ActiveBranch))
 }

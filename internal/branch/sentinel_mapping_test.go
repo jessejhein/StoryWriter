@@ -30,6 +30,9 @@ func (r *errorRepo) CreateAndSwitch(context.Context, string, branch.ExperimentRe
 	return nil
 }
 func (r *errorRepo) Switch(context.Context, string, branch.BranchRef) error { return nil }
+func (r *errorRepo) SwitchExperiment(context.Context, string, branch.ExperimentRef) error {
+	return nil
+}
 func (r *errorRepo) DeleteExperiment(context.Context, string, branch.ExperimentRef, branch.CommitID) error {
 	return nil
 }
