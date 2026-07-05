@@ -15,11 +15,13 @@ import (
 )
 
 type fakeRepo struct {
-	status       branch.RepositoryStatus
-	experiments  []branch.ExperimentRef
-	mainHead     branch.CommitID
-	compareFiles []branch.ChangedFile
-	blobSides    map[string]branch.TextSide
+	status           branch.RepositoryStatus
+	experiments      []branch.ExperimentRef
+	mainHead         branch.CommitID
+	compareFiles     []branch.ChangedFile
+	blobSides        map[string]branch.TextSide
+	forceNonAncestor bool
+	mergeBaseErr     error
 }
 
 func (f *fakeRepo) Status(context.Context, string) (branch.RepositoryStatus, error) {
@@ -74,7 +76,16 @@ func (f *fakeRepo) ReadTextBlob(_ context.Context, _ string, commit branch.Commi
 	return branch.TextSide{}, nil
 }
 func (f *fakeRepo) MergeBase(context.Context, string, branch.CommitID, branch.CommitID) (branch.CommitID, error) {
+	if f.mergeBaseErr != nil {
+		return "", f.mergeBaseErr
+	}
 	return "cccccccccccccccccccccccccccccccccccccccc", nil
+}
+func (f *fakeRepo) IsAncestor(context.Context, string, branch.CommitID, branch.CommitID) (bool, error) {
+	if f.forceNonAncestor {
+		return false, nil
+	}
+	return true, nil
 }
 func (f *fakeRepo) PathsChanged(context.Context, string, branch.CommitID, branch.CommitID) ([]branch.ProjectPath, error) {
 	return nil, nil

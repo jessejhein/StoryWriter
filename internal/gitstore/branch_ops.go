@@ -311,6 +311,10 @@ func (s *Store) MergeBase(ctx context.Context, repoPath, left, right string) (st
 	}
 	output, err := s.run(ctx, "-C", repoPath, "merge-base", left, right)
 	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return "", ErrNoMergeBase
+		}
 		return "", fmt.Errorf("merge base: %w", err)
 	}
 	base := strings.TrimSpace(output)
@@ -318,6 +322,26 @@ func (s *Store) MergeBase(ctx context.Context, repoPath, left, right string) (st
 		return "", fmt.Errorf("invalid merge base: %w", err)
 	}
 	return base, nil
+}
+
+// IsAncestor reports whether ancestor is in descendant's history.
+func (s *Store) IsAncestor(ctx context.Context, repoPath, ancestor, descendant string) (bool, error) {
+	if err := validateCommitID(ancestor); err != nil {
+		return false, err
+	}
+	if err := validateCommitID(descendant); err != nil {
+		return false, err
+	}
+	command := exec.CommandContext(ctx, s.executable, "-C", repoPath, "merge-base", "--is-ancestor", ancestor, descendant)
+	output, err := command.CombinedOutput()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("%s: %w: %s", strings.Join(command.Args, " "), err, strings.TrimSpace(string(output)))
 }
 
 // PathsChanged returns paths changed between baseCommit and headCommit.

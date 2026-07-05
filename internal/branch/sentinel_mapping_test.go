@@ -45,6 +45,9 @@ func (r *errorRepo) ReadTextBlob(context.Context, string, branch.CommitID, branc
 func (r *errorRepo) MergeBase(context.Context, string, branch.CommitID, branch.CommitID) (branch.CommitID, error) {
 	return "", nil
 }
+func (r *errorRepo) IsAncestor(context.Context, string, branch.CommitID, branch.CommitID) (bool, error) {
+	return true, nil
+}
 func (r *errorRepo) PathsChanged(context.Context, string, branch.CommitID, branch.CommitID) ([]branch.ProjectPath, error) {
 	return nil, nil
 }
@@ -102,6 +105,19 @@ func TestMapRepositoryErrorStaleHeadSentinel(t *testing.T) {
 	}
 	if !errors.Is(err, gitstore.ErrStaleExperimentHead) {
 		t.Fatalf("err = %v, want errors.Is gitstore.ErrStaleExperimentHead (original cause preserved)", err)
+	}
+}
+
+// Test: a wrapped gitstore.ErrNoMergeBase maps to branch.ErrStaleRef.
+func TestMapRepositoryErrorNoMergeBaseSentinel(t *testing.T) {
+	t.Parallel()
+	wrapped := fmt.Errorf("adapter: %w", gitstore.ErrNoMergeBase)
+	_, err := newErrorService(wrapped).Status(context.Background())
+	if !errors.Is(err, branch.ErrStaleRef) {
+		t.Fatalf("err = %v, want errors.Is branch.ErrStaleRef", err)
+	}
+	if !errors.Is(err, gitstore.ErrNoMergeBase) {
+		t.Fatalf("err = %v, want errors.Is gitstore.ErrNoMergeBase (original cause preserved)", err)
 	}
 }
 

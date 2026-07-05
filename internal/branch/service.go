@@ -256,7 +256,7 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 	if err != nil {
 		return Comparison{}, mapRepositoryError(err)
 	}
-	if err := s.validateExperimentAncestry(ctx, path, baseHead, experimentHead); err != nil {
+	if err := s.requireExperimentHistory(ctx, path, baseHead, experimentHead); err != nil {
 		return Comparison{}, err
 	}
 	files, err := s.comparison.CompareTrees(ctx, path, mainHead, experimentHead)
@@ -278,12 +278,14 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 	}, nil
 }
 
-func (s *Service) validateExperimentAncestry(ctx context.Context, path string, base, experiment CommitID) error {
-	changed, err := s.comparison.PathsChanged(ctx, path, base, experiment)
+func (s *Service) requireExperimentHistory(ctx context.Context, path string, base, experiment CommitID) error {
+	isAncestor, err := s.comparison.IsAncestor(ctx, path, base, experiment)
 	if err != nil {
 		return mapRepositoryError(err)
 	}
-	_ = changed
+	if !isAncestor {
+		return ErrStaleRef
+	}
 	return nil
 }
 

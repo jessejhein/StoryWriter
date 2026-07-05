@@ -161,7 +161,7 @@ func TestPromoteSelectedFilesOrdersTransactionAndReturnsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
-	want := []string{"paths_changed", "paths_changed", "snapshot", "switch:main", "apply", "validate", "index", "stage", "commit"}
+	want := []string{"paths_changed", "snapshot", "switch:main", "apply", "validate", "index", "stage", "commit"}
 	if !reflect.DeepEqual(repo.calls, want) {
 		t.Fatalf("calls=%v want=%v", repo.calls, want)
 	}

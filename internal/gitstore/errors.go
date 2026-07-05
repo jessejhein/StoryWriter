@@ -10,6 +10,9 @@ var ErrDirtyWorktree = errors.New("worktree is not clean")
 // not match the current ref at deletion time.
 var ErrStaleExperimentHead = errors.New("stale experiment head")
 
+// ErrNoMergeBase is returned when two commits share no merge base.
+var ErrNoMergeBase = errors.New("no merge base")
+
 // ErrDiffTooLarge is returned when a unified diff output exceeds the supplied
 // byte budget.
 var ErrDiffTooLarge = errors.New("diff exceeds byte budget")

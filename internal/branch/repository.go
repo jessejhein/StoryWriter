@@ -120,6 +120,10 @@ func (r *GitRepository) MergeBase(ctx context.Context, repoPath string, left, ri
 	return CommitID(base), nil
 }
 
+func (r *GitRepository) IsAncestor(ctx context.Context, repoPath string, ancestor, descendant CommitID) (bool, error) {
+	return r.Store.IsAncestor(ctx, repoPath, string(ancestor), string(descendant))
+}
+
 func (r *GitRepository) PathsChanged(ctx context.Context, repoPath string, base, head CommitID) ([]ProjectPath, error) {
 	paths, err := r.Store.PathsChanged(ctx, repoPath, string(base), string(head))
 	if err != nil {
@@ -260,6 +264,7 @@ type ComparisonRepository interface {
 	CompareTrees(context.Context, string, CommitID, CommitID) ([]ChangedFile, error)
 	ReadTextBlob(context.Context, string, CommitID, ProjectPath) (TextSide, error)
 	MergeBase(context.Context, string, CommitID, CommitID) (CommitID, error)
+	IsAncestor(context.Context, string, CommitID, CommitID) (bool, error)
 	PathsChanged(context.Context, string, CommitID, CommitID) ([]ProjectPath, error)
 }
 
@@ -317,6 +322,8 @@ func mapRepositoryError(err error) error {
 	switch {
 	case errors.Is(err, gitstore.ErrDirtyWorktree):
 		return errors.Join(ErrDirtyWorktree, err)
+	case errors.Is(err, gitstore.ErrNoMergeBase):
+		return errors.Join(ErrStaleRef, err)
 	case errors.Is(err, gitstore.ErrStaleExperimentHead):
 		return errors.Join(ErrStaleRef, err)
 	case errors.Is(err, gitstore.ErrPathListTooLarge):
