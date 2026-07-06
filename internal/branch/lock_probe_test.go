@@ -44,14 +44,14 @@ func TestAnalyzeReleasesReadLockBeforeProviderCall(t *testing.T) {
 	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	coord := &probeCoordinator{}
 	repo := &analysisRepo{
 		fakeRepo: &fakeRepo{
-			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 			mainHead:     mainHead,
 			compareFiles: files,
 		},

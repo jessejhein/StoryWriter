@@ -113,7 +113,7 @@ func (s *Service) CreateExperiment(ctx context.Context, name string) (Repository
 	if err != nil {
 		return RepositoryStatus{}, err
 	}
-	experiment := ExperimentRef{ID: id, BranchName: ref, Head: mainHead}
+	experiment := ExperimentRef{ID: id, BranchName: ref, Head: mainHead, BaseHead: mainHead}
 	previous := status.ActiveBranch
 	if err := s.experiments.CreateAndSwitch(ctx, path, experiment, mainHead); err != nil {
 		return RepositoryStatus{}, mapRepositoryError(err)
@@ -193,6 +193,16 @@ func (s *Service) SwitchTarget(ctx context.Context, target string, expectedHead 
 		if expectedHead != nil && found.Head != *expectedHead {
 			return RepositoryStatus{}, ErrStaleRef
 		}
+		if _, err := ValidateCommitID(string(found.BaseHead)); err != nil {
+			return RepositoryStatus{}, ErrRepositoryState
+		}
+		historyOK, err := s.comparison.IsAncestor(ctx, path, found.BaseHead, found.Head)
+		if err != nil {
+			return RepositoryStatus{}, mapRepositoryError(err)
+		}
+		if !historyOK {
+			return RepositoryStatus{}, ErrStaleRef
+		}
 		ref = found.BranchName
 	}
 	if isMain {
@@ -252,9 +262,9 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 		return Comparison{}, ErrMainMissing
 	}
 	experimentHead := found.Head
-	baseHead, err := s.comparison.MergeBase(ctx, path, mainHead, experimentHead)
-	if err != nil {
-		return Comparison{}, mapRepositoryError(err)
+	baseHead := found.BaseHead
+	if _, err := ValidateCommitID(string(baseHead)); err != nil {
+		return Comparison{}, ErrRepositoryState
 	}
 	if err := s.requireExperimentHistory(ctx, path, baseHead, experimentHead); err != nil {
 		return Comparison{}, err
@@ -378,6 +388,16 @@ func (s *Service) DiscardExperiment(ctx context.Context, experimentID string, ex
 		return RepositoryStatus{}, ErrExperimentNotFound
 	}
 	if found.Head != expectedHead {
+		return RepositoryStatus{}, ErrStaleRef
+	}
+	if _, err := ValidateCommitID(string(found.BaseHead)); err != nil {
+		return RepositoryStatus{}, ErrRepositoryState
+	}
+	historyOK, err := s.comparison.IsAncestor(ctx, path, found.BaseHead, found.Head)
+	if err != nil {
+		return RepositoryStatus{}, mapRepositoryError(err)
+	}
+	if !historyOK {
 		return RepositoryStatus{}, ErrStaleRef
 	}
 	if status.ExperimentID == id {

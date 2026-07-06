@@ -32,8 +32,8 @@ func TestDiscardActiveExperimentSwitchesIndexesAndDeletes(t *testing.T) {
 	t.Parallel()
 	head := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	repo := &fakeRepo{
-		status:      branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: head},
-		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: head}},
+		status:      branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: head, BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: head, BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 	}
 	index := &fakeIndex{}
 	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
@@ -50,7 +50,7 @@ func TestDiscardActiveExperimentSwitchesIndexesAndDeletes(t *testing.T) {
 // Requirements: M8-R17.
 func TestDiscardExperimentRejectsStaleHeadWithoutSideEffects(t *testing.T) {
 	t.Parallel()
-	repo := &fakeRepo{status: branch.RepositoryStatus{ActiveBranch: "main", IsCanon: true, IsClean: true}, experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}}}
+	repo := &fakeRepo{status: branch.RepositoryStatus{ActiveBranch: "main", IsCanon: true, IsClean: true}, experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}
 	index := &fakeIndex{}
 	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
 	_, err := service.DiscardExperiment(context.Background(), "brn_0123456789abcdef0123", "cccccccccccccccccccccccccccccccccccccccc")
@@ -77,7 +77,7 @@ func TestDiscardExperimentRejectsUnsupportedRepositoryStates(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			repo := &fakeRepo{
 				status:      testCase.status,
-				experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: head}},
+				experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: head, BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 			}
 			index := &fakeIndex{}
 			service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
@@ -106,10 +106,11 @@ func TestDiscardInactiveExperimentAvoidsCheckoutAndIndexWork(t *testing.T) {
 			ExperimentID:   "brn_0123456789abcdef0124",
 			ExperimentHead: "dddddddddddddddddddddddddddddddddddddddd",
 			MainHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			BaseHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		},
 		experiments: []branch.ExperimentRef{
-			{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: targetHead},
-			{ID: "brn_0123456789abcdef0124", BranchName: "branch/other-exp-0123456789abcdef0124", Head: "dddddddddddddddddddddddddddddddddddddddd"},
+			{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: targetHead, BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+			{ID: "brn_0123456789abcdef0124", BranchName: "branch/other-exp-0123456789abcdef0124", Head: "dddddddddddddddddddddddddddddddddddddddd", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
 		},
 	}
 	index := &fakeIndex{}

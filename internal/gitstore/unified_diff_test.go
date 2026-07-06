@@ -26,7 +26,7 @@ func TestUnifiedDiffModifiedFileHasContextLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	modified := "version: 2\nroot:\n  arcs: []\n"
@@ -67,7 +67,7 @@ func TestUnifiedDiffAddedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	os.MkdirAll(filepath.Join(dir, "scenes"), 0o755)
@@ -102,7 +102,7 @@ func TestUnifiedDiffDeletedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(dir, "outline.yaml")); err != nil {
@@ -133,7 +133,7 @@ func TestUnifiedDiffMultiPathSorted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	os.MkdirAll(filepath.Join(dir, "scenes"), 0o755)
@@ -173,7 +173,7 @@ func TestUnifiedDiffExceedsMaxBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	big := strings.Repeat("x\n", 200)

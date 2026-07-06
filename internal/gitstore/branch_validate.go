@@ -14,10 +14,13 @@ const (
 )
 
 var (
-	commitIDPattern      = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
-	experimentHexPattern = regexp.MustCompile(`^[0-9a-f]{20}$`)
-	slugPattern          = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-	refInjectionPattern  = regexp.MustCompile(`[\x00-\x1f\x7f~^:?*[]`)
+	commitIDPattern         = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+	experimentHexPattern    = regexp.MustCompile(`^[0-9a-f]{20}$`)
+	slugPattern             = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	refInjectionPattern     = regexp.MustCompile(`[\x00-\x1f\x7f~^:?*[]`)
+	reservedExperimentSlugs = map[string]struct{}{
+		"main": {},
+	}
 )
 
 func validateCommitID(value string) error {
@@ -51,6 +54,9 @@ func validateBranchRef(value string) error {
 	}
 	slug := strings.Join(parts[:len(parts)-1], "-")
 	if !slugPattern.MatchString(slug) || len(slug) == 0 || len(slug) > 48 {
+		return fmt.Errorf("branch ref %q is invalid", value)
+	}
+	if _, reserved := reservedExperimentSlugs[slug]; reserved {
 		return fmt.Errorf("branch ref %q is invalid", value)
 	}
 	return nil

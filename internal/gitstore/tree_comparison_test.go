@@ -31,7 +31,7 @@ func TestCompareTreesReportsAddedModifiedDeleted(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	scenePath := filepath.Join(dir, "scenes")
@@ -79,7 +79,7 @@ func TestCompareTreesRejectsSymlinkChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/symlink-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.MkdirAll(filepath.Join(dir, "scenes"), 0o755); err != nil {

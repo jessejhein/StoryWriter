@@ -110,13 +110,13 @@ func promotionFixture(t *testing.T) (*promotionRepo, branch.PromotionRequest) {
 	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := &promotionRepo{fakeRepo: &fakeRepo{
-		status:      branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: experimentHead, MainHead: mainHead},
-		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+		status:      branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: experimentHead, BaseHead: mainHead, MainHead: mainHead},
+		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 		mainHead:    mainHead, compareFiles: files,
 	}, fail: map[string]error{}}
 	return repo, branch.PromotionRequest{ExperimentID: "brn_0123456789abcdef0123", Paths: []branch.ProjectPath{"outline.yaml"}, ExpectedMainHead: mainHead, ExpectedExperimentHead: experimentHead, ExpectedFingerprint: fingerprint}

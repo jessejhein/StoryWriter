@@ -197,6 +197,7 @@ func TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain(t *testing.T) {
 		"branch/../evil-0123456789abcdef0123",
 		"branch/obi..wan-0123456789abcdef0123",
 		"branch/obi-wan-lives-0123456789abcdef0123.lock",
+		"branch/main-0123456789abcdef0123",
 		"feature/obi-wan",
 		"branch/obi-wan-lives",
 	}
@@ -204,5 +205,18 @@ func TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain(t *testing.T) {
 		if err := branch.ValidateBranchRef(value); err == nil {
 			t.Fatalf("ValidateBranchRef(%q) = nil, want error", value)
 		}
+	}
+}
+
+// Test: reserved experiment refs are rejected by branch parsing helpers.
+// Requirements: M8-R01, M8-R06.
+func TestParseManagedExperimentRefRejectsReservedSlug(t *testing.T) {
+	t.Parallel()
+	value := "branch/main-0123456789abcdef0123"
+	if _, _, err := branch.ParseManagedExperimentRef(value); !errors.Is(err, branch.ErrInvalidBranchRef) {
+		t.Fatalf("ParseManagedExperimentRef(%q) = %v, want ErrInvalidBranchRef", value, err)
+	}
+	if branch.IsManagedExperimentRef(value) {
+		t.Fatalf("IsManagedExperimentRef(%q) = true, want false", value)
 	}
 }

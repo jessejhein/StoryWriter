@@ -278,7 +278,8 @@ Backend:
 
 - `internal/branch/identity_test.go`: `TestValidateExperimentIDAcceptsCanonicalShape`,
   `TestNormalizeSlugDerivesCanonicalSlugs`, `TestBuildAndParseManagedBranchRefRoundTrip`,
-  `TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain`
+  `TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain`,
+  `TestParseManagedExperimentRefRejectsReservedSlug`
 - `internal/branch/path_test.go`: `TestValidateProjectPathAcceptsAllowedFamilies`,
   `TestValidateProjectPathRejectsUnsafeSegments`, `TestValidateStrictUTF8EnforcesBounds`
 - `internal/branch/comparison_test.go`: `TestValidateChangedFilesSortsAndDedupes`
@@ -288,12 +289,18 @@ Backend:
 - `internal/branch/service_lifecycle_test.go`: `TestCreateExperimentRebuildsIndex`,
   `TestCreateExperimentRecoversOnIndexFailure`,
   `TestCreateExperimentRecoversAfterRequestCancellation`,
-  `TestCreateExperimentSerializesUnderCoordinator`
+  `TestCreateExperimentSerializesUnderCoordinator`,
+  `TestCreateExperimentFromActiveManagedBranchRecordsMainBase`
 - `internal/branch/promotion_policy_test.go`: `TestPromotionConflictsDetectsMainDivergence`,
   `TestValidatePromotionPreflightRejectsStaleRefs`
 - `internal/branch/promotion_service_test.go`:
   `TestPromoteSelectedFilesRejectsConflictBeforeCheckout`
 - `internal/branch/discard_test.go`: `TestDiscardExperimentRejectsDirtyWorktree`
+- `internal/branch/experiment_history_guard_test.go`:
+  `TestLoadComparisonRejectsRewrittenExperimentHistory`,
+  `TestPromoteSelectedFilesRejectsRewrittenExperimentHistoryBeforeCheckout`,
+  `TestMissingExperimentBaseFailsClosedBeforeBranchMutation`,
+  `TestSwitchAndDiscardRejectRelatedRewrittenExperimentHistory`
 - `internal/branch/ramification_test.go`: `TestParseRamificationOutputAcceptsZeroFindings`,
   `TestParseRamificationOutputRejectsUnknownFields`
 - `internal/branch/ramification_service_test.go`:
@@ -309,6 +316,8 @@ Backend:
   `TestParseRamificationOutputRejectsEveryStrictContractViolation`
 - `internal/api/branch_negative_contract_test.go`:
   `TestBranchRouteMapsEveryContractErrorClass`,
+  `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
+  `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
   `TestBranchRoutesRejectMalformedCallsBeforeService`,
   `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
   `TestBranchRoutesRejectOversizedBodies`,
@@ -334,8 +343,12 @@ Backend:
   `TestValidateProjectRejectsMalformedOutline`
 - `internal/gitstore/branch_status_test.go`: `TestStatusReportsActiveBranchAndCleanliness`
 - `internal/gitstore/branch_switch_test.go`: `TestCreateAndSwitchFromMain`,
+  `TestCreateAndSwitchFromAnotherManagedExperiment`,
   `TestCreateAndSwitchRejectsDirtyWorktree`,
   `TestSwitchExperimentRejectsStaleExpectedHead`
+- `internal/gitstore/snapshot_test.go`:
+  `TestSnapshotPathsDistinguishesExistenceAndInspectionErrors`,
+  `TestSnapshotPathsFailsClosedOnInvalidTreeState`
 - `internal/gitstore/tree_comparison_test.go`:
   `TestCompareTreesReportsAddedModifiedDeleted`
 - `internal/gitstore/blob_test.go`: `TestReadTextBlobWithoutCheckout`
@@ -351,8 +364,12 @@ Backend:
 - `internal/importer/milestone8_branch_characterization_test.go`:
   `TestMilestone8ImportSnapshotCommitsToActiveBranchOnly`,
   `TestMilestone8ImportReviewMutationCommitsToActiveBranchOnly`
-- `internal/api/branch_lifecycle_test.go`: `TestBranchStatusAndListRoutes`,
-  `TestBranchCreateRoute`, `TestBranchRoutesMethodNotAllowed`
+- `internal/api/branch_negative_contract_test.go`: `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
+  `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
+  `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
+  `TestBranchRoutesRejectOversizedBodies`,
+  `TestEveryBranchRouteReturnsMethodSpecificAllow`
 - `internal/api/branch_comparison_test.go`: `TestBranchComparisonRoute`,
   `TestBranchFileComparisonRouteRequiresPath`
 - `internal/api/branch_operations_test.go`: `TestBranchRamificationRouteRequiresStrictBody`,
@@ -363,6 +380,11 @@ Backend:
   `stale_fingerprint_and_refs_rejected_before_provider_or_checkout`,
   `changed_on_main_path_conflicts_before_promotion_checkout`,
   `invalid_promotion_subset_rolls_back_main`
+- `internal/app/milestone8_history_guard_integration_test.go`:
+  `TestMilestone8RewrittenExperimentHistoryFailsClosed`
+- `web/src/App.branch_invalidation.test.tsx`:
+  `confirms branch navigation before leaving dirty scene, codex, and import drafts`,
+  `remounts branch-sensitive workspaces after switch, promotion, and discard actions`
 
 Frontend:
 
@@ -385,8 +407,8 @@ Frontend:
   dirty guard, stale conflicts, pending disabled state
 
 Verification: full `make check` (including `go test -race ./...`,
-`git diff --check`, and tracked-artifact leak detection), 49 frontend test
-files, 125 frontend tests.
+`git diff --check`, and tracked-artifact leak detection), 50 frontend test
+files, 127 frontend tests.
 
 ### Milestone 9
 

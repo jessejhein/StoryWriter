@@ -56,7 +56,7 @@ func TestAnalyzeRamificationsRejectsStaleFingerprint(t *testing.T) {
 	t.Parallel()
 	repo := &fakeRepo{
 		status:      branch.RepositoryStatus{IsClean: true},
-		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		mainHead:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 	}
 	service := branch.NewService(repo, &fakeIndex{}, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
@@ -82,12 +82,12 @@ func TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket(t *testing.T) {
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	repo := &analysisRepo{
 		fakeRepo: &fakeRepo{
-			experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 			mainHead:    mainHead,
 		},
 		diffText: "--- a/outline.yaml\n+++ b/outline.yaml\n@@ -1,1 +1,1 @@\n-old line\n+new line\n",
 	}
-	comparison, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}})
+	comparison, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,13 +115,13 @@ func TestAnalyzeRamificationsRejectsOversizedDiffBeforeProvider(t *testing.T) {
 	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := &analysisRepo{
 		fakeRepo: &fakeRepo{
-			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 			mainHead:     mainHead,
 			compareFiles: files,
 		},
@@ -149,11 +149,11 @@ func TestAnalyzeRamificationsRejectsFileBudgetBeforeReadingBlobs(t *testing.T) {
 		files = append(files, branch.ChangedFile{Path: branch.ProjectPath(fmt.Sprintf("scenes/scn_%020x.md", index)), Status: branch.StatusModified})
 	}
 	repo := &analysisRepo{fakeRepo: &fakeRepo{
-		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 		mainHead:    mainHead,
 	}}
 	repo.fakeRepo.compareFiles = files
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,14 +175,14 @@ func TestAnalyzeRamificationsPassesExactDiffBudget(t *testing.T) {
 		{Path: "outline.yaml", Status: branch.StatusModified},
 		{Path: "scenes/scn_001.md", Status: branch.StatusAdded},
 	}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	goal := "Review the changes"
 	repo := &analysisRepo{
 		fakeRepo: &fakeRepo{
-			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 			mainHead:     mainHead,
 			compareFiles: files,
 		},
@@ -211,13 +211,13 @@ func TestAnalyzeRamificationsRejectsInvalidProfileAndModelBeforeProvider(t *test
 	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	repo := &analysisRepo{
 		fakeRepo: &fakeRepo{
-			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+			experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 			mainHead:     mainHead,
 			compareFiles: files,
 		},
@@ -240,7 +240,7 @@ func TestAnalyzeRamificationsRejectsInvalidGoalsBeforeProvider(t *testing.T) {
 	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestAnalyzeRamificationsRejectsInvalidGoalsBeforeProvider(t *testing.T) {
 			t.Parallel()
 			repo := &analysisRepo{
 				fakeRepo: &fakeRepo{
-					experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+					experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 					mainHead:     mainHead,
 					compareFiles: files,
 				},
@@ -282,14 +282,14 @@ func TestAnalyzeRamificationsMapsAnalyzerCancellationToProviderUnavailable(t *te
 	mainHead := branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}}
-	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, "cccccccccccccccccccccccccccccccccccccccc", files)
+	fingerprint, err := branch.ComputeFingerprint(mainHead, experimentHead, mainHead, files)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, analyzerErr := range []error{context.Canceled, context.DeadlineExceeded} {
 		repo := &analysisRepo{
 			fakeRepo: &fakeRepo{
-				experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+				experiments:  []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 				mainHead:     mainHead,
 				compareFiles: files,
 			},

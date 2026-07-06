@@ -10,17 +10,37 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"storywork/internal/api"
 	"storywork/internal/branch"
+	"storywork/internal/gitstore"
+	"storywork/internal/mutation"
 )
 
 type statusErrorBranchStore struct {
 	branchServiceStub
 	err error
 }
+
+type listErrorBranchStore struct {
+	branchServiceStub
+	err error
+}
+
+type noopBranchIndex struct{}
+
+func (noopBranchIndex) Rebuild(context.Context, string) error { return nil }
+
+type staticBranchIDs struct {
+	id branch.ExperimentID
+}
+
+func (s staticBranchIDs) NextExperimentID() (branch.ExperimentID, error) { return s.id, nil }
 
 type spyBranchStore struct {
 	branchServiceStub
@@ -33,6 +53,10 @@ type spyBranchStore struct {
 
 func (s statusErrorBranchStore) Status(context.Context) (branch.RepositoryStatus, error) {
 	return branch.RepositoryStatus{}, s.err
+}
+
+func (s listErrorBranchStore) ListExperiments(context.Context) ([]branch.ExperimentRef, error) {
+	return nil, s.err
 }
 
 func handlerWithBranches(store api.BranchStore) http.Handler {
@@ -92,6 +116,70 @@ func TestBranchRouteMapsEveryContractErrorClass(t *testing.T) {
 				t.Fatalf("unsafe body=%s", response.Body.String())
 			}
 		})
+	}
+}
+
+// Test: malformed repository state returns a safe 500 for status and list
+// routes without surfacing raw diagnostics.
+// Requirements: M8-R01, M8-R06, M8-R20.
+func TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		path  string
+		store api.BranchStore
+	}{
+		{name: "status", path: "/api/branches/status", store: statusErrorBranchStore{err: branch.ErrRepositoryState}},
+		{name: "list", path: "/api/branches", store: listErrorBranchStore{err: branch.ErrRepositoryState}},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handlerWithBranches(testCase.store).ServeHTTP(response, httptest.NewRequest(http.MethodGet, testCase.path, nil))
+			if response.Code != http.StatusInternalServerError {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), "/") || strings.Contains(response.Body.String(), "git") {
+				t.Fatalf("unsafe body=%s", response.Body.String())
+			}
+		})
+	}
+}
+
+// Test: a malformed managed ref in a real repository maps to safe 500s on the
+// public status and list routes.
+// Requirements: M8-R01, M8-R06, M8-R20.
+func TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 1\nroot:\n  arcs: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := gitstore.New("git")
+	if err := store.Init(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitAll(ctx, dir, "init"); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.CommandContext(ctx, "git", "-C", dir, "branch", "branch/main-0123456789abcdef0123", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git branch: %v: %s", err, output)
+	}
+	if output, err := exec.CommandContext(ctx, "git", "-C", dir, "checkout", "branch/main-0123456789abcdef0123").CombinedOutput(); err != nil {
+		t.Fatalf("git checkout: %v: %s", err, output)
+	}
+	service := branch.NewService(&branch.GitRepository{Store: store}, noopBranchIndex{}, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return dir, true }}, nil, nil, staticBranchIDs{id: "brn_0123456789abcdef0123"})
+	handler := handlerWithBranches(service)
+	for _, path := range []string{"/api/branches/status", "/api/branches"} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusInternalServerError {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), dir) || strings.Contains(response.Body.String(), "git checkout") {
+			t.Fatalf("unsafe body=%s", response.Body.String())
+		}
 	}
 }
 

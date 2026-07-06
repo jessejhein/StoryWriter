@@ -24,7 +24,7 @@ func TestApplyPathsAndCommitPromotion(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	changed := "version: 2\nroot:\n  arcs: []\n"
@@ -95,7 +95,7 @@ func TestApplyPathsHandlesAdditionsAndDeletions(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/add-delete-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(filepath.Join(dir, filepath.FromSlash(deleted))); err != nil {
@@ -147,7 +147,7 @@ func TestCommitPromotionRejectsUnexpectedStagedPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 2\nroot:\n  arcs: []\n"), 0o644); err != nil {

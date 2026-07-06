@@ -56,6 +56,32 @@ type PromotionCommitInput struct {
 	Paths            []string
 }
 
+func experimentBaseRef(ref string) (string, error) {
+	if err := validateBranchRef(ref); err != nil {
+		return "", err
+	}
+	if ref == canonBranch {
+		return "", fmt.Errorf("branch ref %q is invalid", ref)
+	}
+	suffix := strings.TrimPrefix(ref, experimentNamespace)
+	parts := strings.Split(suffix, "-")
+	if len(parts) < 2 {
+		return "", fmt.Errorf("branch ref %q is invalid", ref)
+	}
+	hex := parts[len(parts)-1]
+	if !experimentHexPattern.MatchString(hex) {
+		return "", fmt.Errorf("branch ref %q is invalid", ref)
+	}
+	return "refs/storywork/experiment-base/brn_" + hex, nil
+}
+
+func writeUpdateRefTransaction(commands ...string) string {
+	if len(commands) == 0 {
+		return ""
+	}
+	return strings.Join(commands, "\n") + "\n"
+}
+
 // Status returns active branch, cleanliness, and current main head.
 func (s *Store) Status(ctx context.Context, repoPath string) (BranchStatus, error) {
 	active, detached, err := s.activeBranch(ctx, repoPath)
@@ -141,11 +167,14 @@ func (s *Store) ListExperiments(ctx context.Context, repoPath string) ([]Experim
 }
 
 // CreateAndSwitch creates one experiment ref at startCommit and checks it out.
-func (s *Store) CreateAndSwitch(ctx context.Context, repoPath, ref, startCommit string) error {
+func (s *Store) CreateAndSwitch(ctx context.Context, repoPath, ref, startCommit, baseCommit string) error {
 	if err := validateBranchRef(ref); err != nil {
 		return err
 	}
 	if err := validateCommitID(startCommit); err != nil {
+		return err
+	}
+	if err := validateCommitID(baseCommit); err != nil {
 		return err
 	}
 	clean, err := s.IsClean(ctx, repoPath)
@@ -162,14 +191,34 @@ func (s *Store) CreateAndSwitch(ctx context.Context, repoPath, ref, startCommit 
 	if detached {
 		return errors.New("detached HEAD is not supported")
 	}
-	if _, err := s.run(ctx, "-C", repoPath, "branch", ref, startCommit); err != nil {
-		return fmt.Errorf("create branch %q: %w", ref, err)
+	baseRef, err := experimentBaseRef(ref)
+	if err != nil {
+		return err
+	}
+	transaction := writeUpdateRefTransaction(
+		"create refs/heads/"+ref+" "+startCommit,
+		"create "+baseRef+" "+baseCommit,
+	)
+	command := exec.CommandContext(ctx, s.executable, "-C", repoPath, "update-ref", "--stdin")
+	command.Stdin = strings.NewReader(transaction)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", strings.Join(command.Args, " "), err, strings.TrimSpace(string(output)))
 	}
 	if _, err := s.run(ctx, "-C", repoPath, "checkout", ref); err != nil {
 		cleanupCtx, cancel := cleanupContext(ctx)
 		defer cancel()
 		_, switchErr := s.run(cleanupCtx, "-C", repoPath, "checkout", previous)
-		_, deleteErr := s.run(cleanupCtx, "-C", repoPath, "branch", "-D", ref)
+		deleteTxn := writeUpdateRefTransaction(
+			"delete refs/heads/"+ref+" "+startCommit,
+			"delete "+baseRef+" "+baseCommit,
+		)
+		deleteCommand := exec.CommandContext(cleanupCtx, s.executable, "-C", repoPath, "update-ref", "--stdin")
+		deleteCommand.Stdin = strings.NewReader(deleteTxn)
+		deleteOutput, deleteErr := deleteCommand.CombinedOutput()
+		if deleteErr != nil {
+			deleteErr = fmt.Errorf("%s: %w: %s", strings.Join(deleteCommand.Args, " "), deleteErr, strings.TrimSpace(string(deleteOutput)))
+		}
 		return fmt.Errorf("checkout branch %q: %w", ref, errors.Join(err, switchErr, deleteErr))
 	}
 	return nil
@@ -246,18 +295,32 @@ func (s *Store) SwitchExperiment(ctx context.Context, repoPath, ref, expectedHea
 }
 
 // DeleteExperiment deletes one managed experiment ref at the expected head.
-func (s *Store) DeleteExperiment(ctx context.Context, repoPath, ref, expectedHead string) error {
+func (s *Store) DeleteExperiment(ctx context.Context, repoPath, ref, expectedHead, baseCommit string) error {
 	if err := validateBranchRef(ref); err != nil {
 		return err
 	}
 	if err := validateCommitID(expectedHead); err != nil {
 		return err
 	}
-	if _, err := s.run(ctx, "-C", repoPath, "update-ref", "-d", "refs/heads/"+ref, expectedHead); err != nil {
-		if strings.Contains(err.Error(), "cannot lock ref") {
-			return errors.Join(ErrStaleExperimentHead, err)
+	if err := validateCommitID(baseCommit); err != nil {
+		return err
+	}
+	baseRef, err := experimentBaseRef(ref)
+	if err != nil {
+		return err
+	}
+	transaction := writeUpdateRefTransaction(
+		"delete refs/heads/"+ref+" "+expectedHead,
+		"delete "+baseRef+" "+baseCommit,
+	)
+	command := exec.CommandContext(ctx, s.executable, "-C", repoPath, "update-ref", "--stdin")
+	command.Stdin = strings.NewReader(transaction)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		if strings.Contains(string(output), "cannot lock ref") {
+			return errors.Join(ErrStaleExperimentHead, fmt.Errorf("%s: %w: %s", strings.Join(command.Args, " "), err, strings.TrimSpace(string(output))))
 		}
-		return fmt.Errorf("delete branch %q: %w", ref, err)
+		return fmt.Errorf("delete branch %q: %w: %s", ref, err, strings.TrimSpace(string(output)))
 	}
 	return nil
 }
@@ -392,6 +455,23 @@ func (s *Store) ReadTextBlob(ctx context.Context, repoPath, commit, projectPath 
 	return TextBlob{Exists: true, Bytes: output}, nil
 }
 
+// ResolveExperimentBase resolves the immutable base provenance for a managed experiment.
+func (s *Store) ResolveExperimentBase(ctx context.Context, repoPath, ref string) (string, error) {
+	baseRef, err := experimentBaseRef(ref)
+	if err != nil {
+		return "", err
+	}
+	output, err := s.run(ctx, "-C", repoPath, "rev-parse", "--verify", baseRef+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve experiment base %q: %w", ref, err)
+	}
+	base := strings.TrimSpace(output)
+	if err := validateCommitID(base); err != nil {
+		return "", err
+	}
+	return base, nil
+}
+
 func (s *Store) inspectRegularTreePath(ctx context.Context, repoPath, commit, projectPath string) (bool, string, error) {
 	entry, err := s.runBytes(ctx, "-C", repoPath, "ls-tree", "-z", commit, "--", projectPath)
 	if err != nil {
@@ -421,7 +501,11 @@ func (s *Store) SnapshotPaths(ctx context.Context, repoPath, commit string, path
 		if err := validateProjectPath(projectPath); err != nil {
 			return nil, err
 		}
-		if _, err := s.run(ctx, "-C", repoPath, "cat-file", "-e", commit+":"+projectPath); err != nil {
+		exists, _, err := s.inspectRegularTreePath(ctx, repoPath, commit, projectPath)
+		if err != nil {
+			return nil, fmt.Errorf("inspect blob %q at %s: %w", projectPath, commit, err)
+		}
+		if !exists {
 			snapshots = append(snapshots, PathSnapshot{Path: projectPath, Exists: false, SourceCommit: commit})
 			continue
 		}

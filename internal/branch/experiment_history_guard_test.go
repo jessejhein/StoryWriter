@@ -19,8 +19,8 @@ import (
 func TestLoadComparisonRejectsRewrittenExperimentHistory(t *testing.T) {
 	t.Parallel()
 	repo := &fakeRepo{
-		status:           branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", MainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-		experiments:      []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+		status:           branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		experiments:      []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
 		mainHead:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		forceNonAncestor: true,
 	}
@@ -46,6 +46,73 @@ func TestPromoteSelectedFilesRejectsRewrittenExperimentHistoryBeforeCheckout(t *
 	}
 	if containsCall(repo.calls, "switch:main") {
 		t.Fatalf("calls = %v", repo.calls)
+	}
+}
+
+// Test: a missing recorded experiment base is treated as repository-state
+// corruption before switch, comparison, or discard work.
+// Requirements: M8-R05, M8-R12, M8-R17.
+func TestMissingExperimentBaseFailsClosedBeforeBranchMutation(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		status: branch.RepositoryStatus{
+			ActiveBranch:   "branch/test-exp-0123456789abcdef0123",
+			IsManaged:      true,
+			IsClean:        true,
+			ExperimentID:   "brn_0123456789abcdef0123",
+			ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			MainHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}},
+		mainHead:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	service := branch.NewService(repo, &fakeIndex{}, nilCoordinator{}, branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	if _, err := service.LoadComparison(context.Background(), "brn_0123456789abcdef0123"); !errors.Is(err, branch.ErrRepositoryState) {
+		t.Fatalf("LoadComparison() err = %v, want ErrRepositoryState", err)
+	}
+	if _, err := service.SwitchTarget(context.Background(), "brn_0123456789abcdef0123", ptrCommit("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")); !errors.Is(err, branch.ErrRepositoryState) {
+		t.Fatalf("SwitchTarget() err = %v, want ErrRepositoryState", err)
+	}
+	if _, err := service.DiscardExperiment(context.Background(), "brn_0123456789abcdef0123", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); !errors.Is(err, branch.ErrRepositoryState) {
+		t.Fatalf("DiscardExperiment() err = %v, want ErrRepositoryState", err)
+	}
+}
+
+func ptrCommit(value string) *branch.CommitID {
+	id := branch.CommitID(value)
+	return &id
+}
+
+// Test: a related but non-descendant experiment history is rejected before
+// switch or discard mutations.
+// Requirements: M8-R05, M8-R12, M8-R17.
+func TestSwitchAndDiscardRejectRelatedRewrittenExperimentHistory(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		status: branch.RepositoryStatus{
+			ActiveBranch:   "branch/test-exp-0123456789abcdef0123",
+			IsManaged:      true,
+			IsClean:        true,
+			ExperimentID:   "brn_0123456789abcdef0123",
+			ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BaseHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			MainHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		experiments: []branch.ExperimentRef{{
+			ID:         "brn_0123456789abcdef0123",
+			BranchName: "branch/test-exp-0123456789abcdef0123",
+			Head:       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BaseHead:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		mainHead:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		forceNonAncestor: true,
+	}
+	service := branch.NewService(repo, &fakeIndex{}, nilCoordinator{}, branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	if _, err := service.SwitchTarget(context.Background(), "brn_0123456789abcdef0123", ptrCommit("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")); !errors.Is(err, branch.ErrStaleRef) {
+		t.Fatalf("SwitchTarget() err = %v, want ErrStaleRef", err)
+	}
+	if _, err := service.DiscardExperiment(context.Background(), "brn_0123456789abcdef0123", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); !errors.Is(err, branch.ErrStaleRef) {
+		t.Fatalf("DiscardExperiment() err = %v, want ErrStaleRef", err)
 	}
 }
 

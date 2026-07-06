@@ -53,6 +53,7 @@ type ExperimentRef struct {
 	ID         ExperimentID `json:"experiment_id"`
 	BranchName BranchRef    `json:"branch_name"`
 	Head       CommitID     `json:"head"`
+	BaseHead   CommitID     `json:"-"`
 }
 
 // ChangedFile is one changed path in a tree comparison.
@@ -71,6 +72,7 @@ type RepositoryStatus struct {
 	MainHead       CommitID     `json:"main_head"`
 	ExperimentID   ExperimentID `json:"experiment_id,omitempty"`
 	ExperimentHead CommitID     `json:"experiment_head,omitempty"`
+	BaseHead       CommitID     `json:"-"`
 }
 
 // Comparison is a deterministic main-vs-experiment inventory.

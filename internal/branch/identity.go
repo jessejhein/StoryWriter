@@ -155,6 +155,9 @@ func ValidateBranchRef(value string) error {
 	if !slugPattern.MatchString(slug) || len(slug) == 0 || len(slug) > slugMaxBytes {
 		return fmt.Errorf("branch ref %q: %w", value, ErrInvalidBranchRef)
 	}
+	if _, reserved := reservedExperimentSlugs[slug]; reserved {
+		return fmt.Errorf("branch ref %q: %w", value, ErrInvalidBranchRef)
+	}
 	return nil
 }
 

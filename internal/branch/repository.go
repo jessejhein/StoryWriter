@@ -4,13 +4,38 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"storywork/internal/gitstore"
 )
 
 // GitRepository adapts gitstore.Store to the branch repository boundary.
 type GitRepository struct {
-	Store *gitstore.Store
+	Store gitRepositoryStore
+}
+
+type gitRepositoryStore interface {
+	Status(context.Context, string) (gitstore.BranchStatus, error)
+	ListExperiments(context.Context, string) ([]gitstore.ExperimentBranch, error)
+	CreateAndSwitch(context.Context, string, string, string, string) error
+	Switch(context.Context, string, string) error
+	SwitchExperiment(context.Context, string, string, string) error
+	DeleteExperiment(context.Context, string, string, string, string) error
+	CompareTrees(context.Context, string, string, string) ([]gitstore.TreeChange, error)
+	ReadTextBlob(context.Context, string, string, string) (gitstore.TextBlob, error)
+	MergeBase(context.Context, string, string, string) (string, error)
+	IsAncestor(context.Context, string, string, string) (bool, error)
+	PathsChanged(context.Context, string, string, string) ([]string, error)
+	UnifiedDiff(context.Context, string, string, string, []string, int) (string, error)
+	SnapshotPaths(context.Context, string, string, []string) ([]gitstore.PathSnapshot, error)
+	ApplyPaths(context.Context, string, string, []gitstore.TreeChange, []string) error
+	StagePaths(context.Context, string, []string) error
+	UnstagePaths(context.Context, string, []string) error
+	RestorePathSnapshots(context.Context, string, []gitstore.PathSnapshot) error
+	CommitPromotion(context.Context, string, gitstore.PromotionCommitInput) (string, error)
+	ResolveCommit(context.Context, string, string) (string, error)
+	IsClean(context.Context, string) (bool, error)
+	ResolveExperimentBase(context.Context, string, string) (string, error)
 }
 
 func (r *GitRepository) Status(ctx context.Context, repoPath string) (RepositoryStatus, error) {
@@ -26,17 +51,26 @@ func (r *GitRepository) Status(ctx context.Context, repoPath string) (Repository
 		IsClean:      status.IsClean,
 		MainHead:     CommitID(status.MainHead),
 	}
-	if result.IsManaged {
+	if strings.HasPrefix(status.ActiveBranch, ExperimentNamespace) {
+		if !IsManagedExperimentRef(status.ActiveBranch) {
+			return RepositoryStatus{}, fmt.Errorf("managed branch ref %q: %w", status.ActiveBranch, ErrRepositoryState)
+		}
 		id, _, err := ParseManagedExperimentRef(status.ActiveBranch)
 		if err != nil {
-			return RepositoryStatus{}, err
+			return RepositoryStatus{}, fmt.Errorf("managed branch ref %q: %w", status.ActiveBranch, ErrRepositoryState)
 		}
 		head, err := r.Store.ResolveCommit(ctx, repoPath, status.ActiveBranch)
 		if err != nil {
 			return RepositoryStatus{}, err
 		}
+		base, err := r.Store.ResolveExperimentBase(ctx, repoPath, status.ActiveBranch)
+		if err != nil {
+			return RepositoryStatus{}, fmt.Errorf("managed branch ref %q: %w", status.ActiveBranch, ErrRepositoryState)
+		}
 		result.ExperimentID = id
 		result.ExperimentHead = CommitID(head)
+		result.BaseHead = CommitID(base)
+		result.IsManaged = true
 	}
 	return result, nil
 }
@@ -44,25 +78,30 @@ func (r *GitRepository) Status(ctx context.Context, repoPath string) (Repository
 func (r *GitRepository) ListExperiments(ctx context.Context, repoPath string) ([]ExperimentRef, error) {
 	refs, err := r.Store.ListExperiments(ctx, repoPath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Join(ErrRepositoryState, err)
 	}
 	experiments := make([]ExperimentRef, 0, len(refs))
 	for _, item := range refs {
 		id, _, err := ParseManagedExperimentRef(item.Ref)
 		if err != nil {
-			continue
+			return nil, errors.Join(ErrRepositoryState, err)
+		}
+		base, err := r.Store.ResolveExperimentBase(ctx, repoPath, item.Ref)
+		if err != nil {
+			return nil, errors.Join(ErrRepositoryState, err)
 		}
 		experiments = append(experiments, ExperimentRef{
 			ID:         id,
 			BranchName: BranchRef(item.Ref),
 			Head:       CommitID(item.Head),
+			BaseHead:   CommitID(base),
 		})
 	}
 	return experiments, nil
 }
 
 func (r *GitRepository) CreateAndSwitch(ctx context.Context, repoPath string, ref ExperimentRef, start CommitID) error {
-	return r.Store.CreateAndSwitch(ctx, repoPath, string(ref.BranchName), string(start))
+	return r.Store.CreateAndSwitch(ctx, repoPath, string(ref.BranchName), string(start), string(ref.BaseHead))
 }
 
 func (r *GitRepository) Switch(ctx context.Context, repoPath string, ref BranchRef) error {
@@ -74,7 +113,7 @@ func (r *GitRepository) SwitchExperiment(ctx context.Context, repoPath string, r
 }
 
 func (r *GitRepository) DeleteExperiment(ctx context.Context, repoPath string, ref ExperimentRef, expected CommitID) error {
-	return r.Store.DeleteExperiment(ctx, repoPath, string(ref.BranchName), string(expected))
+	return r.Store.DeleteExperiment(ctx, repoPath, string(ref.BranchName), string(expected), string(ref.BaseHead))
 }
 
 func (r *GitRepository) CompareTrees(ctx context.Context, repoPath string, left, right CommitID) ([]ChangedFile, error) {

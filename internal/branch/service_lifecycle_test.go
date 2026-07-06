@@ -35,6 +35,7 @@ func (f *fakeRepo) CreateAndSwitch(_ context.Context, _ string, ref branch.Exper
 	f.status.IsManaged = true
 	f.status.ExperimentID = ref.ID
 	f.status.ExperimentHead = ref.Head
+	f.status.BaseHead = ref.BaseHead
 	f.experiments = append(f.experiments, ref)
 	return nil
 }
@@ -45,11 +46,19 @@ func (f *fakeRepo) Switch(_ context.Context, _ string, ref branch.BranchRef) err
 	if ref == branch.CanonBranchName {
 		f.status.ExperimentID = ""
 		f.status.ExperimentHead = ""
+		f.status.BaseHead = ""
 	}
 	return nil
 }
 func (f *fakeRepo) SwitchExperiment(ctx context.Context, path string, ref branch.ExperimentRef) error {
-	return f.Switch(ctx, path, ref.BranchName)
+	f.status.ActiveBranch = string(ref.BranchName)
+	f.status.IsCanon = false
+	f.status.IsManaged = true
+	f.status.IsDetached = false
+	f.status.ExperimentID = ref.ID
+	f.status.ExperimentHead = ref.Head
+	f.status.BaseHead = ref.BaseHead
+	return nil
 }
 func (f *fakeRepo) DeleteExperiment(_ context.Context, _ string, ref branch.ExperimentRef, _ branch.CommitID) error {
 	filtered := f.experiments[:0]
@@ -200,6 +209,40 @@ func TestCreateExperimentRebuildsIndex(t *testing.T) {
 	}
 	if !status.IsManaged || index.rebuilds != 1 {
 		t.Fatalf("status = %#v rebuilds = %d", status, index.rebuilds)
+	}
+}
+
+// Test: creating a new experiment while another managed experiment is active
+// still starts from main and records main as the immutable base.
+// Requirements: M8-R02, M8-R03.
+func TestCreateExperimentFromActiveManagedBranchRecordsMainBase(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		status: branch.RepositoryStatus{
+			ActiveBranch:   "branch/first-0123456789abcdef0123",
+			IsManaged:      true,
+			IsClean:        true,
+			ExperimentID:   "brn_0123456789abcdef0123",
+			ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BaseHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			MainHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		mainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		experiments: []branch.ExperimentRef{{
+			ID:         "brn_0123456789abcdef0123",
+			BranchName: "branch/first-0123456789abcdef0123",
+			Head:       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BaseHead:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+	}
+	index := &fakeIndex{}
+	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0124"})
+	status, err := service.CreateExperiment(context.Background(), "Second Exp")
+	if err != nil {
+		t.Fatalf("CreateExperiment() error = %v", err)
+	}
+	if status.BaseHead != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || len(repo.experiments) != 2 {
+		t.Fatalf("status=%#v experiments=%#v", status, repo.experiments)
 	}
 }
 

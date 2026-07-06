@@ -35,7 +35,7 @@ func TestLoadFileComparisonRepresentsAddedAndDeletedSides(t *testing.T) {
 	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 	files := []branch.ChangedFile{{Path: "scenes/scn_00000000000000000001.md", Status: branch.StatusAdded}, {Path: "scenes/scn_00000000000000000002.md", Status: branch.StatusDeleted}}
 	repo := &fakeRepo{
-		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead}},
+		experiments: []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: experimentHead, BaseHead: mainHead}},
 		mainHead:    mainHead, compareFiles: files,
 		blobSides: map[string]branch.TextSide{
 			string(experimentHead) + "|scenes/scn_00000000000000000001.md": {Exists: true, Text: "added\n"},

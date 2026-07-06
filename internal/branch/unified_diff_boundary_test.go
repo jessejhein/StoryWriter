@@ -35,7 +35,7 @@ func initRealRepoForBranch(t *testing.T) (context.Context, string, *branch.GitRe
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	repo := &branch.GitRepository{Store: store}

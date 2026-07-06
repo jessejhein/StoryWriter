@@ -18,7 +18,7 @@ func TestDeleteExperimentLeavesMainUntouched(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	experimentHead, err := store.ResolveCommit(ctx, dir, ref)
@@ -28,10 +28,13 @@ func TestDeleteExperimentLeavesMainUntouched(t *testing.T) {
 	if err := store.Switch(ctx, dir, "main"); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.DeleteExperiment(ctx, dir, ref, experimentHead); err != nil {
+	if err := store.DeleteExperiment(ctx, dir, ref, experimentHead, mainHead); err != nil {
 		t.Fatalf("DeleteExperiment() error = %v", err)
 	}
 	if got, _ := store.ResolveCommit(ctx, dir, "main"); got != mainHead {
 		t.Fatalf("main head changed: %q -> %q", mainHead, got)
+	}
+	if _, err := store.ResolveExperimentBase(ctx, dir, ref); err == nil {
+		t.Fatal("ResolveExperimentBase() error = nil, want deleted ref")
 	}
 }

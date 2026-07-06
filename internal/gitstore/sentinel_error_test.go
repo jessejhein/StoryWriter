@@ -25,7 +25,7 @@ func TestCreateAndSwitchDirtyWorktreeErrorIsSentinel(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 1\nroot:\n  arcs: []\ndirty: true\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err = store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", mainHead)
+	err = store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", mainHead, mainHead)
 	if err == nil {
 		t.Fatal("CreateAndSwitch() = nil, want dirty error")
 	}
@@ -43,7 +43,7 @@ func TestSwitchDirtyWorktreeErrorIsSentinel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 1\nroot:\n  arcs: []\ndirty: true\n"), 0o644); err != nil {
@@ -68,13 +68,13 @@ func TestDeleteExperimentStaleHeadErrorIsSentinel(t *testing.T) {
 		t.Fatal(err)
 	}
 	ref := "branch/test-exp-0123456789abcdef0123"
-	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Switch(ctx, dir, "main"); err != nil {
 		t.Fatal(err)
 	}
-	err = store.DeleteExperiment(ctx, dir, ref, "ffffffffffffffffffffffffffffffffffffffff")
+	err = store.DeleteExperiment(ctx, dir, ref, "ffffffffffffffffffffffffffffffffffffffff", mainHead)
 	if err == nil {
 		t.Fatal("DeleteExperiment() = nil, want stale error")
 	}

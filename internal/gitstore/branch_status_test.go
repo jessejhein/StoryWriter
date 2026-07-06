@@ -37,7 +37,7 @@ func initTestRepo(t *testing.T) (context.Context, string, *gitstore.Store) {
 func TestListExperimentsRejectsMalformedReservedRef(t *testing.T) {
 	t.Parallel()
 	ctx, dir, store := initTestRepo(t)
-	if output, err := exec.Command("git", "-C", dir, "branch", "branch/not-managed", "main").CombinedOutput(); err != nil {
+	if output, err := exec.Command("git", "-C", dir, "branch", "branch/main-0123456789abcdef0123", "main").CombinedOutput(); err != nil {
 		t.Fatalf("git branch: %v: %s", err, output)
 	}
 	if _, err := store.ListExperiments(ctx, dir); err == nil {
@@ -57,7 +57,7 @@ func TestStatusReportsActiveBranchAndCleanliness(t *testing.T) {
 	if status.ActiveBranch != "main" || !status.IsClean || status.IsDetached {
 		t.Fatalf("status = %#v", status)
 	}
-	if err := store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", status.MainHead); err != nil {
+	if err := store.CreateAndSwitch(ctx, dir, "branch/test-exp-0123456789abcdef0123", status.MainHead, status.MainHead); err != nil {
 		t.Fatalf("CreateAndSwitch() error = %v", err)
 	}
 	status, err = store.Status(ctx, dir)

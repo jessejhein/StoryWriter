@@ -2,7 +2,7 @@
 // Requirements: M8-R04, M8-R05, M8-R12, M8-R17
 // Test purpose: Real Git adapters fail closed when a managed experiment ref is
 // force-moved to unrelated history, and the API returns safe conflicts without
-// mutating canon.
+// mutating canon or leaving the project on the rewritten experiment branch.
 
 package app_test
 
@@ -71,7 +71,7 @@ func TestMilestone8RewrittenExperimentHistoryFailsClosed(t *testing.T) {
 	putJSON(t, handler, http.MethodPost, "/api/branches/switch", map[string]any{
 		"target":        experimentID,
 		"expected_head": unrelatedHead,
-	}, http.StatusOK, nil)
+	}, http.StatusConflict, nil)
 
 	getJSON(t, handler, "/api/branches/"+experimentID+"/comparison", http.StatusConflict, nil)
 	putJSON(t, handler, http.MethodPost, "/api/branches/"+experimentID+"/promote", map[string]any{
@@ -82,8 +82,8 @@ func TestMilestone8RewrittenExperimentHistoryFailsClosed(t *testing.T) {
 	}, http.StatusConflict, nil)
 
 	assertMainRefAndTreeUnchanged(t, projectPath, mainHeadBefore, mainTreeBefore)
-	if gitActiveBranch(t, projectPath) != experimentBranch {
-		t.Fatalf("active branch = %q, want %q", gitActiveBranch(t, projectPath), experimentBranch)
+	if gitActiveBranch(t, projectPath) != "main" {
+		t.Fatalf("active branch = %q, want main", gitActiveBranch(t, projectPath))
 	}
 	if got := atomic.LoadInt64(providerCalls); got != 0 {
 		t.Fatalf("provider calls = %d, want 0", got)

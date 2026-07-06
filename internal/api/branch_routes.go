@@ -57,16 +57,19 @@ type experimentResponse struct {
 	DisplayName  string              `json:"display_name"`
 }
 
-func publicExperiments(experiments []branch.ExperimentRef) []experimentResponse {
+func publicExperiments(experiments []branch.ExperimentRef) ([]experimentResponse, error) {
 	result := make([]experimentResponse, 0, len(experiments))
 	for _, experiment := range experiments {
-		_, slug, _ := branch.ParseManagedExperimentRef(string(experiment.BranchName))
+		_, slug, err := branch.ParseManagedExperimentRef(string(experiment.BranchName))
+		if err != nil {
+			return nil, err
+		}
 		result = append(result, experimentResponse{
 			ExperimentID: experiment.ID, BranchName: experiment.BranchName,
 			Head: experiment.Head, DisplayName: strings.TrimSpace(slug),
 		})
 	}
-	return result
+	return result, nil
 }
 
 func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
@@ -96,7 +99,12 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 		if experiments == nil {
 			experiments = []branch.ExperimentRef{}
 		}
-		writeJSON(writer, http.StatusOK, map[string]any{"experiments": publicExperiments(experiments)})
+		public, err := publicExperiments(experiments)
+		if err != nil {
+			writeBranchError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{"experiments": public})
 	})
 	mux.HandleFunc("POST /api/branches", func(writer http.ResponseWriter, request *http.Request) {
 		if err := validateExactQuery(request); err != nil {
