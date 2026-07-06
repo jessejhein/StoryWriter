@@ -417,7 +417,7 @@ func TestMilestone8AcceptanceM834Adversarial(t *testing.T) {
 			"expected_main_head":       refreshed["main_head"],
 			"expected_experiment_head": refreshed["experiment_head"],
 			"comparison_fingerprint":   refreshed["fingerprint"],
-		}, http.StatusInternalServerError, nil)
+		}, http.StatusConflict, nil)
 
 		if gitRevParse(t, projectPath, "main") != mainHeadBefore {
 			t.Fatal("invalid promotion advanced main")

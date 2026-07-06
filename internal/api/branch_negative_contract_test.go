@@ -32,6 +32,11 @@ type listErrorBranchStore struct {
 	err error
 }
 
+type promotionErrorBranchStore struct {
+	branchServiceStub
+	err error
+}
+
 type noopBranchIndex struct{}
 
 func (noopBranchIndex) Rebuild(context.Context, string) error { return nil }
@@ -88,6 +93,10 @@ func (s *spyBranchStore) DiscardExperiment(context.Context, string, branch.Commi
 	return branch.RepositoryStatus{}, nil
 }
 
+func (s promotionErrorBranchStore) PromoteSelectedFiles(context.Context, branch.PromotionRequest) (branch.PromotionResult, error) {
+	return branch.PromotionResult{}, s.err
+}
+
 // Test: typed domain errors map to the exact public status classes.
 // Requirements: M8-R03, M8-R07, M8-R09, M8-R12, M8-R17.
 func TestBranchRouteMapsEveryContractErrorClass(t *testing.T) {
@@ -103,6 +112,7 @@ func TestBranchRouteMapsEveryContractErrorClass(t *testing.T) {
 		{name: "too large", err: branch.ErrFileTooLarge, status: http.StatusRequestEntityTooLarge},
 		{name: "provider output", err: branch.ErrInvalidAnalysisOutput, status: http.StatusBadGateway},
 		{name: "provider unavailable", err: branch.ErrProviderUnavailable, status: http.StatusServiceUnavailable},
+		{name: "promotion subset", err: branch.ErrInvalidPromotionSubset, status: http.StatusConflict},
 		{name: "internal", err: errors.New("/secret/project raw git command"), status: http.StatusInternalServerError},
 	}
 	for _, testCase := range tests {
@@ -113,6 +123,34 @@ func TestBranchRouteMapsEveryContractErrorClass(t *testing.T) {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
 			if strings.Contains(response.Body.String(), "/secret/") || strings.Contains(response.Body.String(), "git command") {
+				t.Fatalf("unsafe body=%s", response.Body.String())
+			}
+		})
+	}
+}
+
+// Test: promotion subset validation failures return 409 while infrastructure
+// failures remain 500 with safe error bodies.
+// Requirements: M8-R14, M8-R15.
+func TestBranchPromotionRouteMapsSubsetValidationAndInfrastructureFailures(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		store  api.BranchStore
+		status int
+	}{
+		{name: "invalid subset", store: promotionErrorBranchStore{err: branch.ErrInvalidPromotionSubset}, status: http.StatusConflict},
+		{name: "infrastructure", store: promotionErrorBranchStore{err: branch.ErrRepositoryState}, status: http.StatusInternalServerError},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			body := `{"paths":["outline.yaml"],"expected_main_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","expected_experiment_head":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","comparison_fingerprint":"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}`
+			response := httptest.NewRecorder()
+			handlerWithBranches(testCase.store).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/branches/brn_0123456789abcdef0123/promote", strings.NewReader(body)))
+			if response.Code != testCase.status {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), "/") || strings.Contains(response.Body.String(), "git") {
 				t.Fatalf("unsafe body=%s", response.Body.String())
 			}
 		})

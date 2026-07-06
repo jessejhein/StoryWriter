@@ -193,15 +193,8 @@ func (s *Service) SwitchTarget(ctx context.Context, target string, expectedHead 
 		if expectedHead != nil && found.Head != *expectedHead {
 			return RepositoryStatus{}, ErrStaleRef
 		}
-		if _, err := ValidateCommitID(string(found.BaseHead)); err != nil {
-			return RepositoryStatus{}, ErrRepositoryState
-		}
-		historyOK, err := s.comparison.IsAncestor(ctx, path, found.BaseHead, found.Head)
-		if err != nil {
-			return RepositoryStatus{}, mapRepositoryError(err)
-		}
-		if !historyOK {
-			return RepositoryStatus{}, ErrStaleRef
+		if _, err := s.resolveManagedExperiment(ctx, path, *found); err != nil {
+			return RepositoryStatus{}, err
 		}
 		ref = found.BranchName
 	}
@@ -243,57 +236,90 @@ func (s *Service) LoadComparison(ctx context.Context, experimentID string) (Comp
 }
 
 func (s *Service) buildComparison(ctx context.Context, path string, id ExperimentID) (Comparison, error) {
-	experiments, err := s.experiments.ListExperiments(ctx, path)
+	resolved, err := s.resolveManagedExperiment(ctx, path, ExperimentRef{ID: id})
 	if err != nil {
 		return Comparison{}, err
 	}
-	var found *ExperimentRef
-	for i := range experiments {
-		if experiments[i].ID == id {
-			found = &experiments[i]
-			break
-		}
-	}
-	if found == nil {
-		return Comparison{}, ErrExperimentNotFound
-	}
-	mainHead, err := s.experiments.ResolveCommit(ctx, path, CanonBranchName)
-	if err != nil {
-		return Comparison{}, ErrMainMissing
-	}
-	experimentHead := found.Head
-	baseHead := found.BaseHead
-	if _, err := ValidateCommitID(string(baseHead)); err != nil {
-		return Comparison{}, ErrRepositoryState
-	}
-	if err := s.requireExperimentHistory(ctx, path, baseHead, experimentHead); err != nil {
-		return Comparison{}, err
-	}
-	files, err := s.comparison.CompareTrees(ctx, path, mainHead, experimentHead)
+	files, err := s.comparison.CompareTrees(ctx, path, resolved.mainHead, resolved.experimentHead)
 	if err != nil {
 		return Comparison{}, mapRepositoryError(err)
 	}
-	fingerprint, err := ComputeFingerprint(mainHead, experimentHead, baseHead, files)
+	fingerprint, err := ComputeFingerprint(resolved.mainHead, resolved.experimentHead, resolved.liveBase, files)
 	if err != nil {
 		return Comparison{}, err
 	}
 	return Comparison{
-		ExperimentID:   id,
-		BranchName:     found.BranchName,
-		MainHead:       mainHead,
-		ExperimentHead: experimentHead,
-		BaseHead:       baseHead,
+		ExperimentID:   resolved.ref.ID,
+		BranchName:     resolved.ref.BranchName,
+		MainHead:       resolved.mainHead,
+		ExperimentHead: resolved.experimentHead,
+		BaseHead:       resolved.liveBase,
 		Fingerprint:    fingerprint,
 		Files:          files,
 	}, nil
 }
 
-func (s *Service) requireExperimentHistory(ctx context.Context, path string, base, experiment CommitID) error {
-	isAncestor, err := s.comparison.IsAncestor(ctx, path, base, experiment)
+type experimentState struct {
+	ref            ExperimentRef
+	mainHead       CommitID
+	experimentHead CommitID
+	liveBase       CommitID
+}
+
+func (s *Service) resolveManagedExperiment(ctx context.Context, path string, ref ExperimentRef) (experimentState, error) {
+	if ref.ID == "" {
+		return experimentState{}, ErrExperimentNotFound
+	}
+	experiments, err := s.experiments.ListExperiments(ctx, path)
+	if err != nil {
+		return experimentState{}, err
+	}
+	var found *ExperimentRef
+	for i := range experiments {
+		if experiments[i].ID == ref.ID {
+			found = &experiments[i]
+			break
+		}
+	}
+	if found == nil {
+		return experimentState{}, ErrExperimentNotFound
+	}
+	if _, err := ValidateCommitID(string(found.BaseHead)); err != nil {
+		return experimentState{}, ErrRepositoryState
+	}
+	mainHead, err := s.experiments.ResolveCommit(ctx, path, CanonBranchName)
+	if err != nil {
+		return experimentState{}, ErrMainMissing
+	}
+	experimentHead := found.Head
+	liveBase, err := s.comparison.MergeBase(ctx, path, mainHead, experimentHead)
+	if err != nil {
+		return experimentState{}, mapRepositoryError(err)
+	}
+	if err := s.requireExperimentHistory(ctx, path, found.BaseHead, mainHead, experimentHead); err != nil {
+		return experimentState{}, err
+	}
+	return experimentState{
+		ref:            *found,
+		mainHead:       mainHead,
+		experimentHead: experimentHead,
+		liveBase:       liveBase,
+	}, nil
+}
+
+func (s *Service) requireExperimentHistory(ctx context.Context, path string, base, mainHead, experimentHead CommitID) error {
+	mainAncestor, err := s.comparison.IsAncestor(ctx, path, base, mainHead)
 	if err != nil {
 		return mapRepositoryError(err)
 	}
-	if !isAncestor {
+	if !mainAncestor {
+		return ErrStaleRef
+	}
+	experimentAncestor, err := s.comparison.IsAncestor(ctx, path, base, experimentHead)
+	if err != nil {
+		return mapRepositoryError(err)
+	}
+	if !experimentAncestor {
 		return ErrStaleRef
 	}
 	return nil
@@ -390,15 +416,9 @@ func (s *Service) DiscardExperiment(ctx context.Context, experimentID string, ex
 	if found.Head != expectedHead {
 		return RepositoryStatus{}, ErrStaleRef
 	}
-	if _, err := ValidateCommitID(string(found.BaseHead)); err != nil {
-		return RepositoryStatus{}, ErrRepositoryState
-	}
-	historyOK, err := s.comparison.IsAncestor(ctx, path, found.BaseHead, found.Head)
+	_, err = s.resolveManagedExperiment(ctx, path, *found)
 	if err != nil {
-		return RepositoryStatus{}, mapRepositoryError(err)
-	}
-	if !historyOK {
-		return RepositoryStatus{}, ErrStaleRef
+		return RepositoryStatus{}, err
 	}
 	if status.ExperimentID == id {
 		if err := s.experiments.Switch(ctx, path, CanonBranchName); err != nil {

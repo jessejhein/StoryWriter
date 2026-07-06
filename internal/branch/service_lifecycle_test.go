@@ -15,13 +15,15 @@ import (
 )
 
 type fakeRepo struct {
-	status           branch.RepositoryStatus
-	experiments      []branch.ExperimentRef
-	mainHead         branch.CommitID
-	compareFiles     []branch.ChangedFile
-	blobSides        map[string]branch.TextSide
-	forceNonAncestor bool
-	mergeBaseErr     error
+	status                     branch.RepositoryStatus
+	experiments                []branch.ExperimentRef
+	mainHead                   branch.CommitID
+	compareFiles               []branch.ChangedFile
+	blobSides                  map[string]branch.TextSide
+	mergeBase                  branch.CommitID
+	forceMainNonAncestor       bool
+	forceExperimentNonAncestor bool
+	mergeBaseErr               error
 }
 
 func (f *fakeRepo) Status(context.Context, string) (branch.RepositoryStatus, error) {
@@ -88,11 +90,26 @@ func (f *fakeRepo) MergeBase(context.Context, string, branch.CommitID, branch.Co
 	if f.mergeBaseErr != nil {
 		return "", f.mergeBaseErr
 	}
+	if f.mergeBase != "" {
+		return f.mergeBase, nil
+	}
+	if f.mainHead != "" {
+		return f.mainHead, nil
+	}
 	return "cccccccccccccccccccccccccccccccccccccccc", nil
 }
-func (f *fakeRepo) IsAncestor(context.Context, string, branch.CommitID, branch.CommitID) (bool, error) {
-	if f.forceNonAncestor {
-		return false, nil
+func (f *fakeRepo) IsAncestor(_ context.Context, _ string, _ branch.CommitID, descendant branch.CommitID) (bool, error) {
+	switch descendant {
+	case f.status.MainHead:
+		if f.forceMainNonAncestor {
+			return false, nil
+		}
+		return true, nil
+	case f.status.ExperimentHead:
+		if f.forceExperimentNonAncestor {
+			return false, nil
+		}
+		return true, nil
 	}
 	return true, nil
 }

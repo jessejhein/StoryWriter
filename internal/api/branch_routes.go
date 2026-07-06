@@ -384,6 +384,8 @@ func statusForBranchError(err error) int {
 		return http.StatusConflict
 	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
 		return http.StatusBadRequest
+	case errors.Is(err, branch.ErrInvalidPromotionSubset):
+		return http.StatusConflict
 	case errors.Is(err, branch.ErrExperimentNotFound), errors.Is(err, branch.ErrPathNotInComparison):
 		return http.StatusNotFound
 	case errors.Is(err, branch.ErrFileTooLarge):
@@ -403,6 +405,8 @@ func sanitizeBranchError(err error) error {
 		return errors.New("branch operation conflicts with current project state")
 	case errors.Is(err, branch.ErrPromotionConflict):
 		return err
+	case errors.Is(err, branch.ErrInvalidPromotionSubset):
+		return errors.New("selected files do not form a valid canonical project")
 	case errors.Is(err, branch.ErrExperimentNotFound), errors.Is(err, branch.ErrPathNotInComparison):
 		return errors.New("branch resource not found")
 	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):

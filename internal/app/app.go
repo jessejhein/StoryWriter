@@ -81,6 +81,24 @@ type importHandlerStore struct {
 	service *importer.Service
 }
 
+type branchValidationAdapter struct {
+	validator *projectcheck.Validator
+}
+
+func (v branchValidationAdapter) ValidateProject(ctx context.Context, projectPath string) error {
+	if v.validator == nil {
+		return branch.ErrRepositoryState
+	}
+	err := v.validator.ValidateProject(ctx, projectPath)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, projectcheck.ErrInvalidProject) {
+		return errors.Join(branch.ErrInvalidPromotionSubset, err)
+	}
+	return err
+}
+
 func (s *importHandlerStore) ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error) {
 	return s.service.ImportDirectory(ctx, sourceDirectory)
 }
@@ -169,7 +187,7 @@ func NewHandler(version string) http.Handler {
 			}
 			return current.Path, true
 		}},
-		projectcheck.New(),
+		branchValidationAdapter{validator: projectcheck.New()},
 		branchAnalyzer,
 		branch.NewRandomIDGenerator(),
 	)

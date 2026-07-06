@@ -19,10 +19,29 @@ import (
 func TestLoadComparisonRejectsRewrittenExperimentHistory(t *testing.T) {
 	t.Parallel()
 	repo := &fakeRepo{
-		status:           branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
-		experiments:      []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
-		mainHead:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		forceNonAncestor: true,
+		status:                     branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+		experiments:                []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+		mainHead:                   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		forceExperimentNonAncestor: true,
+	}
+	service := branch.NewService(repo, &fakeIndex{}, nilCoordinator{}, branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+
+	_, err := service.LoadComparison(context.Background(), "brn_0123456789abcdef0123")
+	if !errors.Is(err, branch.ErrStaleRef) {
+		t.Fatalf("err = %v, want errors.Is(branch.ErrStaleRef)", err)
+	}
+}
+
+// Test: comparison rejects unrelated main history even when the stored base
+// still looks valid for the experiment side.
+// Requirements: M8-R05, M8-R17.
+func TestLoadComparisonRejectsUnrelatedCanonHistory(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		status:               branch.RepositoryStatus{ActiveBranch: "branch/test-exp-0123456789abcdef0123", IsManaged: true, IsClean: true, ExperimentID: "brn_0123456789abcdef0123", ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", MainHead: "dddddddddddddddddddddddddddddddddddddddd"},
+		experiments:          []branch.ExperimentRef{{ID: "brn_0123456789abcdef0123", BranchName: "branch/test-exp-0123456789abcdef0123", Head: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", BaseHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+		mainHead:             "dddddddddddddddddddddddddddddddddddddddd",
+		forceMainNonAncestor: true,
 	}
 	service := branch.NewService(repo, &fakeIndex{}, nilCoordinator{}, branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
 
@@ -37,7 +56,7 @@ func TestLoadComparisonRejectsRewrittenExperimentHistory(t *testing.T) {
 func TestPromoteSelectedFilesRejectsRewrittenExperimentHistoryBeforeCheckout(t *testing.T) {
 	t.Parallel()
 	repo, request := promotionFixture(t)
-	repo.forceNonAncestor = true
+	repo.forceExperimentNonAncestor = true
 	service := newPromotionService(repo, &promotionIndex{calls: &repo.calls}, promotionValidator{calls: &repo.calls})
 
 	_, err := service.PromoteSelectedFiles(context.Background(), request)
@@ -104,8 +123,8 @@ func TestSwitchAndDiscardRejectRelatedRewrittenExperimentHistory(t *testing.T) {
 			Head:       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
 			BaseHead:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		}},
-		mainHead:         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		forceNonAncestor: true,
+		mainHead:             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		forceMainNonAncestor: true,
 	}
 	service := branch.NewService(repo, &fakeIndex{}, nilCoordinator{}, branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
 	if _, err := service.SwitchTarget(context.Background(), "brn_0123456789abcdef0123", ptrCommit("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")); !errors.Is(err, branch.ErrStaleRef) {
@@ -113,6 +132,43 @@ func TestSwitchAndDiscardRejectRelatedRewrittenExperimentHistory(t *testing.T) {
 	}
 	if _, err := service.DiscardExperiment(context.Background(), "brn_0123456789abcdef0123", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"); !errors.Is(err, branch.ErrStaleRef) {
 		t.Fatalf("DiscardExperiment() err = %v, want ErrStaleRef", err)
+	}
+}
+
+// Test: comparison fingerprints and base heads use the live merge base.
+// Requirements: M8-R05, M8-R06.
+func TestLoadComparisonUsesLiveMergeBase(t *testing.T) {
+	t.Parallel()
+	liveBase := branch.CommitID("cccccccccccccccccccccccccccccccccccccccc")
+	repo := &fakeRepo{
+		status: branch.RepositoryStatus{
+			ActiveBranch:   "branch/test-exp-0123456789abcdef0123",
+			IsManaged:      true,
+			IsClean:        true,
+			ExperimentID:   "brn_0123456789abcdef0123",
+			ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BaseHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			MainHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		},
+		experiments: []branch.ExperimentRef{{
+			ID:         "brn_0123456789abcdef0123",
+			BranchName: "branch/test-exp-0123456789abcdef0123",
+			Head:       "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+			BaseHead:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		mainHead:  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		mergeBase: liveBase,
+	}
+	service := branch.NewService(repo, &fakeIndex{}, nilCoordinator{}, branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	comparison, err := service.LoadComparison(context.Background(), "brn_0123456789abcdef0123")
+	if err != nil {
+		t.Fatalf("LoadComparison() err = %v", err)
+	}
+	if comparison.BaseHead != liveBase {
+		t.Fatalf("base head = %q, want %q", comparison.BaseHead, liveBase)
+	}
+	if comparison.Fingerprint == "" {
+		t.Fatal("fingerprint is empty")
 	}
 }
 

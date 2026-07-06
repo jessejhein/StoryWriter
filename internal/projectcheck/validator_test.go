@@ -6,12 +6,14 @@ package projectcheck_test
 
 import (
 	"context"
+	"errors"
 	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"storywork/internal/agent"
 	"storywork/internal/projectcheck"
 )
 
@@ -171,4 +173,47 @@ func TestValidateProjectRejectsUnexpectedImportArtifacts(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+}
+
+// Test: malformed canonical outline state is classified as an invalid
+// promotion subset so callers can return a 409 without leaking infrastructure
+// details.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectClassifiesInvalidCanonicalState(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "styles"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, root, map[string]string{
+		"project.yaml": "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+		"outline.yaml": "version: 2\nroot:\n  arcs: []\n",
+	})
+	err := projectcheck.New().ValidateProject(context.Background(), root)
+	if !errors.Is(err, projectcheck.ErrInvalidProject) {
+		t.Fatalf("ValidateProject() error = %v", err)
+	}
+}
+
+// Test: infrastructure failures remain distinct from invalid canonical state.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectLeavesInfrastructureFailuresUnclassified(t *testing.T) {
+	t.Parallel()
+	infraErr := errors.New("filesystem offline")
+	v := projectcheck.NewWithReaders(
+		&fakeStoryReader{outlineErr: infraErr},
+		&fakeRegistryReader{agents: []agent.Agent{}, styles: []agent.Style{}},
+		projectcheck.WithMetadataFunc(noopMetadata),
+		projectcheck.WithImportsFunc(noopImports),
+	)
+	err := v.ValidateProject(context.Background(), t.TempDir())
+	if !errors.Is(err, infraErr) {
+		t.Fatalf("ValidateProject() error = %v, want %v", err, infraErr)
+	}
+	if errors.Is(err, projectcheck.ErrInvalidProject) {
+		t.Fatalf("ValidateProject() error = %v, want no invalid-project classification", err)
+	}
 }

@@ -2,7 +2,7 @@
 // Requirements: M8-R06, M8-R18
 // Test purpose: verify pure branch state keys, stale protection, selection, and invalidation.
 
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import type { BranchContextKey, ChangedFile, ComparisonResponse, RamificationFinding } from './branchTypes'
 import {
   applyComparisonFailure,
@@ -11,7 +11,6 @@ import {
   applyFileComparisonSuccess,
   applyRamificationSuccess,
   beginComparisonRequest,
-  branchUsesBrowserStorage,
   buildBranchContextKey,
   canProceedWithBranchChange,
   contextKeysEqual,
@@ -238,10 +237,16 @@ test('requires confirmation when browser drafts are dirty', () => {
   expect(canProceedWithBranchChange(true, false)).toBe('blocked')
 })
 
-// Test: branch comparison text, goals, and findings never enter browser storage.
+// Test: branch comparison transitions never write to browser storage.
 // Requirements: M8-R18.
 test('never writes branch comparison goals or findings to browser storage', () => {
-  expect(branchUsesBrowserStorage()).toBe(false)
+  const setItemSpy = vi.spyOn(Storage.prototype, 'setItem')
+  const state = applyComparisonSuccess(initialBranchWorkbenchState(projectID), comparison, context(), 0)
+  const reset = invalidateOnBranchChange(projectID)
+  expect(reset.comparison).toBeNull()
+  expect(state.comparison?.fingerprint).toBe(fingerprint)
+  expect(setItemSpy).not.toHaveBeenCalled()
+  setItemSpy.mockRestore()
 })
 
 // Test: shouldAcceptResponse compares every context dimension.

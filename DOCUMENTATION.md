@@ -278,10 +278,11 @@ receive scope-specific messages only. Its durable contract is
 
 Milestone 8 adds managed `branch/` experiments from fixed `main` canon,
 read-only comparison against current `main` while an experiment stays checked
-out, explicit transient ramification analysis, and conservative whole-file
-promotion with `internal/projectcheck` validation. Shared provider chat
-transport lives in `internal/modelchat`. Its durable contract is
-`docs/17_milestone_8_task_prompt.md`.
+out, live merge-base validation against the immutable creation provenance,
+explicit transient ramification analysis, and rollback-safe whole-file
+promotion with `internal/projectcheck` validation and post-publication
+verification. Shared provider chat transport lives in `internal/modelchat`.
+Its durable contract is `docs/17_milestone_8_task_prompt.md`.
 
 Example:
 

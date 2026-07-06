@@ -2,6 +2,7 @@ package projectcheck
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,6 +15,10 @@ import (
 	"storywork/internal/story"
 	"storywork/internal/storyfile"
 )
+
+// ErrInvalidProject reports malformed, incomplete, or relationship-invalid
+// canonical project state.
+var ErrInvalidProject = errors.New("invalid canonical project")
 
 // StoryReader provides read-only access to outline, codex, and progression files.
 type StoryReader interface {
@@ -76,11 +81,11 @@ func NewWithReaders(files StoryReader, agents RegistryReader, opts ...Option) *V
 // ValidateProject validates the complete canonical project at projectPath.
 func (v *Validator) ValidateProject(ctx context.Context, projectPath string) error {
 	if err := v.validateProjectMetadata(projectPath); err != nil {
-		return err
+		return classifyValidationError(err)
 	}
 	outline, err := v.files.Load(ctx, projectPath)
 	if err != nil {
-		return fmt.Errorf("outline validation failed: %w", err)
+		return classifyValidationError(fmt.Errorf("outline validation failed: %w", err))
 	}
 	sceneIDs := make(map[string]struct{})
 	for _, arc := range outline.Arcs {
@@ -92,7 +97,7 @@ func (v *Validator) ValidateProject(ctx context.Context, projectPath string) err
 	}
 	entries, err := v.files.LoadCodexEntries(ctx, projectPath)
 	if err != nil {
-		return fmt.Errorf("codex validation failed: %w", err)
+		return classifyValidationError(fmt.Errorf("codex validation failed: %w", err))
 	}
 	entryIDs := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
@@ -105,24 +110,24 @@ func (v *Validator) ValidateProject(ctx context.Context, projectPath string) err
 	for _, progressionFile := range progressionFiles {
 		entryID := strings.TrimSuffix(filepath.Base(progressionFile), ".yaml")
 		if _, ok := entryIDs[entryID]; !ok {
-			return fmt.Errorf("progression validation failed: entry %q does not exist", entryID)
+			return classifyValidationError(fmt.Errorf("progression validation failed: entry %q does not exist", entryID))
 		}
 		document, err := v.files.LoadProgressions(ctx, projectPath, entryID)
 		if err != nil {
-			return fmt.Errorf("progression validation failed for %q: %w", entryID, err)
+			return classifyValidationError(fmt.Errorf("progression validation failed for %q: %w", entryID, err))
 		}
 		if _, err := codex.NormalizeProgressions(entryID, document.Progressions, sceneIDs); err != nil {
-			return fmt.Errorf("progression validation failed for %q: %w", entryID, err)
+			return classifyValidationError(fmt.Errorf("progression validation failed for %q: %w", entryID, err))
 		}
 	}
 	if _, err := v.agents.LoadAgents(projectPath); err != nil {
-		return fmt.Errorf("agent registry validation failed: %w", err)
+		return classifyValidationError(fmt.Errorf("agent registry validation failed: %w", err))
 	}
 	if _, err := v.agents.LoadStyles(projectPath); err != nil {
-		return fmt.Errorf("style registry validation failed: %w", err)
+		return classifyValidationError(fmt.Errorf("style registry validation failed: %w", err))
 	}
 	if err := v.validateImportArtifacts(ctx, projectPath); err != nil {
-		return err
+		return classifyValidationError(err)
 	}
 	return nil
 }
@@ -164,4 +169,52 @@ func (v *Validator) validateImportArtifacts(ctx context.Context, projectPath str
 		}
 	}
 	return nil
+}
+
+func classifyValidationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, os.ErrNotExist) ||
+		errors.Is(err, story.ErrInvalidTitle) ||
+		errors.Is(err, story.ErrInvalidID) ||
+		errors.Is(err, story.ErrParentNotFound) ||
+		errors.Is(err, story.ErrInvalidPOV) ||
+		errors.Is(err, story.ErrInvalidStatus) ||
+		errors.Is(err, story.ErrInvalidMarkdown) ||
+		errors.Is(err, story.ErrInvalidRevision) ||
+		errors.Is(err, story.ErrInvalidSelection) ||
+		errors.Is(err, codex.ErrInvalidType) ||
+		errors.Is(err, codex.ErrInvalidID) ||
+		errors.Is(err, codex.ErrInvalidName) ||
+		errors.Is(err, codex.ErrInvalidAlias) ||
+		errors.Is(err, codex.ErrInvalidTag) ||
+		errors.Is(err, codex.ErrInvalidDescription) ||
+		errors.Is(err, codex.ErrInvalidMetadata) ||
+		errors.Is(err, codex.ErrInvalidRevision) ||
+		errors.Is(err, codex.ErrInvalidProgression) ||
+		errors.Is(err, codex.ErrEntryNotFound) ||
+		errors.Is(err, codex.ErrSceneNotFound) ||
+		errors.Is(err, agent.ErrInvalidAgent) ||
+		errors.Is(err, agent.ErrInvalidStyle) ||
+		errors.Is(err, importer.ErrInvalidID) ||
+		errors.Is(err, importer.ErrInvalidManifest) ||
+		errors.Is(err, importer.ErrInvalidPath) ||
+		errors.Is(err, importer.ErrCaseFoldedCollision) ||
+		errors.Is(err, importer.ErrInvalidCandidate) ||
+		strings.Contains(err.Error(), "codex validation failed") ||
+		strings.Contains(err.Error(), "progression validation failed") ||
+		strings.Contains(err.Error(), "agent registry validation failed") ||
+		strings.Contains(err.Error(), "style registry validation failed") ||
+		strings.Contains(err.Error(), "outline.yaml") ||
+		strings.Contains(err.Error(), "arcs/") ||
+		strings.Contains(err.Error(), "chapters/") ||
+		strings.Contains(err.Error(), "scenes/") ||
+		strings.Contains(err.Error(), "codex/") ||
+		strings.Contains(err.Error(), "progressions/") ||
+		strings.Contains(err.Error(), "import candidate") ||
+		strings.Contains(err.Error(), "raw import") {
+		return errors.Join(ErrInvalidProject, err)
+	}
+	return err
 }

@@ -678,6 +678,12 @@ exposes a project path:
 For `main`, `active_kind` is `canon`, and both experiment fields are `null`.
 Experiment list entries add an author-safe `display_name` derived from the
 validated branch slug.
+`main` is the fixed canon branch. Managed experiments live under `branch/` and
+must resolve to a live merge base that still descends from their immutable
+creation provenance before comparison, analysis, discard, switch, or promotion.
+Promotion verifies the published `main` ref and clean worktree after the single
+commit is written; if verification fails, the backend restores `main` back to
+its previous head and reports the failure.
 
 Create body:
 
@@ -771,8 +777,9 @@ Milestone 8 status rules:
   duplicate/empty path selection, unsupported Git state, or analysis budget.
 - `404 Not Found`: valid absent experiment or comparison path.
 - `409 Conflict`: no active project, dirty worktree, stale ref/fingerprint,
-  detached/unmanaged active branch, selected path changed on `main`, invalid
-  promotion subset, or branch deletion/switch conflict.
+  detached/unmanaged active branch, unrelated or rewritten experiment history,
+  selected path changed on `main`, invalid promotion subset, or branch
+  deletion/switch conflict.
 - `413 Request Entity Too Large`: HTTP body or comparison blob exceeds its
   documented limit.
 - `502 Bad Gateway`: provider rejects or returns invalid ramification output.

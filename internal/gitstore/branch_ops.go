@@ -1,6 +1,7 @@
 package gitstore
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -333,13 +334,9 @@ func (s *Store) CompareTrees(ctx context.Context, repoPath, leftTree, rightTree 
 	if err := validateCommitID(rightTree); err != nil {
 		return nil, err
 	}
-	output, err := s.run(ctx, "-C", repoPath, "diff", "--no-renames", "--name-status", "-z", leftTree, rightTree)
+	changes, err := s.runNameStatusStream(ctx, maxChangedPaths, maxPathListBytes, "-C", repoPath, "diff", "--no-renames", "--name-status", "-z", leftTree, rightTree)
 	if err != nil {
 		return nil, fmt.Errorf("compare trees: %w", err)
-	}
-	changes, err := parseNameStatusZ(output, maxChangedPaths)
-	if err != nil {
-		return nil, err
 	}
 	for _, change := range changes {
 		if change.Status == 'A' || change.Status == 'M' {
@@ -415,11 +412,11 @@ func (s *Store) PathsChanged(ctx context.Context, repoPath, baseCommit, headComm
 	if err := validateCommitID(headCommit); err != nil {
 		return nil, err
 	}
-	output, err := s.runLimitedText(ctx, maxPathListBytes, "-C", repoPath, "diff", "--no-renames", "--name-only", "-z", baseCommit, headCommit)
+	paths, err := s.runPathListStream(ctx, maxChangedPaths, maxPathListBytes, "-C", repoPath, "diff", "--no-renames", "--name-only", "-z", baseCommit, headCommit)
 	if err != nil {
 		return nil, fmt.Errorf("paths changed: %w", err)
 	}
-	return parsePathListZ(output, maxChangedPaths)
+	return paths, nil
 }
 
 // ReadTextBlob reads one regular-file blob at commit without checkout.
@@ -685,7 +682,52 @@ func (s *Store) CommitPromotion(ctx context.Context, repoPath string, input Prom
 	if _, err := s.run(ctx, "-C", repoPath, "update-ref", "refs/heads/main", head, input.ExpectedMainHead); err != nil {
 		return "", fmt.Errorf("publish promotion commit: %w", err)
 	}
+	if err := s.verifyPublishedPromotion(ctx, repoPath, head); err != nil {
+		revertErr := s.revertPublishedPromotion(ctx, repoPath, head, input.ExpectedMainHead)
+		if revertErr != nil {
+			return "", errors.Join(fmt.Errorf("verify promotion publication: %w", err), fmt.Errorf("revert promotion publication: %w", revertErr))
+		}
+		return "", fmt.Errorf("verify promotion publication: %w", err)
+	}
 	return head, nil
+}
+
+func (s *Store) verifyPublishedPromotion(ctx context.Context, repoPath, newHead string) error {
+	active, detached, err := s.activeBranch(ctx, repoPath)
+	if err != nil {
+		return fmt.Errorf("verify promotion head: %w", err)
+	}
+	if detached || active != canonBranch {
+		return errors.New("promotion did not leave main active")
+	}
+	head, err := s.ResolveCommit(ctx, repoPath, "HEAD")
+	if err != nil {
+		return fmt.Errorf("verify promotion head: %w", err)
+	}
+	if head != newHead {
+		return fmt.Errorf("promotion head mismatch: got %s want %s", head, newHead)
+	}
+	clean, err := s.IsClean(ctx, repoPath)
+	if err != nil {
+		return fmt.Errorf("verify promotion cleanliness: %w", err)
+	}
+	if !clean {
+		return errors.New("promotion left the worktree dirty")
+	}
+	return nil
+}
+
+func (s *Store) revertPublishedPromotion(ctx context.Context, repoPath, newHead, expectedMainHead string) error {
+	if err := validateCommitID(newHead); err != nil {
+		return err
+	}
+	if err := validateCommitID(expectedMainHead); err != nil {
+		return err
+	}
+	if _, err := s.run(ctx, "-C", repoPath, "update-ref", "refs/heads/main", expectedMainHead, newHead); err != nil {
+		return fmt.Errorf("restore main head: %w", err)
+	}
+	return nil
 }
 
 func parseNameStatusZ(output string, maxCount int) ([]TreeChange, error) {
@@ -755,6 +797,158 @@ func parsePathListZ(output string, maxCount int) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+func (s *Store) runNameStatusStream(ctx context.Context, maxCount int, maxBytes int, arguments ...string) ([]TreeChange, error) {
+	command := exec.CommandContext(ctx, s.executable, arguments...)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	if err := command.Start(); err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	changes, parseErr := parseNameStatusStream(stdout, maxCount, maxBytes)
+	if parseErr != nil {
+		_ = command.Process.Kill()
+		waitErr := command.Wait()
+		if waitErr != nil {
+			return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), errors.Join(parseErr, waitErr))
+		}
+		return nil, parseErr
+	}
+	waitErr := command.Wait()
+	if waitErr != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), waitErr)
+	}
+	return changes, nil
+}
+
+func (s *Store) runPathListStream(ctx context.Context, maxCount int, maxBytes int, arguments ...string) ([]string, error) {
+	command := exec.CommandContext(ctx, s.executable, arguments...)
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	if err := command.Start(); err != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), err)
+	}
+	paths, parseErr := parsePathListStream(stdout, maxCount, maxBytes)
+	if parseErr != nil {
+		_ = command.Process.Kill()
+		waitErr := command.Wait()
+		if waitErr != nil {
+			return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), errors.Join(parseErr, waitErr))
+		}
+		return nil, parseErr
+	}
+	waitErr := command.Wait()
+	if waitErr != nil {
+		return nil, fmt.Errorf("%s: %w", strings.Join(command.Args, " "), waitErr)
+	}
+	return paths, nil
+}
+
+func parseNameStatusStream(r io.Reader, maxCount int, maxBytes int) ([]TreeChange, error) {
+	reader := bufio.NewReader(r)
+	changes := make([]TreeChange, 0, min(maxCount, 16))
+	consumed := 0
+	for {
+		statusToken, err := readNULToken(reader, maxBytes, &consumed)
+		if err == io.EOF {
+			return changes, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(statusToken) != 1 {
+			return nil, fmt.Errorf("unexpected name-status record %q", string(statusToken))
+		}
+		if statusToken[0] == 0 {
+			continue
+		}
+		pathToken, err := readNULToken(reader, maxBytes, &consumed)
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("unexpected name-status record %q", string(statusToken))
+			}
+			return nil, err
+		}
+		status, err := parseStatusByte(statusToken[0])
+		if err != nil {
+			return nil, err
+		}
+		path := string(pathToken)
+		if err := validateProjectPath(path); err != nil {
+			return nil, err
+		}
+		changes = append(changes, TreeChange{Path: path, Status: status})
+		if maxCount > 0 && len(changes) > maxCount {
+			return nil, ErrPathListTooLarge
+		}
+	}
+}
+
+func parsePathListStream(r io.Reader, maxCount int, maxBytes int) ([]string, error) {
+	reader := bufio.NewReader(r)
+	paths := make([]string, 0, min(maxCount, 16))
+	consumed := 0
+	for {
+		token, err := readNULToken(reader, maxBytes, &consumed)
+		if err == io.EOF {
+			return paths, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(token) == 0 {
+			continue
+		}
+		path := string(token)
+		if err := validateProjectPath(path); err != nil {
+			return nil, err
+		}
+		paths = append(paths, path)
+		if maxCount > 0 && len(paths) > maxCount {
+			return nil, ErrPathListTooLarge
+		}
+	}
+}
+
+func readNULToken(reader *bufio.Reader, maxBytes int, consumed *int) ([]byte, error) {
+	var token []byte
+	for {
+		part, err := reader.ReadSlice(0)
+		if len(part) > 0 {
+			*consumed += len(part)
+			if maxBytes > 0 && *consumed > maxBytes {
+				return nil, ErrPathListTooLarge
+			}
+			token = append(token, part[:len(part)-1]...)
+		}
+		if err == nil {
+			return token, nil
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if err == io.EOF {
+			if len(token) == 0 {
+				return nil, io.EOF
+			}
+			return token, nil
+		}
+		return nil, err
+	}
+}
+
+func parseStatusByte(code byte) (byte, error) {
+	switch code {
+	case 'A', 'M', 'D':
+		return code, nil
+	default:
+		return 0, fmt.Errorf("unsupported status %q", string(code))
+	}
 }
 
 const maxPathListBytes = 512 << 10

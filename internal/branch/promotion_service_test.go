@@ -18,6 +18,7 @@ type promotionRepo struct {
 	*fakeRepo
 	calls       []string
 	mainChanged []branch.ProjectPath
+	lastCommit  branch.PromotionCommit
 	fail        map[string]error
 }
 
@@ -64,6 +65,7 @@ func (r *promotionRepo) CommitPromotion(_ context.Context, _ string, commit bran
 	if err := r.record("commit"); err != nil {
 		return "", err
 	}
+	r.lastCommit = commit
 	head := branch.CommitID("dddddddddddddddddddddddddddddddddddddddd")
 	r.status.ActiveBranch = branch.CanonBranchName
 	r.status.IsCanon = true
@@ -167,6 +169,31 @@ func TestPromoteSelectedFilesOrdersTransactionAndReturnsResult(t *testing.T) {
 	}
 	if result.ExperimentID != request.ExperimentID || !reflect.DeepEqual(result.PromotedPaths, request.Paths) {
 		t.Fatalf("result=%#v", result)
+	}
+}
+
+// Test: the live merge base is used for comparison and promotion provenance.
+// Requirements: M8-R05, M8-R12, M8-R16.
+func TestPromoteSelectedFilesUsesLiveMergeBase(t *testing.T) {
+	t.Parallel()
+	repo, request := promotionFixture(t)
+	liveBase := branch.CommitID("cccccccccccccccccccccccccccccccccccccccc")
+	repo.mergeBase = liveBase
+	fingerprint, err := branch.ComputeFingerprint(request.ExpectedMainHead, request.ExpectedExperimentHead, liveBase, []branch.ChangedFile{{Path: "outline.yaml", Status: branch.StatusModified}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.ExpectedFingerprint = fingerprint
+	service := newPromotionService(repo, &promotionIndex{calls: &repo.calls}, promotionValidator{calls: &repo.calls})
+	result, err := service.PromoteSelectedFiles(context.Background(), request)
+	if err != nil {
+		t.Fatalf("error = %v", err)
+	}
+	if result.MainHead == "" {
+		t.Fatal("promotion returned empty main head")
+	}
+	if repo.lastCommit.BaseCommit != liveBase {
+		t.Fatalf("promotion base = %q, want %q", repo.lastCommit.BaseCommit, liveBase)
 	}
 }
 

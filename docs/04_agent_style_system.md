@@ -403,7 +403,8 @@ consequences are a separate branch-owned use case:
 - comparison packets include only the author goal, sorted changed paths, and
   bounded unified diff text for allowed project files.
 
-Shared provider chat transport now lives in `internal/modelchat`. Agent actions
-and import extraction consume the same neutral completer contract through thin
-adapters; provider wire shapes remain adapter details and do not enter action
-runs, extraction candidates, or branch comparison responses.
+Shared provider chat transport lives in `internal/modelchat`. Agent actions,
+import extraction, and branch analysis consume the same neutral completer
+contract through thin adapters; provider wire shapes remain adapter details and
+do not enter action runs, extraction candidates, or branch comparison
+responses.

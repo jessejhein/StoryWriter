@@ -292,10 +292,3 @@ export function invalidateOnBranchChange(projectID: string): BranchWorkbenchStat
     requestVersion: next.requestVersion + 1,
   }
 }
-export function branchUsesBrowserStorage(): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-  const keys = [...Object.keys(localStorage), ...Object.keys(sessionStorage)]
-  return keys.some((key) => /branch|comparison|ramification|experiment/i.test(key))
-}

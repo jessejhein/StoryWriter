@@ -205,15 +205,20 @@ Rules:
 
 - experiment creation starts at the current `main` commit and checks out the new
   experiment in the one working directory,
+- each experiment records immutable creation provenance separately from the live
+  merge base used for comparison and promotion checks,
 - the disposable SQLite index always represents the active checked-out tree only;
   it is rebuilt after every successful branch switch,
 - comparison reads current `main` and experiment head trees directly from Git
   without a second checkout,
+- branch operations refuse rewritten or unrelated history when the live merge
+  base is missing or no longer matches the stored provenance,
 - ramification analysis is transient: prompts, diff prose, and findings are not
   written to Git, SQLite, project files, action-run stores, or browser storage,
 - promotion copies or deletes selected complete canonical text files onto `main`,
   runs strict full-project validation through `internal/projectcheck`, rebuilds
-  the index, and creates exactly one promotion commit,
+  the index, verifies the published `main` ref and clean worktree, and creates
+  exactly one promotion commit,
 - discard deletes only the experiment ref; `main` history and tree are unchanged.
 
 Promotion commit bodies use a separate typed formatter from accepted AI-action

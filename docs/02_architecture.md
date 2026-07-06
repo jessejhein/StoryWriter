@@ -121,6 +121,14 @@ Milestone 8 adds controlled what-if experiments without a second checkout:
   experiment remains active. Branch-changing operations acquire the shared
   `internal/mutation.Coordinator` write lock and rebuild the single active-tree
   SQLite index after checkout.
+- Branch history validation uses the live merge base between `main` and the
+  experiment head, not only the stored creation provenance. The stored
+  experiment-base ref remains immutable provenance that guards against rewritten
+  or unrelated history.
+- Promotion validates the full canonical snapshot, publishes exactly one commit,
+  and verifies the published `main` ref and clean worktree before success. If
+  publication verification fails, the Git adapter restores `main` back to the
+  previous head and the service rolls back the touched files and index state.
 
 ## Suggested source repository layout
 
