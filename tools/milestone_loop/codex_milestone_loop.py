@@ -600,37 +600,14 @@ def codex_exec(
         resume_command=resume_command,
     )
 
-    cmd = [
-        "codex",
-        "exec",
-        "--color",
-        "never",
-        "--ask-for-approval",
-        config.ask_for_approval,
-        "--sandbox",
-        sandbox,
-        "--model",
-        model,
-        "-c",
-        f'model_reasoning_effort="{reasoning}"',
-        "--output-last-message",
-        str(output_file),
-        "-",
-    ]
-
-    if config.ephemeral_sessions:
-        cmd.insert(2, "--ephemeral")
-
-    if output_schema is not None:
-        insert_at = len(cmd) - 1
-        cmd[insert_at:insert_at] = ["--output-schema", str(output_schema)]
-
-    if config.allow_network:
-        insert_at = cmd.index("--output-last-message")
-        cmd[insert_at:insert_at] = [
-            "-c",
-            "sandbox_workspace_write.network_access=true",
-        ]
+    cmd = build_codex_exec_command(
+        config=config,
+        model=model,
+        reasoning=reasoning,
+        sandbox=sandbox,
+        output_file=output_file,
+        output_schema=output_schema,
+    )
 
     print(f"\n== Iteration {iteration}: {stage} ==", flush=True)
     print(f"$ {' '.join(cmd[:-1])} < prompt", flush=True)
@@ -683,6 +660,50 @@ def codex_exec(
         output_file=output_file,
         resume_command=resume_command,
     )
+
+
+def build_codex_exec_command(
+    *,
+    config: CodexConfig,
+    model: str,
+    reasoning: str,
+    sandbox: SandboxMode,
+    output_file: Path,
+    output_schema: Path | None = None,
+) -> list[str]:
+    cmd = [
+        "codex",
+        "--ask-for-approval",
+        config.ask_for_approval,
+        "exec",
+        "--color",
+        "never",
+        "--sandbox",
+        sandbox,
+        "--model",
+        model,
+        "-c",
+        f'model_reasoning_effort="{reasoning}"',
+        "--output-last-message",
+        str(output_file),
+        "-",
+    ]
+
+    if config.ephemeral_sessions:
+        cmd.insert(4, "--ephemeral")
+
+    if output_schema is not None:
+        insert_at = len(cmd) - 1
+        cmd[insert_at:insert_at] = ["--output-schema", str(output_schema)]
+
+    if config.allow_network:
+        insert_at = cmd.index("--output-last-message")
+        cmd[insert_at:insert_at] = [
+            "-c",
+            "sandbox_workspace_write.network_access=true",
+        ]
+
+    return cmd
 
 
 def parse_json_file(path: Path, *, paths: Paths, iteration: int) -> dict[str, Any]:
