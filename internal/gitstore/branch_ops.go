@@ -419,6 +419,26 @@ func (s *Store) PathsChanged(ctx context.Context, repoPath, baseCommit, headComm
 	return paths, nil
 }
 
+// SelectedPathsChanged returns the changed subset of selected paths between two commits.
+func (s *Store) SelectedPathsChanged(ctx context.Context, repoPath, baseCommit, headCommit string, selected []string) ([]string, error) {
+	if err := validateCommitID(baseCommit); err != nil {
+		return nil, err
+	}
+	if err := validateCommitID(headCommit); err != nil {
+		return nil, err
+	}
+	if len(selected) == 0 {
+		return []string{}, nil
+	}
+	args := []string{"-C", repoPath, "diff", "--no-renames", "--name-only", "-z", baseCommit, headCommit, "--"}
+	args = append(args, selected...)
+	paths, err := s.runPathListStream(ctx, maxChangedPaths, maxPathListBytes, args...)
+	if err != nil {
+		return nil, fmt.Errorf("selected paths changed: %w", err)
+	}
+	return paths, nil
+}
+
 // ReadTextBlob reads one regular-file blob at commit without checkout.
 func (s *Store) ReadTextBlob(ctx context.Context, repoPath, commit, projectPath string) (TextBlob, error) {
 	if err := validateCommitID(commit); err != nil {

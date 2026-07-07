@@ -57,7 +57,7 @@ func promoteSelectedFiles(ctx context.Context, s *Service, request PromotionRequ
 			return PromotionResult{}, fmt.Errorf("path %q is not changed: %w", path, ErrInvalidPromotion)
 		}
 	}
-	mainChanged, err := s.comparison.PathsChanged(ctx, path, comparison.BaseHead, comparison.MainHead)
+	mainChanged, err := s.comparison.SelectedPathsChanged(ctx, path, comparison.BaseHead, comparison.MainHead, selected)
 	if err != nil {
 		return PromotionResult{}, mapRepositoryError(err)
 	}

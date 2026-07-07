@@ -267,7 +267,7 @@ Frontend:
 - `web/src/editor/SceneEditor.milestone7_actions.test.tsx`: preview, scene rewrite, dirty guards.
 - `web/src/editor/ChapterReview.test.tsx`, `FollowUpInvitations.test.tsx`: suggestions and explicit invitation runs.
 
-Verification: full `make check`, `go test -race ./...`, 78 frontend tests.
+Verification: full `make check`, `go test -race ./...`, 129 frontend tests.
 
 ### Milestone 8
 
@@ -286,6 +286,8 @@ Backend:
 - `internal/branch/fingerprint_test.go`: `TestComputeFingerprintMatchesFixture`,
   `TestComputeFingerprintSensitiveToInputs`
 - `internal/branch/file_comparison_test.go`: `TestIndexChangedFilesRejectsUnknownPath`
+- `internal/gitstore/branch_selected_paths_test.go`:
+  `TestSelectedPathsChangedUsesPathspecFilter`
 - `internal/branch/service_lifecycle_test.go`: `TestCreateExperimentRebuildsIndex`,
   `TestCreateExperimentRecoversOnIndexFailure`,
   `TestCreateExperimentRecoversAfterRequestCancellation`,
@@ -328,6 +330,10 @@ Backend:
 - `internal/projectcheck/validator_test.go`:
   `TestValidateProjectRejectsNonStrictProjectMetadata`,
   `TestValidateProjectRejectsOrphanProgressionsAndMalformedRawImports`
+- `internal/projectcheck/validator_injection_test.go`:
+  `TestNewWithReadersUsesInjectedImplementations`,
+  `TestNewWithReadersPropagatesRegistryErrors`,
+  `TestNewWithReadersLeavesCodexAndProgressionInfrastructureErrorsUnclassified`
 - `internal/branch/ramification_adapter_test.go`: `TestModelchatAnalyzerParsesStrictFindings`,
   `TestModelchatAnalyzerRejectsMalformedOutput`
 - `internal/modelchat/model_test.go`: `TestM8ModelMessageRolesAndContent`,
@@ -341,6 +347,9 @@ Backend:
   `TestM8ExtractNoLongerImportsAgentChatTransport`
 - `internal/projectcheck/validator_test.go`: `TestValidateProjectAcceptsValidFixture`,
   `TestValidateProjectRejectsMalformedOutline`
+- `internal/storyfile/milestone8_validation_test.go`:
+  `TestValidateCanonicalFilesRejectsOrphanStoryFiles`,
+  `TestValidateCanonicalFilesIgnoresGitkeepPlaceholders`
 - `internal/gitstore/branch_status_test.go`: `TestStatusReportsActiveBranchAndCleanliness`
 - `internal/gitstore/branch_switch_test.go`: `TestCreateAndSwitchFromMain`,
   `TestCreateAndSwitchFromAnotherManagedExperiment`,
@@ -408,7 +417,7 @@ Frontend:
 
 Verification: full `make check` (including `go test -race ./...`,
 `git diff --check`, and tracked-artifact leak detection), 50 frontend test
-files, 127 frontend tests.
+files, 129 frontend tests.
 
 ### Milestone 9
 

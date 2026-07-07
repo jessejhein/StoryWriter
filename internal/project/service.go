@@ -23,6 +23,9 @@ import (
 
 var nonIdentifier = regexp.MustCompile(`[^a-z0-9]+`)
 
+// ErrInvalidMetadata reports malformed or incomplete project.yaml content.
+var ErrInvalidMetadata = errors.New("invalid project metadata")
+
 // GitStore is the project history boundary.
 type GitStore interface {
 	// Init creates a repository at path.
@@ -237,28 +240,31 @@ type metadataDocument struct {
 func ValidateMetadataFile(path string) (string, string, error) {
 	body, err := os.ReadFile(path)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", errors.Join(ErrInvalidMetadata, err)
+		}
 		return "", "", fmt.Errorf("read project.yaml: %w", err)
 	}
 	var document metadataDocument
 	decoder := yaml.NewDecoder(bytes.NewReader(body))
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&document); err != nil {
-		return "", "", fmt.Errorf("decode project.yaml: %w", err)
+		return "", "", errors.Join(ErrInvalidMetadata, fmt.Errorf("decode project.yaml: %w", err))
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return "", "", errors.New("project.yaml must contain exactly one YAML document")
+		return "", "", errors.Join(ErrInvalidMetadata, errors.New("project.yaml must contain exactly one YAML document"))
 	}
 	if document.Version != 1 || strings.TrimSpace(document.ID) == "" || strings.TrimSpace(document.Name) == "" {
-		return "", "", errors.New("project.yaml has invalid version, id, or name")
+		return "", "", errors.Join(ErrInvalidMetadata, errors.New("project.yaml has invalid version, id, or name"))
 	}
 	if _, err := time.Parse(time.RFC3339, document.CreatedAt); err != nil {
-		return "", "", errors.New("project.yaml has invalid created_at")
+		return "", "", errors.Join(ErrInvalidMetadata, errors.New("project.yaml has invalid created_at"))
 	}
 	if document.Settings == nil || document.Settings.VimModeDefault == nil || document.Settings.AIMutationRequiresAcceptance == nil {
-		return "", "", errors.New("project.yaml settings are incomplete")
+		return "", "", errors.Join(ErrInvalidMetadata, errors.New("project.yaml settings are incomplete"))
 	}
 	if document.DefaultBranch != "main" || document.Settings.ProseFormat != "markdown" || !*document.Settings.AIMutationRequiresAcceptance {
-		return "", "", errors.New("project.yaml has unsupported settings")
+		return "", "", errors.Join(ErrInvalidMetadata, errors.New("project.yaml has unsupported settings"))
 	}
 	return document.ID, document.Name, nil
 }

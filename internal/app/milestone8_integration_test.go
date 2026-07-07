@@ -6,6 +6,7 @@
 package app_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"testing"
 
 	"storywork/internal/app"
+	"storywork/internal/projectcheck"
 )
 
 func TestMilestone8AcceptanceM833HappyPath(t *testing.T) {
@@ -205,6 +207,9 @@ func TestMilestone8AcceptanceM833HappyPath(t *testing.T) {
 	})
 
 	t.Run("promote_selected_files_creates_one_main_commit_with_trailers", func(t *testing.T) {
+		if err := projectcheck.New().ValidateProject(context.Background(), projectPath); err != nil {
+			t.Fatalf("pre-promotion validation failed: %v", err)
+		}
 		startMainCommits := gitRevCountRef(t, projectPath, "main")
 		var promoted map[string]any
 		putJSON(t, handler, http.MethodPost, "/api/branches/"+experimentID+"/promote", map[string]any{

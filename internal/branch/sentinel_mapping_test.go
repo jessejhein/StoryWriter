@@ -51,6 +51,9 @@ func (r *errorRepo) IsAncestor(context.Context, string, branch.CommitID, branch.
 func (r *errorRepo) PathsChanged(context.Context, string, branch.CommitID, branch.CommitID) ([]branch.ProjectPath, error) {
 	return nil, nil
 }
+func (r *errorRepo) SelectedPathsChanged(context.Context, string, branch.CommitID, branch.CommitID, []branch.ProjectPath) ([]branch.ProjectPath, error) {
+	return nil, nil
+}
 func (r *errorRepo) UnifiedDiff(context.Context, string, branch.CommitID, branch.CommitID, []branch.ProjectPath, int) (string, error) {
 	return "", nil
 }

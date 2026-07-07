@@ -49,11 +49,12 @@ func (s staticBranchIDs) NextExperimentID() (branch.ExperimentID, error) { retur
 
 type spyBranchStore struct {
 	branchServiceStub
-	analysisCalls int
-	createCalls   int
-	switchCalls   int
-	promoteCalls  int
-	discardCalls  int
+	analysisCalls       int
+	createCalls         int
+	switchCalls         int
+	fileComparisonCalls int
+	promoteCalls        int
+	discardCalls        int
 }
 
 func (s statusErrorBranchStore) Status(context.Context) (branch.RepositoryStatus, error) {
@@ -81,6 +82,11 @@ func (s *spyBranchStore) CreateExperiment(context.Context, string) (branch.Repos
 func (s *spyBranchStore) SwitchTarget(context.Context, string, *branch.CommitID) (branch.RepositoryStatus, error) {
 	s.switchCalls++
 	return branch.RepositoryStatus{}, nil
+}
+
+func (s *spyBranchStore) LoadFileComparison(context.Context, string, string) (branch.FileComparison, error) {
+	s.fileComparisonCalls++
+	return branch.FileComparison{}, nil
 }
 
 func (s *spyBranchStore) PromoteSelectedFiles(context.Context, branch.PromotionRequest) (branch.PromotionResult, error) {
@@ -254,6 +260,54 @@ func TestBranchRoutesRejectMalformedCallsBeforeService(t *testing.T) {
 			if response.Code != testCase.status {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
+		})
+	}
+}
+
+// Test: invalid switch targets and comparison paths fail before the branch
+// service is invoked.
+// Requirements: M8-R01, M8-R07, M8-R20.
+func TestBranchRoutesRejectInvalidSwitchTargetAndComparisonPathBeforeService(t *testing.T) {
+	t.Parallel()
+	store := &spyBranchStore{}
+	handler := handlerWithBranches(store)
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		check  func(*testing.T)
+	}{
+		{
+			name:   "invalid switch target",
+			method: http.MethodPost,
+			path:   "/api/branches/switch",
+			body:   `{"target":"not-a-branch","expected_head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
+			check: func(t *testing.T) {
+				if store.switchCalls != 0 {
+					t.Fatalf("switchCalls=%d", store.switchCalls)
+				}
+			},
+		},
+		{
+			name:   "invalid comparison path",
+			method: http.MethodGet,
+			path:   "/api/branches/brn_0123456789abcdef0123/comparison/file?path=/absolute/path.md",
+			check: func(t *testing.T) {
+				if store.fileComparisonCalls != 0 {
+					t.Fatalf("fileComparisonCalls=%d", store.fileComparisonCalls)
+				}
+			},
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, httptest.NewRequest(testCase.method, testCase.path, strings.NewReader(testCase.body)))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+			testCase.check(t)
 		})
 	}
 }

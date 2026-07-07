@@ -142,6 +142,11 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchBodyError(writer, err)
 			return
 		}
+		target, isMain, err := branch.ValidateSwitchTarget(body.Target)
+		if err != nil {
+			writeBranchError(writer, err)
+			return
+		}
 		var expected *branch.CommitID
 		if body.ExpectedHead != nil {
 			head, err := branch.ValidateCommitID(*body.ExpectedHead)
@@ -151,11 +156,11 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			}
 			expected = &head
 		}
-		if (body.Target == branch.CanonBranchName && expected != nil) || (body.Target != branch.CanonBranchName && expected == nil) {
+		if (isMain && expected != nil) || (!isMain && expected == nil) {
 			writeInvalidBranchRequest(writer)
 			return
 		}
-		status, err := branches.SwitchTarget(request.Context(), body.Target, expected)
+		status, err := branches.SwitchTarget(request.Context(), target, expected)
 		if err != nil {
 			writeBranchError(writer, err)
 			return
@@ -192,11 +197,17 @@ func registerBranchRoutes(mux *http.ServeMux, deps branchRouteDeps) {
 			writeBranchError(writer, branch.ErrInvalidProjectPath)
 			return
 		}
+		normalizedPath, err := branch.ValidateProjectPath(path)
+		if err != nil {
+			writeBranchError(writer, err)
+			return
+		}
 		comparison, err := branches.LoadFileComparison(request.Context(), request.PathValue("experiment_id"), path)
 		if err != nil {
 			writeBranchError(writer, err)
 			return
 		}
+		comparison.Path = normalizedPath
 		writeJSON(writer, http.StatusOK, comparison)
 	})
 	mux.HandleFunc("POST /api/branches/{experiment_id}/ramifications", func(writer http.ResponseWriter, request *http.Request) {

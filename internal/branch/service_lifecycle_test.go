@@ -116,6 +116,9 @@ func (f *fakeRepo) IsAncestor(_ context.Context, _ string, _ branch.CommitID, de
 func (f *fakeRepo) PathsChanged(context.Context, string, branch.CommitID, branch.CommitID) ([]branch.ProjectPath, error) {
 	return nil, nil
 }
+func (f *fakeRepo) SelectedPathsChanged(context.Context, string, branch.CommitID, branch.CommitID, []branch.ProjectPath) ([]branch.ProjectPath, error) {
+	return nil, nil
+}
 func (f *fakeRepo) UnifiedDiff(_ context.Context, _ string, _, _ branch.CommitID, _ []branch.ProjectPath, _ int) (string, error) {
 	return "", nil
 }

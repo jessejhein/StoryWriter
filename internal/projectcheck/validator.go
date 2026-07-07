@@ -23,6 +23,7 @@ var ErrInvalidProject = errors.New("invalid canonical project")
 // StoryReader provides read-only access to outline, codex, and progression files.
 type StoryReader interface {
 	Load(ctx context.Context, projectPath string) (story.Outline, error)
+	ValidateCanonicalFiles(ctx context.Context, projectPath string, outline story.Outline) error
 	LoadCodexEntries(ctx context.Context, projectPath string) ([]codex.Entry, error)
 	LoadProgressions(ctx context.Context, projectPath, entryID string) (codex.ProgressionDocument, error)
 }
@@ -86,6 +87,9 @@ func (v *Validator) ValidateProject(ctx context.Context, projectPath string) err
 	outline, err := v.files.Load(ctx, projectPath)
 	if err != nil {
 		return classifyValidationError(fmt.Errorf("outline validation failed: %w", err))
+	}
+	if err := v.files.ValidateCanonicalFiles(ctx, projectPath, outline); err != nil {
+		return classifyValidationError(err)
 	}
 	sceneIDs := make(map[string]struct{})
 	for _, arc := range outline.Arcs {
@@ -175,7 +179,8 @@ func classifyValidationError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, os.ErrNotExist) ||
+	if errors.Is(err, project.ErrInvalidMetadata) ||
+		errors.Is(err, storyfile.ErrInvalidCanonicalState) ||
 		errors.Is(err, story.ErrInvalidTitle) ||
 		errors.Is(err, story.ErrInvalidID) ||
 		errors.Is(err, story.ErrParentNotFound) ||
@@ -201,19 +206,7 @@ func classifyValidationError(err error) error {
 		errors.Is(err, importer.ErrInvalidManifest) ||
 		errors.Is(err, importer.ErrInvalidPath) ||
 		errors.Is(err, importer.ErrCaseFoldedCollision) ||
-		errors.Is(err, importer.ErrInvalidCandidate) ||
-		strings.Contains(err.Error(), "codex validation failed") ||
-		strings.Contains(err.Error(), "progression validation failed") ||
-		strings.Contains(err.Error(), "agent registry validation failed") ||
-		strings.Contains(err.Error(), "style registry validation failed") ||
-		strings.Contains(err.Error(), "outline.yaml") ||
-		strings.Contains(err.Error(), "arcs/") ||
-		strings.Contains(err.Error(), "chapters/") ||
-		strings.Contains(err.Error(), "scenes/") ||
-		strings.Contains(err.Error(), "codex/") ||
-		strings.Contains(err.Error(), "progressions/") ||
-		strings.Contains(err.Error(), "import candidate") ||
-		strings.Contains(err.Error(), "raw import") {
+		errors.Is(err, importer.ErrInvalidCandidate) {
 		return errors.Join(ErrInvalidProject, err)
 	}
 	return err

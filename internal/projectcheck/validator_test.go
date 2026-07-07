@@ -7,6 +7,7 @@ package projectcheck_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -65,6 +66,54 @@ func TestValidateProjectRejectsMalformedOutline(t *testing.T) {
 	err := projectcheck.New().ValidateProject(context.Background(), root)
 	if err == nil || !strings.Contains(err.Error(), "outline") {
 		t.Fatalf("ValidateProject() error = %v", err)
+	}
+}
+
+// Test: malformed codex and progression documents are classified as invalid
+// canonical project state.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectClassifiesMalformedCodexAndProgressionDocuments(t *testing.T) {
+	t.Parallel()
+	base := map[string]string{
+		"project.yaml":                                    "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+		"outline.yaml":                                    "version: 1\nroot:\n  arcs:\n    - id: arc_00000000000000000001\n      chapters:\n        - id: ch_00000000000000000001\n          scenes:\n            - id: scn_00000000000000000001\n",
+		"arcs/arc_00000000000000000001.yaml":              "version: 1\nid: arc_00000000000000000001\ntitle: Act\n",
+		"chapters/ch_00000000000000000001.yaml":           "version: 1\nid: ch_00000000000000000001\narc_id: arc_00000000000000000001\ntitle: Chapter\n",
+		"scenes/scn_00000000000000000001.md":              "---\nid: scn_00000000000000000001\ntitle: Scene\nchapter_id: ch_00000000000000000001\npov: \"\"\nstatus: draft\nexclude_from_ai: false\n---\n\n",
+		"codex/characters/char_0123456789abcdef0123.yaml": "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: Character\naliases: []\ntags: []\ndescription: Character description.\nmetadata: {}\n",
+		"progressions/char_0123456789abcdef0123.yaml":     "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - anchor:\n      type: scene\n      id: scn_00000000000000000001\n      timing: after\n    changes:\n      description: Updated.\n",
+	}
+	tests := []struct {
+		name     string
+		rel      string
+		contents string
+	}{
+		{name: "malformed codex yaml", rel: "codex/characters/char_0123456789abcdef0123.yaml", contents: "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: [\n"},
+		{name: "unknown codex field", rel: "codex/characters/char_0123456789abcdef0123.yaml", contents: "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: Character\naliases: []\ntags: []\ndescription: Character description.\nmetadata: {}\nextra: true\n"},
+		{name: "bad progression yaml", rel: "progressions/char_0123456789abcdef0123.yaml", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions: [\n"},
+		{name: "wrong progression entry id", rel: "progressions/char_0123456789abcdef0123.yaml", contents: "version: 1\nentry_id: char_0123456789abcdef0124\nprogressions:\n  - anchor:\n      type: scene\n      id: scn_00000000000000000001\n      timing: after\n    changes:\n      description: Updated.\n"},
+		{name: "invalid progression anchor", rel: "progressions/char_0123456789abcdef0123.yaml", contents: "version: 1\nentry_id: char_0123456789abcdef0123\nprogressions:\n  - anchor:\n      type: chapter\n      id: ch_00000000000000000001\n      timing: during\n    changes:\n      description: Updated.\n"},
+		{name: "duplicate codex field", rel: "codex/characters/char_0123456789abcdef0123.yaml", contents: "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: Character\nname: Duplicate\naliases: []\ntags: []\ndescription: Character description.\nmetadata: {}\n"},
+	}
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "styles"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			files := maps.Clone(base)
+			files[testCase.rel] = testCase.contents
+			writeFixture(t, root, files)
+			err := projectcheck.New().ValidateProject(context.Background(), root)
+			if !errors.Is(err, projectcheck.ErrInvalidProject) {
+				t.Fatalf("ValidateProject() error = %v, want invalid project classification", err)
+			}
+		})
 	}
 }
 
@@ -212,6 +261,79 @@ func TestValidateProjectLeavesInfrastructureFailuresUnclassified(t *testing.T) {
 	err := v.ValidateProject(context.Background(), t.TempDir())
 	if !errors.Is(err, infraErr) {
 		t.Fatalf("ValidateProject() error = %v, want %v", err, infraErr)
+	}
+	if errors.Is(err, projectcheck.ErrInvalidProject) {
+		t.Fatalf("ValidateProject() error = %v, want no invalid-project classification", err)
+	}
+}
+
+// Test: orphan story files are rejected by the composed validator.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectRejectsOrphanCanonicalStoryFiles(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name: "orphan arc",
+			files: map[string]string{
+				"project.yaml":                       "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+				"outline.yaml":                       "version: 1\nroot:\n  arcs: []\n",
+				"arcs/arc_0123456789abcdef0123.yaml": "version: 1\nid: arc_0123456789abcdef0123\ntitle: Act\n",
+			},
+		},
+		{
+			name: "orphan chapter",
+			files: map[string]string{
+				"project.yaml":                          "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+				"outline.yaml":                          "version: 1\nroot:\n  arcs: []\n",
+				"chapters/ch_0123456789abcdef0123.yaml": "version: 1\nid: ch_0123456789abcdef0123\narc_id: arc_0123456789abcdef0123\ntitle: Chapter\n",
+			},
+		},
+		{
+			name: "orphan scene",
+			files: map[string]string{
+				"project.yaml":                       "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+				"outline.yaml":                       "version: 1\nroot:\n  arcs: []\n",
+				"scenes/scn_0123456789abcdef0123.md": "---\nid: scn_0123456789abcdef0123\ntitle: Scene\nchapter_id: ch_0123456789abcdef0123\npov: \"\"\nstatus: draft\nexclude_from_ai: false\n---\n\n",
+			},
+		},
+	} {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "styles"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFixture(t, root, testCase.files)
+			err := projectcheck.New().ValidateProject(context.Background(), root)
+			if !errors.Is(err, projectcheck.ErrInvalidProject) {
+				t.Fatalf("ValidateProject() error = %v, want invalid project classification", err)
+			}
+		})
+	}
+}
+
+// Test: wrapped permission failures remain infrastructure failures rather than
+// being misclassified as invalid canonical state.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectLeavesWrappedPermissionFailuresUnclassified(t *testing.T) {
+	t.Parallel()
+	permissionErr := fmt.Errorf("read outline.yaml: %w", os.ErrPermission)
+	v := projectcheck.NewWithReaders(
+		&fakeStoryReader{outlineErr: permissionErr},
+		&fakeRegistryReader{agents: []agent.Agent{}, styles: []agent.Style{}},
+		projectcheck.WithMetadataFunc(noopMetadata),
+		projectcheck.WithImportsFunc(noopImports),
+	)
+	err := v.ValidateProject(context.Background(), t.TempDir())
+	if !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("ValidateProject() error = %v, want %v", err, os.ErrPermission)
 	}
 	if errors.Is(err, projectcheck.ErrInvalidProject) {
 		t.Fatalf("ValidateProject() error = %v, want no invalid-project classification", err)

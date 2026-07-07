@@ -26,6 +26,7 @@ type gitRepositoryStore interface {
 	MergeBase(context.Context, string, string, string) (string, error)
 	IsAncestor(context.Context, string, string, string) (bool, error)
 	PathsChanged(context.Context, string, string, string) ([]string, error)
+	SelectedPathsChanged(context.Context, string, string, string, []string) ([]string, error)
 	UnifiedDiff(context.Context, string, string, string, []string, int) (string, error)
 	SnapshotPaths(context.Context, string, string, []string) ([]gitstore.PathSnapshot, error)
 	ApplyPaths(context.Context, string, string, []gitstore.TreeChange, []string) error
@@ -179,6 +180,26 @@ func (r *GitRepository) PathsChanged(ctx context.Context, repoPath string, base,
 	return SortProjectPaths(result), nil
 }
 
+func (r *GitRepository) SelectedPathsChanged(ctx context.Context, repoPath string, base, head CommitID, selected []ProjectPath) ([]ProjectPath, error) {
+	rawSelected := make([]string, len(selected))
+	for i, path := range selected {
+		rawSelected[i] = string(path)
+	}
+	paths, err := r.Store.SelectedPathsChanged(ctx, repoPath, string(base), string(head), rawSelected)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ProjectPath, 0, len(paths))
+	for _, raw := range paths {
+		path, err := ValidateProjectPath(raw)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, path)
+	}
+	return SortProjectPaths(result), nil
+}
+
 func (r *GitRepository) SnapshotMainPaths(ctx context.Context, repoPath string, mainHead CommitID, paths []ProjectPath) ([]PathSnapshot, error) {
 	raw := make([]string, len(paths))
 	for i, path := range paths {
@@ -305,6 +326,7 @@ type ComparisonRepository interface {
 	MergeBase(context.Context, string, CommitID, CommitID) (CommitID, error)
 	IsAncestor(context.Context, string, CommitID, CommitID) (bool, error)
 	PathsChanged(context.Context, string, CommitID, CommitID) ([]ProjectPath, error)
+	SelectedPathsChanged(context.Context, string, CommitID, CommitID, []ProjectPath) ([]ProjectPath, error)
 }
 
 type AnalysisRepository interface {

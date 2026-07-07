@@ -122,6 +122,35 @@ test('requires confirmation and sends expected refs and fingerprint on promote',
   expect(onBranchChanged).toHaveBeenCalled()
 })
 
+// Test: dirty browser drafts require explicit discard confirmation before any
+// promote API call.
+// Requirements: M8-R18.
+test('requires discard confirmation before promoting when the browser draft is dirty', async () => {
+  vi.mocked(api.promoteExperimentFiles).mockResolvedValue({
+    main_head: `sha256:${'f'.repeat(64)}`,
+    promoted_paths: ['scenes/scn_0123456789abcdef0123.md'],
+    experiment_id: experimentID,
+  })
+  const onDirtyChange = vi.fn()
+  const { rerender } = render(<BranchWorkbench project={project} appDirty onDirtyChange={onDirtyChange} onBranchChanged={vi.fn()} />)
+  await waitFor(() => expect(screen.getByLabelText('Promote scenes/scn_0123456789abcdef0123.md')).toBeInTheDocument())
+
+  fireEvent.click(screen.getByLabelText('Promote scenes/scn_0123456789abcdef0123.md'))
+  fireEvent.click(screen.getByRole('button', { name: 'Promote selected files' }))
+
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  expect(api.promoteExperimentFiles).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+  expect(onDirtyChange).toHaveBeenCalledWith(false)
+  rerender(<BranchWorkbench project={project} appDirty={false} onDirtyChange={onDirtyChange} onBranchChanged={vi.fn()} />)
+
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Promote selected files?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Promote to main' }))
+
+  await waitFor(() => expect(api.promoteExperimentFiles).toHaveBeenCalled())
+})
+
 // Test: changed-on-main conflict paths surface safe project-relative paths.
 // Requirements: M8-R13.
 test('shows conflict paths returned from promotion failures', async () => {

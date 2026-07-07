@@ -33,6 +33,12 @@ func (r *promotionRepo) PathsChanged(context.Context, string, branch.CommitID, b
 	}
 	return r.mainChanged, nil
 }
+func (r *promotionRepo) SelectedPathsChanged(context.Context, string, branch.CommitID, branch.CommitID, []branch.ProjectPath) ([]branch.ProjectPath, error) {
+	if err := r.record("selected_paths_changed"); err != nil {
+		return nil, err
+	}
+	return r.mainChanged, nil
+}
 func (r *promotionRepo) SnapshotMainPaths(_ context.Context, _ string, main branch.CommitID, paths []branch.ProjectPath) ([]branch.PathSnapshot, error) {
 	if err := r.record("snapshot"); err != nil {
 		return nil, err
@@ -163,7 +169,7 @@ func TestPromoteSelectedFilesOrdersTransactionAndReturnsResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error = %v", err)
 	}
-	want := []string{"paths_changed", "snapshot", "switch:main", "apply", "validate", "index", "stage", "commit"}
+	want := []string{"selected_paths_changed", "snapshot", "switch:main", "apply", "validate", "index", "stage", "commit"}
 	if !reflect.DeepEqual(repo.calls, want) {
 		t.Fatalf("calls=%v want=%v", repo.calls, want)
 	}

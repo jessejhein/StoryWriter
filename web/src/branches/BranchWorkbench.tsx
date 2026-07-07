@@ -141,7 +141,9 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
         }),
         requestVersion,
       ))
-      setStatusMessage(`Loaded comparison for ${comparison.branch_name}.`)
+      if (requestVersionRef.current === requestVersion) {
+        setStatusMessage(`Loaded comparison for ${comparison.branch_name}.`)
+      }
     } catch (requestError) {
       const message = requestError instanceof Error ? requestError.message : 'Failed to load comparison.'
       setWorkbench((state) => applyComparisonFailure(state, experimentID, message, requestVersion))
@@ -402,6 +404,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
   const activeBadge = status?.active_kind === 'experiment' ? 'Experiment' : 'Canon'
   const changedFiles = workbench.comparison?.files ?? []
+  const needsDiscardConfirmation = pendingAction !== null && canProceedWithBranchChange(appDirty, status?.worktree_clean ?? false) === 'confirm'
   const pending = busy !== null
 
   return (
@@ -531,7 +534,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
                 {status?.active_experiment_id !== selectedExperimentID && (
                   <p className="section-note">Switch to the reviewed experiment before promoting files.</p>
                 )}
-                <button disabled={pending || !status?.worktree_clean || status?.active_experiment_id !== selectedExperimentID} onClick={() => setPendingAction({ kind: 'promote' })} type="button">
+                <button disabled={pending || !status?.worktree_clean || status?.active_experiment_id !== selectedExperimentID} onClick={() => requestBranchChange({ kind: 'promote' })} type="button">
                   Promote selected files
                 </button>
               </section>
@@ -592,16 +595,18 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
         )}
       </div>
 
-      <ConfirmDialog
-        cancelLabel="Keep editing"
-        confirmLabel="Discard draft"
-        message="You have unsaved changes in the current workspace. Discard them and continue?"
-        onCancel={() => setPendingAction(null)}
-        onConfirm={() => {
-          if (pendingAction?.kind === 'switch' && pendingAction.target === 'create') {
-            setPendingAction(null)
-            void (async () => {
+        <ConfirmDialog
+          cancelLabel="Keep editing"
+          confirmLabel="Discard draft"
+          message="You have unsaved changes in the current workspace. Discard them and continue?"
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => {
+            if (pendingAction?.kind === 'switch' && pendingAction.target === 'create') {
+              setPendingAction(null)
+              onDirtyChange?.(false)
+              void (async () => {
                 setBusy('create')
+                setError('')
                 try {
                   const nextStatus = await createExperiment(experimentName.trim())
                   setExperimentName('')
@@ -609,50 +614,53 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
                   setSelectedExperimentID(nextStatus.active_experiment_id)
                   await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`, nextStatus.active_experiment_id)
                 } catch (requestError) {
-                setError(requestError instanceof Error ? requestError.message : 'Failed to create experiment.')
-              } finally {
-                setBusy(null)
-              }
-            })()
-            return
-          }
-          if (pendingAction) {
-            void executeBranchChange(pendingAction)
-          }
-        }}
-        open={pendingAction !== null && pendingAction.kind === 'switch' && canProceedWithBranchChange(appDirty, status?.worktree_clean ?? false) === 'confirm'}
-        title="Discard current draft?"
-      />
+                  setError(requestError instanceof Error ? requestError.message : 'Failed to create experiment.')
+                } finally {
+                  setBusy(null)
+                }
+              })()
+              return
+            }
+            if (pendingAction?.kind === 'switch') {
+              onDirtyChange?.(false)
+              void executeBranchChange(pendingAction)
+              return
+            }
+            onDirtyChange?.(false)
+          }}
+          open={needsDiscardConfirmation}
+          title="Discard current draft?"
+        />
 
-      <ConfirmDialog
-        cancelLabel="Stay on branch"
-        confirmLabel="Switch branch"
-        message="Switch branches now? Branch-sensitive loaded state will be cleared and reloaded from the selected tree."
-        onCancel={() => setPendingAction(null)}
-        onConfirm={() => { if (pendingAction?.kind === 'switch') void executeBranchChange(pendingAction) }}
-        open={pendingAction?.kind === 'switch' && canProceedWithBranchChange(appDirty, status?.worktree_clean ?? false) === 'allowed'}
-        title="Switch branches?"
-      />
+        <ConfirmDialog
+          cancelLabel="Stay on branch"
+          confirmLabel="Switch branch"
+          message="Switch branches now? Branch-sensitive loaded state will be cleared and reloaded from the selected tree."
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => { if (pendingAction?.kind === 'switch') void executeBranchChange(pendingAction) }}
+          open={pendingAction?.kind === 'switch' && !needsDiscardConfirmation && canProceedWithBranchChange(appDirty, status?.worktree_clean ?? false) === 'allowed'}
+          title="Switch branches?"
+        />
 
-      <ConfirmDialog
-        cancelLabel="Keep reviewing"
-        confirmLabel="Promote to main"
-        message="Promote the selected whole files onto main? This creates one promotion commit and leaves main active."
-        onCancel={() => setPendingAction(null)}
-        onConfirm={() => void executeBranchChange({ kind: 'promote' })}
-        open={pendingAction?.kind === 'promote'}
-        title="Promote selected files?"
-      />
+        <ConfirmDialog
+          cancelLabel="Keep reviewing"
+          confirmLabel="Promote to main"
+          message="Promote the selected whole files onto main? This creates one promotion commit and leaves main active."
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => void executeBranchChange({ kind: 'promote' })}
+          open={pendingAction?.kind === 'promote' && !needsDiscardConfirmation}
+          title="Promote selected files?"
+        />
 
-      <ConfirmDialog
-        cancelLabel="Keep experiment"
-        confirmLabel="Discard experiment"
-        message="Discard this experiment permanently? Main history will remain unchanged."
-        onCancel={() => setPendingAction(null)}
-        onConfirm={() => void executeBranchChange({ kind: 'discard' })}
-        open={pendingAction?.kind === 'discard'}
-        title="Discard experiment?"
-      />
+        <ConfirmDialog
+          cancelLabel="Keep experiment"
+          confirmLabel="Discard experiment"
+          message="Discard this experiment permanently? Main history will remain unchanged."
+          onCancel={() => setPendingAction(null)}
+          onConfirm={() => void executeBranchChange({ kind: 'discard' })}
+          open={pendingAction?.kind === 'discard' && !needsDiscardConfirmation}
+          title="Discard experiment?"
+        />
     </section>
   )
 }

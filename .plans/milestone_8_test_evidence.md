@@ -1,6 +1,6 @@
 # Milestone 8 Test Evidence
 
-Status: complete as of July 5, 2026.
+Status: complete as of July 6, 2026.
 
 ## Baseline (M8-00)
 
@@ -8,7 +8,7 @@ Status: complete as of July 5, 2026.
 | --- | --- | --- | --- |
 | M8-00.3 | `go test ./... -count=1` | all packages green | recorded |
 | M8-00.4 | `go test -race ./...` | all packages green | recorded |
-| M8-00.5 | frontend lint/typecheck/test | 50 files, 127 tests green | recorded |
+| M8-00.5 | frontend lint/typecheck/test | 50 files, 129 tests green | recorded |
 | M8-00.6 | `make check` | full check green (vite chunk warning pre-existing) | recorded |
 
 ## Milestone 8
@@ -20,6 +20,15 @@ invalidation behavior.
 
 Backend:
 
+- `internal/gitstore/branch_selected_paths_test.go`:
+  `TestSelectedPathsChangedUsesPathspecFilter`
+- `internal/storyfile/milestone8_validation_test.go`:
+  `TestValidateCanonicalFilesRejectsOrphanStoryFiles`,
+  `TestValidateCanonicalFilesIgnoresGitkeepPlaceholders`
+- `internal/projectcheck/validator_injection_test.go`:
+  `TestNewWithReadersUsesInjectedImplementations`,
+  `TestNewWithReadersPropagatesRegistryErrors`,
+  `TestNewWithReadersLeavesCodexAndProgressionInfrastructureErrorsUnclassified`
 - `internal/branch/experiment_history_guard_test.go`:
   `TestLoadComparisonRejectsUnrelatedCanonHistory`,
   `TestLoadComparisonUsesLiveMergeBase`
@@ -31,12 +40,17 @@ Backend:
   `TestBranchPromotionRouteMapsSubsetValidationAndInfrastructureFailures`,
   `TestBranchRouteMapsEveryContractErrorClass`,
   `TestBranchRoutesRejectOversizedBodies`,
-  `TestEveryBranchRouteReturnsMethodSpecificAllow`
+  `TestEveryBranchRouteReturnsMethodSpecificAllow`,
+  `TestBranchRoutesRejectInvalidSwitchTargetAndComparisonPathBeforeService`
 - `internal/projectcheck/validator_test.go`:
   `TestValidateProjectClassifiesInvalidCanonicalState`,
   `TestValidateProjectLeavesInfrastructureFailuresUnclassified`,
   `TestValidateProjectRejectsMalformedOutline`,
-  `TestValidateProjectAcceptsValidFixture`
+  `TestValidateProjectAcceptsValidFixture`,
+  `TestValidateProjectRejectsOrphanCanonicalStoryFiles`,
+  `TestValidateProjectLeavesWrappedPermissionFailuresUnclassified`
+- `internal/project/service_test.go`:
+  `TestValidateMetadataFileClassifiesInvalidMetadata`
 - `internal/app/milestone8_integration_test.go`:
   `TestMilestone8AcceptanceM833HappyPath`,
   `TestMilestone8AcceptanceM834Adversarial` subtests
@@ -115,7 +129,7 @@ Verification commands and results:
 | `go test -race ./...` | PASS |
 | `cd web && npm run lint` | PASS |
 | `cd web && npm run typecheck` | PASS |
-| `cd web && npm test -- --run` | PASS, 50 files / 127 tests |
+| `cd web && npm test -- --run` | PASS, 50 files / 129 tests |
 | `make check` | PASS, with the pre-existing Vite chunk warning |
 | `git diff --check` | PASS |
-| `git worktree list --porcelain` | inspected for extra worktrees; existing review worktree remained unchanged |
+| `git status --short` | inspected for unexpected generated artifacts |
