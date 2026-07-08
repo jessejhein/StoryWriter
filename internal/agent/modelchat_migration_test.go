@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"storywork/internal/modelchat"
 	"storywork/internal/provider"
@@ -85,4 +86,29 @@ func TestM8AgentDispatchConsumesModelchatIdentity(t *testing.T) {
 		t.Fatalf("provider identity = %#v", response.Provider)
 	}
 	var _ modelchat.ProviderIdentity = response.Provider
+}
+
+// Test: NewDispatcher applies shared modelchat HTTP client policy without
+// mutating the caller client.
+// Requirements: M8-R11.
+func TestM8AgentDispatcherUsesModelchatHTTPPolicy(t *testing.T) {
+	t.Parallel()
+
+	source := &http.Client{}
+	dispatcher := NewDispatcher(nil, source)
+	if dispatcher.openAI.client == source || dispatcher.ollama.client == source {
+		t.Fatal("dispatcher reused caller client")
+	}
+	if dispatcher.openAI.client != dispatcher.ollama.client {
+		t.Fatal("dispatcher generators do not share the prepared client")
+	}
+	if dispatcher.openAI.client.Timeout != 60*time.Second {
+		t.Fatalf("timeout = %v", dispatcher.openAI.client.Timeout)
+	}
+	if err := dispatcher.openAI.client.CheckRedirect(&http.Request{}, nil); err != http.ErrUseLastResponse {
+		t.Fatalf("CheckRedirect() = %v", err)
+	}
+	if source.Timeout != 0 || source.CheckRedirect != nil {
+		t.Fatalf("source mutated: %#v", source)
+	}
 }

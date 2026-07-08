@@ -30,6 +30,7 @@ type Service struct {
 	builder      ContextBuilder
 	invitations  *InvitationStore
 	inviteIDs    InvitationIDGenerator
+	branches     BranchSnapshotter
 }
 
 // NewService creates the action orchestration service.
@@ -44,6 +45,12 @@ func NewService(session Session, loader RegistryLoader, scenes SceneLoader, acce
 		runs:     runs,
 		ids:      ids,
 	}
+}
+
+// WithBranchSnapshotter injects active branch/head snapshots for transient run safety.
+func (s *Service) WithBranchSnapshotter(snapshotter BranchSnapshotter) *Service {
+	s.branches = snapshotter
+	return s
 }
 
 // Agents returns the project-local agent registry.
@@ -152,8 +159,14 @@ func (s *Service) Run(ctx context.Context, request RunRequest) (Run, error) {
 
 // Reject discards one pending run without mutating canon.
 func (s *Service) Reject(ctx context.Context, runID string) (Run, error) {
-	_ = ctx
 	if err := ValidateRunID(runID); err != nil {
+		return Run{}, err
+	}
+	run, ok := s.runs.Get(runID)
+	if !ok {
+		return Run{}, ErrRunNotFound
+	}
+	if err := s.ensureRunSnapshotCurrent(ctx, run); err != nil {
 		return Run{}, err
 	}
 	return s.runs.MarkRejected(runID)
@@ -181,6 +194,10 @@ func (s *Service) Accept(ctx context.Context, runID, expectedRevision string) (A
 	}
 	run, err := s.runs.ClaimAccepting(runID)
 	if err != nil {
+		return AcceptResult{}, err
+	}
+	if err := s.ensureRunSnapshotCurrent(ctx, run); err != nil {
+		_ = s.runs.ReleasePending(runID)
 		return AcceptResult{}, err
 	}
 	if run.Scope == contextpack.ScopeScene {
@@ -281,6 +298,34 @@ func (s *Service) insertRun(run Run) (Run, error) {
 		}
 	}
 	return Run{}, errors.New("generate unique action run ID after 5 attempts")
+}
+
+func (s *Service) ensureRunSnapshotCurrent(ctx context.Context, run Run) error {
+	if s.branches == nil || run.Branch == "" || run.BranchHead == "" {
+		return nil
+	}
+	snapshot, err := s.branches.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if snapshot.Branch != run.Branch || snapshot.Head != run.BranchHead {
+		return ErrRunConflict
+	}
+	return nil
+}
+
+func (s *Service) ensureInvitationSnapshotCurrent(ctx context.Context, invitation Invitation) error {
+	if s.branches == nil || invitation.Branch == "" || invitation.BranchHead == "" {
+		return nil
+	}
+	snapshot, err := s.branches.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if snapshot.Branch != invitation.Branch || snapshot.Head != invitation.BranchHead {
+		return ErrInvitationConflict
+	}
+	return nil
 }
 
 func mapProviderError(err error) error {

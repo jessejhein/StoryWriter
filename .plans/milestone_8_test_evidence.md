@@ -1,6 +1,6 @@
 # Milestone 8 Test Evidence
 
-Status: complete as of July 6, 2026.
+Status: in progress as of July 7, 2026.
 
 ## Baseline (M8-00)
 
@@ -32,6 +32,8 @@ Backend:
 - `internal/branch/experiment_history_guard_test.go`:
   `TestLoadComparisonRejectsUnrelatedCanonHistory`,
   `TestLoadComparisonUsesLiveMergeBase`
+- `internal/branch/fingerprint_test.go`:
+  `TestComputeFingerprintMatchesFixture`
 - `internal/branch/promotion_service_test.go`:
   `TestPromoteSelectedFilesUsesLiveMergeBase`,
   `TestPromoteSelectedFilesOrdersTransactionAndReturnsResult`,
@@ -58,13 +60,19 @@ Backend:
   `changed_on_main_path_conflicts_before_promotion_checkout`,
   `invalid_promotion_subset_rolls_back_main`
 - `internal/app/milestone8_history_guard_integration_test.go`:
-  `TestMilestone8RewrittenExperimentHistoryFailsClosed`
+  `TestMilestone8UnrelatedExperimentHistoryFailsClosed`,
+  `TestMilestone8RelatedRewrittenExperimentHistoryFailsClosed`,
+  `TestMilestone8PrivateBaseRefCorruptionFailsClosed`
+- `internal/app/milestone8_action_branch_guard_integration_test.go`:
+  `TestMilestone8BranchChangeInvalidatesTransientActionState`
 - `internal/gitstore/tree_comparison_test.go`:
   `TestCompareTreesReportsAddedModifiedDeleted`,
   `TestCompareTreesRejectsSymlinkChanges`
 - `internal/gitstore/blob_test.go`:
   `TestReadTextBlobWithoutCheckout`,
   `TestReadTextBlobRejectsNonRegularEntriesAndDoesNotHideGitErrors`
+- `internal/branch/repository_test.go`:
+  `TestGitRepositoryReadTextBlobMapsOversizedBlobSentinel`
 - `internal/gitstore/promotion_test.go`:
   `TestApplyPathsAndCommitPromotion`,
   `TestCommitPromotionRejectsUnexpectedStagedPaths`
@@ -84,7 +92,8 @@ Backend:
   `TestM8ModelMessageRolesAndContent`,
   `TestM8ModelCompleterContract`
 - `internal/agent/modelchat_migration_test.go`:
-  `TestM8AgentCompleteChatDelegatesToModelchat`
+  `TestM8AgentCompleteChatDelegatesToModelchat`,
+  `TestM8AgentDispatcherUsesModelchatHTTPPolicy`
 - `internal/extract/modelchat_migration_test.go`:
   `TestM8ExtractNoLongerImportsAgentChatTransport`
 - `internal/branch/ramification_adapter_test.go`:
@@ -93,6 +102,11 @@ Backend:
 - `internal/branch/ramification_service_test.go`:
   `TestAnalyzeRamificationsRejectsStaleFingerprint`,
   `TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket`
+- `internal/branch/service_lifecycle_test.go`:
+  `TestSwitchTargetRejectsDetachedHEADBeforeMutation`
+- `internal/api/branch_negative_contract_test.go`:
+  `TestBranchFileComparisonRouteMapsOversizedBlobTo413`,
+  `TestBranchSwitchRouteMapsDetachedHEADTo409`
 
 Frontend:
 

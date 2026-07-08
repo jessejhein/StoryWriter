@@ -28,10 +28,9 @@ func TestComputeFingerprintMatchesFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ComputeFingerprint() error = %v", err)
 	}
-	want := "sha256:8f2f5d6f7f0a5f0f7a6f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
-	// Recompute to ensure stable prefix and lowercase hex; exact value checked below.
-	if got[:7] != "sha256:" {
-		t.Fatalf("fingerprint prefix = %q", got[:7])
+	want := "sha256:6ecf098443c151ec088d046f2060f3c3394d7109f8961a7a349efcb2162cc878"
+	if got != want {
+		t.Fatalf("fingerprint = %q, want %q", got, want)
 	}
 	// Deterministic recompute must match regardless of input order.
 	reordered := []branch.ChangedFile{files[1], files[0]}
@@ -47,7 +46,6 @@ func TestComputeFingerprintMatchesFixture(t *testing.T) {
 	if got != got2 {
 		t.Fatalf("fingerprints differ: %q vs %q", got, got2)
 	}
-	_ = want
 }
 
 // Test: fingerprint changes when refs, status, or path change.

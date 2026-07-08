@@ -166,7 +166,7 @@ func (s *Service) SwitchTarget(ctx context.Context, target string, expectedHead 
 	if !status.IsClean {
 		return RepositoryStatus{}, ErrDirtyWorktree
 	}
-	if status.IsDetached && status.ActiveBranch == "" {
+	if status.IsDetached {
 		return RepositoryStatus{}, ErrDetachedHEAD
 	}
 	if !status.IsCanon && !status.IsManaged {

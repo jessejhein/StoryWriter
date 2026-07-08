@@ -140,7 +140,7 @@ func (r *GitRepository) CompareTrees(ctx context.Context, repoPath string, left,
 func (r *GitRepository) ReadTextBlob(ctx context.Context, repoPath string, commit CommitID, path ProjectPath) (TextSide, error) {
 	blob, err := r.Store.ReadTextBlob(ctx, repoPath, string(commit), string(path))
 	if err != nil {
-		return TextSide{}, err
+		return TextSide{}, mapRepositoryError(err)
 	}
 	if !blob.Exists {
 		return TextSide{Exists: false, Text: ""}, nil

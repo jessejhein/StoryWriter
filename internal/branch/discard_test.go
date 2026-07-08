@@ -1,6 +1,6 @@
-// BDD Scenario: 8.5.1 - Discard the active experiment
-// Requirements: M8-R17
-// Test purpose: Discard refuses dirty worktrees and stale heads.
+// BDD Scenario: 8.5.1 - Discard the active experiment; 8.5.2 - Refuse unsafe discard
+// Requirements: M8-R03, M8-R17, M8-R18
+// Test purpose: Discard handles active experiments safely and refuses unsafe states before mutation.
 
 package branch_test
 

@@ -87,6 +87,14 @@ func (s *Service) insertTaggedRun(ctx context.Context, request TaggedRunRequest,
 		Manifest: manifest,
 		Provider: generated.Provider,
 	}
+	if s.branches != nil {
+		snapshot, err := s.branches.Snapshot(ctx)
+		if err != nil {
+			return Run{}, err
+		}
+		run.Branch = snapshot.Branch
+		run.BranchHead = snapshot.Head
+	}
 	switch request.Target.Scope {
 	case contextpack.ScopeSelection:
 		selection := request.Target.Selection
@@ -206,6 +214,10 @@ func (s *Service) AcceptBody(ctx context.Context, runID, expectedRevision string
 	}
 	run, err := s.runs.ClaimAccepting(runID)
 	if err != nil {
+		return AcceptResult{}, err
+	}
+	if err := s.ensureRunSnapshotCurrent(ctx, run); err != nil {
+		_ = s.runs.ReleasePending(runID)
 		return AcceptResult{}, err
 	}
 	if run.Scope != contextpack.ScopeScene {

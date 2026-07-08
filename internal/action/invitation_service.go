@@ -49,6 +49,10 @@ func (s *Service) RunInvitation(ctx context.Context, invitationID string, reques
 	if err != nil {
 		return Run{}, err
 	}
+	if err := s.ensureInvitationSnapshotCurrent(ctx, invitation); err != nil {
+		_ = s.invitations.Release(invitationID)
+		return Run{}, err
+	}
 	release := true
 	defer func() {
 		if release {
@@ -190,12 +194,22 @@ func (s *Service) publishPreparedInvitations(run Run, prepared []preparedInvitat
 		rootRunID = run.RootRunID
 	}
 	chainDepth := run.effectiveChainDepth() + 1
+	invitationBranch := run.Branch
+	invitationHead := run.BranchHead
+	if s.branches != nil {
+		snapshot, err := s.branches.Snapshot(context.Background())
+		if err != nil {
+			return nil, err
+		}
+		invitationBranch = snapshot.Branch
+		invitationHead = snapshot.Head
+	}
 	batch := make([]Invitation, 0, len(prepared))
 	for index, offer := range prepared {
 		invitation := Invitation{
 			ID: ids[index], ParentRunID: run.RunID, RootRunID: rootRunID, ChainDepth: chainDepth,
 			AgentID: offer.AgentID, Scope: offer.Scope, SceneID: offer.SceneID, ChapterID: offer.ChapterID,
-			Relationship: offer.Relationship,
+			Relationship: offer.Relationship, Branch: invitationBranch, BranchHead: invitationHead,
 		}
 		batch = append(batch, invitation)
 	}

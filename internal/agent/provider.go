@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"slices"
 	"strings"
-	"time"
 
 	"storywork/internal/contextpack"
 	"storywork/internal/modelchat"
@@ -121,18 +120,7 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(resolver profileResolver, client *http.Client) *Dispatcher {
-	if client == nil {
-		client = &http.Client{}
-	} else {
-		clientCopy := *client
-		client = &clientCopy
-	}
-	if client.Timeout == 0 {
-		client.Timeout = 60 * time.Second
-	}
-	client.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
+	client = modelchat.PrepareHTTPClient(client)
 	return &Dispatcher{
 		resolver: resolver,
 		mock:     NewMockProvider(),

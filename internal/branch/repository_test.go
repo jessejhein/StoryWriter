@@ -17,6 +17,15 @@ import (
 	"storywork/internal/gitstore"
 )
 
+type blobErrorStore struct {
+	*gitstore.Store
+	err error
+}
+
+func (s blobErrorStore) ReadTextBlob(context.Context, string, string, string) (gitstore.TextBlob, error) {
+	return gitstore.TextBlob{}, s.err
+}
+
 // Test: a malformed reserved ref is returned as a repository-state error
 // rather than disappearing from the adapter output.
 // Requirements: M8-R01, M8-R06.
@@ -40,5 +49,20 @@ func TestGitRepositoryListExperimentsReturnsMalformedRefError(t *testing.T) {
 	repo := &branch.GitRepository{Store: store}
 	if _, err := repo.ListExperiments(ctx, dir); !errors.Is(err, branch.ErrRepositoryState) {
 		t.Fatalf("ListExperiments() err = %v, want ErrRepositoryState", err)
+	}
+}
+
+// Test: wrapped oversized git blobs map to branch.ErrFileTooLarge while
+// preserving the original gitstore sentinel.
+// Requirements: M8-R07.
+func TestGitRepositoryReadTextBlobMapsOversizedBlobSentinel(t *testing.T) {
+	t.Parallel()
+	repo := &branch.GitRepository{Store: &blobErrorStore{err: errors.Join(errors.New("adapter read"), gitstore.ErrBlobTooLarge)}}
+	_, err := repo.ReadTextBlob(context.Background(), "/tmp/project", branch.CommitID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), branch.ProjectPath("outline.yaml"))
+	if !errors.Is(err, branch.ErrFileTooLarge) {
+		t.Fatalf("ReadTextBlob() err = %v, want ErrFileTooLarge", err)
+	}
+	if !errors.Is(err, gitstore.ErrBlobTooLarge) {
+		t.Fatalf("ReadTextBlob() err = %v, want original gitstore.ErrBlobTooLarge", err)
 	}
 }

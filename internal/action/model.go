@@ -35,6 +35,15 @@ type Session interface {
 	Current() (project.Project, bool)
 }
 
+type BranchSnapshot struct {
+	Branch string
+	Head   string
+}
+
+type BranchSnapshotter interface {
+	Snapshot(context.Context) (BranchSnapshot, error)
+}
+
 type RegistryLoader interface {
 	Load(projectPath string) (agent.Registry, error)
 }
@@ -117,6 +126,8 @@ type Run struct {
 	Selection           Selection              `json:"selection,omitempty"`
 	OriginalText        string                 `json:"-"`
 	Replacement         string                 `json:"-"`
+	Branch              string                 `json:"-"`
+	BranchHead          string                 `json:"-"`
 	Manifest            contextpack.Manifest   `json:"manifest,omitempty"`
 	ContextSummary      agent.ContextSummary   `json:"context_summary,omitempty"`
 	Findings            []Finding              `json:"findings,omitempty"`

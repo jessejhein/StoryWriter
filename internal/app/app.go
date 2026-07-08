@@ -85,6 +85,11 @@ type branchValidationAdapter struct {
 	validator *projectcheck.Validator
 }
 
+type actionBranchSnapshotter struct {
+	session *workspace.Session
+	git     *gitstore.Store
+}
+
 func (v branchValidationAdapter) ValidateProject(ctx context.Context, projectPath string) error {
 	if v.validator == nil {
 		return branch.ErrRepositoryState
@@ -97,6 +102,22 @@ func (v branchValidationAdapter) ValidateProject(ctx context.Context, projectPat
 		return errors.Join(branch.ErrInvalidPromotionSubset, err)
 	}
 	return err
+}
+
+func (s actionBranchSnapshotter) Snapshot(ctx context.Context) (action.BranchSnapshot, error) {
+	current, ok := s.session.Current()
+	if !ok {
+		return action.BranchSnapshot{}, story.ErrNoActiveProject
+	}
+	status, err := s.git.Status(ctx, current.Path)
+	if err != nil {
+		return action.BranchSnapshot{}, err
+	}
+	head, err := s.git.ResolveCommit(ctx, current.Path, "HEAD")
+	if err != nil {
+		return action.BranchSnapshot{}, err
+	}
+	return action.BranchSnapshot{Branch: status.ActiveBranch, Head: head}, nil
 }
 
 func (s *importHandlerStore) ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error) {
@@ -202,6 +223,7 @@ func NewHandler(version string) http.Handler {
 		action.NewRandomIDGenerator(),
 	).WithMaterialSource(stories).WithContextBuilder(contextpack.NewBuilder()).
 		WithBodyAcceptor(stories).
+		WithBranchSnapshotter(actionBranchSnapshotter{session: session, git: git}).
 		WithInvitationStore(action.NewInvitationStore(1000)).
 		WithInvitationIDGenerator(action.NewRandomInvitationIDGenerator())
 	return api.NewHandler(api.HandlerDependencies{

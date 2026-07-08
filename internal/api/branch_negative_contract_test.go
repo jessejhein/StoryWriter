@@ -37,6 +37,16 @@ type promotionErrorBranchStore struct {
 	err error
 }
 
+type fileComparisonErrorBranchStore struct {
+	branchServiceStub
+	err error
+}
+
+type switchErrorBranchStore struct {
+	branchServiceStub
+	err error
+}
+
 type noopBranchIndex struct{}
 
 func (noopBranchIndex) Rebuild(context.Context, string) error { return nil }
@@ -103,6 +113,14 @@ func (s promotionErrorBranchStore) PromoteSelectedFiles(context.Context, branch.
 	return branch.PromotionResult{}, s.err
 }
 
+func (s fileComparisonErrorBranchStore) LoadFileComparison(context.Context, string, string) (branch.FileComparison, error) {
+	return branch.FileComparison{}, s.err
+}
+
+func (s switchErrorBranchStore) SwitchTarget(context.Context, string, *branch.CommitID) (branch.RepositoryStatus, error) {
+	return branch.RepositoryStatus{}, s.err
+}
+
 // Test: typed domain errors map to the exact public status classes.
 // Requirements: M8-R03, M8-R07, M8-R09, M8-R12, M8-R17.
 func TestBranchRouteMapsEveryContractErrorClass(t *testing.T) {
@@ -160,6 +178,43 @@ func TestBranchPromotionRouteMapsSubsetValidationAndInfrastructureFailures(t *te
 				t.Fatalf("unsafe body=%s", response.Body.String())
 			}
 		})
+	}
+}
+
+// Test: oversized comparison file blobs return 413 on the file comparison
+// route with a safe body and no partial content fields.
+// Requirements: M8-R07.
+func TestBranchFileComparisonRouteMapsOversizedBlobTo413(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	handlerWithBranches(fileComparisonErrorBranchStore{err: branch.ErrFileTooLarge}).ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/api/branches/brn_0123456789abcdef0123/comparison/file?path=outline.yaml", nil),
+	)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "/") || strings.Contains(body, "git") || strings.Contains(body, "\"canon\"") || strings.Contains(body, "\"experiment\"") {
+		t.Fatalf("unsafe body=%s", body)
+	}
+}
+
+// Test: detached HEAD switch failures map to 409 with a sanitized body.
+// Requirements: M8-R03.
+func TestBranchSwitchRouteMapsDetachedHEADTo409(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	handlerWithBranches(switchErrorBranchStore{err: branch.ErrDetachedHEAD}).ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodPost, "/api/branches/switch", strings.NewReader(`{"target":"main"}`)),
+	)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "/") || strings.Contains(body, "git") {
+		t.Fatalf("unsafe body=%s", body)
 	}
 }
 

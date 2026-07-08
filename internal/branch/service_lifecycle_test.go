@@ -24,6 +24,7 @@ type fakeRepo struct {
 	forceMainNonAncestor       bool
 	forceExperimentNonAncestor bool
 	mergeBaseErr               error
+	switches                   int
 }
 
 func (f *fakeRepo) Status(context.Context, string) (branch.RepositoryStatus, error) {
@@ -42,6 +43,7 @@ func (f *fakeRepo) CreateAndSwitch(_ context.Context, _ string, ref branch.Exper
 	return nil
 }
 func (f *fakeRepo) Switch(_ context.Context, _ string, ref branch.BranchRef) error {
+	f.switches++
 	f.status.ActiveBranch = string(ref)
 	f.status.IsCanon = ref == branch.CanonBranchName
 	f.status.IsManaged = branch.IsManagedExperimentRef(string(ref))
@@ -53,6 +55,7 @@ func (f *fakeRepo) Switch(_ context.Context, _ string, ref branch.BranchRef) err
 	return nil
 }
 func (f *fakeRepo) SwitchExperiment(ctx context.Context, path string, ref branch.ExperimentRef) error {
+	f.switches++
 	f.status.ActiveBranch = string(ref.BranchName)
 	f.status.IsCanon = false
 	f.status.IsManaged = true
@@ -360,5 +363,31 @@ func TestBranchChangesRejectUnmanagedActiveBranch(t *testing.T) {
 	}
 	if index.rebuilds != 0 || len(repo.experiments) != 0 {
 		t.Fatalf("rebuilds=%d experiments=%#v", index.rebuilds, repo.experiments)
+	}
+}
+
+// Test: detached HEAD is rejected for switch even when the repository status
+// reports a non-empty active branch token.
+// Requirements: M8-R03.
+func TestSwitchTargetRejectsDetachedHEADBeforeMutation(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		status: branch.RepositoryStatus{
+			ActiveBranch: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			IsDetached:   true,
+			IsClean:      true,
+		},
+		mainHead: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	index := &fakeIndex{}
+	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	if _, err := service.SwitchTarget(context.Background(), "main", nil); !errors.Is(err, branch.ErrDetachedHEAD) {
+		t.Fatalf("SwitchTarget() error = %v", err)
+	}
+	if index.rebuilds != 0 {
+		t.Fatalf("rebuilds=%d", index.rebuilds)
+	}
+	if repo.switches != 0 {
+		t.Fatalf("switches=%d", repo.switches)
 	}
 }
