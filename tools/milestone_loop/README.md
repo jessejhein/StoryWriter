@@ -108,6 +108,15 @@ Suggested resume command:
   tools/milestone_loop/resume_last_codex.sh implementation
 ```
 
+To inspect the latest recorded loop state without starting a new run:
+
+```bash
+uv run --script tools/milestone_loop/codex_milestone_loop.py --status
+```
+
+The status report shows the latest recorded stage, loop artifacts, and a
+preview of the last Codex output file.
+
 To resume the last Codex session after a quota/token-regeneration stop:
 
 ```bash

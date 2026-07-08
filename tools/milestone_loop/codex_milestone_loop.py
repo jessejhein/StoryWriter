@@ -22,6 +22,8 @@ Failure handling is deliberately loud:
 - Writes .git/codex-milestone-loop/latest_failure.md on failure
 - Prints the iteration, stage, reason, and suggested resume command
 - Does NOT use --ephemeral by default, so Codex sessions can be resumed
+- Supports a read-only --status mode that reports the latest recorded loop
+  state, per-iteration artifacts, and the last output preview.
 
 Designed for local use in a dedicated repo/worktree.
 
@@ -430,15 +432,21 @@ def git_path(repo: Path, name: str) -> Path:
 
 
 def prepare_paths(repo: Path, run_dir_arg: Path | None) -> Paths:
+    return resolve_paths(repo, run_dir_arg, create=True)
+
+
+def resolve_paths(repo: Path, run_dir_arg: Path | None, *, create: bool) -> Paths:
     if run_dir_arg is None:
         run_dir = git_path(repo, "codex-milestone-loop")
     else:
         run_dir = run_dir_arg.resolve()
 
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    schema_file = run_dir / "milestone-review.schema.json"
-    schema_file.write_text(json.dumps(REVIEW_SCHEMA, indent=2), encoding="utf-8")
+    if create:
+        run_dir.mkdir(parents=True, exist_ok=True)
+        schema_file = run_dir / "milestone-review.schema.json"
+        schema_file.write_text(json.dumps(REVIEW_SCHEMA, indent=2), encoding="utf-8")
+    else:
+        schema_file = run_dir / "milestone-review.schema.json"
 
     return Paths(
         repo=repo,
@@ -546,6 +554,144 @@ def write_failure_report(paths: Paths, error: StageError) -> None:
     )
 
     paths.latest_failure_file.write_text("".join(lines), encoding="utf-8")
+
+
+def load_loop_state(paths: Paths) -> dict[str, Any] | None:
+    if not paths.state_file.exists():
+        return None
+
+    try:
+        return json.loads(paths.state_file.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise LoopError(f"Could not parse loop state file {paths.state_file}: {exc}") from exc
+
+
+def collect_iteration_artifacts(run_dir: Path) -> dict[int, list[str]]:
+    artifacts: dict[int, set[str]] = {}
+    patterns = [
+        (re.compile(r"^review-(\d+)\.json$"), "review"),
+        (re.compile(r"^implement-(\d+)\.md$"), "implementation"),
+        (re.compile(r"^commit-(\d+)\.raw\.txt$"), "commit-message-raw"),
+        (re.compile(r"^commit-(\d+)\.txt$"), "commit-message"),
+    ]
+
+    if not run_dir.exists():
+        return {}
+
+    for path in run_dir.iterdir():
+        if not path.is_file():
+            continue
+        name = path.name
+        for pattern, label in patterns:
+            match = pattern.match(name)
+            if match:
+                iteration = int(match.group(1))
+                artifacts.setdefault(iteration, set()).add(label)
+                break
+
+    order = {
+        "review": 0,
+        "implementation": 1,
+        "commit-message-raw": 2,
+        "commit-message": 3,
+    }
+    return {
+        iteration: sorted(labels, key=lambda label: order.get(label, 99))
+        for iteration, labels in sorted(artifacts.items())
+    }
+
+
+def preview_output(path: Path, *, max_chars: int = 2000) -> str:
+    if not path.exists():
+        return "(missing)"
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        return f"(unreadable: {exc})"
+
+    if len(text) <= max_chars:
+        return text.rstrip()
+
+    return text[:max_chars].rstrip() + "\n...[truncated]..."
+
+
+def build_status_report(paths: Paths) -> str:
+    state = load_loop_state(paths)
+    branch = ""
+    git_state = "(unavailable)"
+    try:
+        branch = current_branch(paths.repo)
+    except Exception:
+        branch = "(unavailable)"
+    try:
+        git_state = git_status(paths.repo) or "(clean)"
+    except Exception:
+        git_state = "(unavailable)"
+
+    lines: list[str] = []
+    lines.append("Codex Milestone Loop Status\n")
+    lines.append("\n")
+    lines.append(f"Repository : {paths.repo}\n")
+    lines.append(f"Branch     : {branch}\n")
+    lines.append(f"Run dir    : {paths.run_dir}\n")
+    lines.append(f"State file : {rel_display(paths.state_file, paths.repo)}\n")
+    lines.append(f"Git status : {git_state}\n")
+
+    if state is None:
+        lines.append("\nNo loop state file was found.\n")
+        lines.append("Next step: run the milestone loop once to create state.\n")
+        return "".join(lines)
+
+    lines.append("\nCurrent state\n")
+    lines.append(f"  Status   : {state.get('status', '(unknown)')}\n")
+    lines.append(f"  Iteration: {state.get('iteration', '(unknown)')}\n")
+    lines.append(f"  Stage    : {state.get('stage', '(unknown)')}\n")
+    lines.append(f"  Reason   : {state.get('reason', '(unknown)')}\n")
+    lines.append(f"  Updated  : {state.get('timestamp_utc', '(unknown)')}\n")
+    if state.get("branch"):
+        lines.append(f"  Recorded branch: {state.get('branch')}\n")
+    if state.get("detail"):
+        lines.append(f"  Detail   : {state.get('detail')}\n")
+    if state.get("milestone_file"):
+        lines.append(f"  Milestone: {state.get('milestone_file')}\n")
+    if state.get("remediation_file"):
+        lines.append(f"  Remediation: {state.get('remediation_file')}\n")
+    if state.get("review_file"):
+        lines.append(f"  Review file: {state.get('review_file')}\n")
+    if state.get("output_file"):
+        lines.append(f"  Last output file: {state.get('output_file')}\n")
+    if state.get("resume_command"):
+        lines.append(f"  Resume command: {state.get('resume_command')}\n")
+
+    artifacts = collect_iteration_artifacts(paths.run_dir)
+    if artifacts:
+        lines.append("\nPerformed loops\n")
+        for iteration, labels in artifacts.items():
+            lines.append(f"  Iteration {iteration}: {', '.join(labels)}\n")
+
+    output_file = state.get("output_file")
+    if isinstance(output_file, str) and output_file:
+        output_path = (paths.repo / output_file).resolve() if not Path(output_file).is_absolute() else Path(output_file)
+        lines.append("\nLast output\n")
+        lines.append(f"  Path: {output_file}\n")
+        lines.append("  Preview:\n")
+        preview = preview_output(output_path)
+        for line in preview.splitlines() or [""]:
+            lines.append(f"    {line}\n")
+
+    lines.append("\nNext steps\n")
+    if state.get("resume_command"):
+        lines.append(f"  Run: {state.get('resume_command')}\n")
+        lines.append(
+            "  After it finishes, rerun the milestone loop. Use --allow-dirty-start if partial changes remain.\n"
+        )
+    elif state.get("status") == "complete":
+        lines.append("  The loop reported completion. Move to the next milestone prompt if you are continuing.\n")
+    else:
+        lines.append("  Inspect the recorded state and rerun the loop after addressing the stop reason.\n")
+
+    return "".join(lines)
 
 
 def print_failure_banner(paths: Paths, error: StageError) -> None:
@@ -1117,8 +1263,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "milestone_file",
+        nargs="?",
         type=Path,
         help="Path to the milestone description file.",
+    )
+
+    parser.add_argument(
+        "--status",
+        action="store_true",
+        help="Show the latest recorded loop status and exit without running Codex.",
     )
 
     parser.add_argument(
@@ -1239,11 +1392,19 @@ def main() -> int:
 
     try:
         require_tool("git")
-        require_tool("codex")
 
         repo = resolve_repo(args.repo)
 
+        if args.status:
+            paths = resolve_paths(repo, args.run_dir, create=False)
+            print(build_status_report(paths))
+            return 0
+
+        require_tool("codex")
+
         milestone_file = args.milestone_file
+        if milestone_file is None:
+            raise LoopError("Milestone file is required unless --status is set.")
         if not milestone_file.is_absolute():
             milestone_file = (Path.cwd() / milestone_file).resolve()
 
