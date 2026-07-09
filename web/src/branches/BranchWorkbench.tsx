@@ -74,10 +74,6 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
   const liveRegionRef = useRef<HTMLParagraphElement>(null)
 
   useEffect(() => {
-    onDirtyChange?.(false)
-  }, [onDirtyChange])
-
-  useEffect(() => {
     if (!appDirty) {
       setDirtyDraftAcknowledged(false)
     }
@@ -225,6 +221,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
   function resetBranchSensitiveState() {
     requestVersionRef.current += 1
     setDirtyDraftAcknowledged(false)
+    onDirtyChange?.(false)
     setWorkbench((state) => ({
       ...invalidateOnBranchChange(project.project_id),
       requestVersion: state.requestVersion + 1,
@@ -583,7 +580,16 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
               <p className="section-note">Run analysis only after reviewing the current comparison. Analysis does not edit files.</p>
               <label>
                 Analysis goal
-                <textarea disabled={pending} onChange={(event) => setWorkbench((state) => ({ ...state, goal: event.target.value }))} rows={3} value={workbench.goal} />
+                <textarea
+                  disabled={pending}
+                  onChange={(event) => {
+                    const nextGoal = event.target.value
+                    onDirtyChange?.(nextGoal.trim().length > 0)
+                    setWorkbench((state) => ({ ...state, goal: nextGoal }))
+                  }}
+                  rows={3}
+                  value={workbench.goal}
+                />
               </label>
               <label>
                 Provider profile

@@ -279,6 +279,173 @@ func TestMilestone8AcceptanceM833HappyPath(t *testing.T) {
 	})
 }
 
+// BDD Scenario: 8.4.1 - Promote selected files after unrelated canon advance
+// Requirements: M8-R05, M8-R12, M8-R13, M8-R14, M8-R15, M8-R16, M8-R20
+// Test purpose: Real adapters prove selected promotion succeeds when main
+// advanced after the fork on a different allowed canonical path.
+func TestMilestone8AcceptanceM835PromotionAllowsUnrelatedMainAdvancement(t *testing.T) {
+	configPath := t.TempDir()
+	t.Setenv("STORYWORK_CONFIG_DIR", configPath)
+
+	handler := app.NewHandler("test")
+	projectPath := filepath.Join(t.TempDir(), "m8-unrelated-main-advance")
+	putJSON(t, handler, http.MethodPost, "/api/projects", map[string]any{"name": "M8 Unrelated Main Advance", "path": projectPath}, http.StatusCreated, nil)
+
+	var outline struct {
+		Outline struct {
+			Arcs []struct {
+				ID       string `json:"id"`
+				Chapters []struct {
+					ID     string `json:"id"`
+					Scenes []struct {
+						ID string `json:"id"`
+					} `json:"scenes"`
+				} `json:"chapters"`
+			} `json:"arcs"`
+		} `json:"outline"`
+	}
+	putJSON(t, handler, http.MethodPost, "/api/arcs", map[string]string{"title": "Act"}, http.StatusCreated, &outline)
+	arcID := outline.Outline.Arcs[0].ID
+	putJSON(t, handler, http.MethodPost, "/api/chapters", map[string]any{"arc_id": arcID, "title": "Chapter"}, http.StatusCreated, &outline)
+	chapterID := outline.Outline.Arcs[0].Chapters[0].ID
+	putJSON(t, handler, http.MethodPost, "/api/scenes", map[string]any{"chapter_id": chapterID, "title": "Opening"}, http.StatusCreated, &outline)
+	sceneAID := outline.Outline.Arcs[0].Chapters[0].Scenes[0].ID
+	sceneAPath := "scenes/" + sceneAID + ".md"
+
+	sceneA := loadScene(t, handler, sceneAID)
+	saveSceneMarkdown(t, handler, sceneAID, sceneA, "Canon opening remains stable before any branch work begins.\n")
+	sceneA = loadScene(t, handler, sceneAID)
+
+	var createStatus map[string]any
+	putJSON(t, handler, http.MethodPost, "/api/branches", map[string]string{"name": "Selective Promotion"}, http.StatusCreated, &createStatus)
+	experimentID := createStatus["active_experiment_id"].(string)
+
+	saveSceneMarkdown(t, handler, sceneAID, sceneA, "Experiment opening changes on the branch while canon stays untouched.\n")
+	sceneA = loadScene(t, handler, sceneAID)
+	experimentHead := gitRevParse(t, projectPath, "HEAD")
+
+	putJSON(t, handler, http.MethodPost, "/api/branches/switch", map[string]string{"target": "main"}, http.StatusOK, nil)
+
+	putJSON(t, handler, http.MethodPost, "/api/scenes", map[string]any{"chapter_id": chapterID, "title": "Aftermath"}, http.StatusCreated, &outline)
+	sceneBID := outline.Outline.Arcs[0].Chapters[0].Scenes[1].ID
+	sceneBPath := "scenes/" + sceneBID + ".md"
+	sceneB := loadScene(t, handler, sceneBID)
+	saveSceneMarkdown(t, handler, sceneBID, sceneB, "Main-only aftermath appears after the fork and must remain on canon.\n")
+	mainHeadAfterSceneB := gitRevParse(t, projectPath, "main")
+
+	putJSON(t, handler, http.MethodPost, "/api/branches/switch", map[string]any{
+		"target":        experimentID,
+		"expected_head": experimentHead,
+	}, http.StatusOK, nil)
+
+	var comparison struct {
+		MainHead       string `json:"main_head"`
+		ExperimentHead string `json:"experiment_head"`
+		BaseHead       string `json:"base_head"`
+		Fingerprint    string `json:"fingerprint"`
+		Files          []struct {
+			Path   string `json:"path"`
+			Status string `json:"status"`
+		} `json:"files"`
+	}
+	getJSON(t, handler, "/api/branches/"+experimentID+"/comparison", http.StatusOK, &comparison)
+
+	if comparison.ExperimentHead != experimentHead {
+		t.Fatalf("comparison experiment_head = %q, want %q", comparison.ExperimentHead, experimentHead)
+	}
+
+	foundSceneAModified := false
+	foundSceneBDeleted := false
+	for _, file := range comparison.Files {
+		if file.Path == sceneAPath && file.Status == "modified" {
+			foundSceneAModified = true
+		}
+		if file.Path == sceneBPath && file.Status == "deleted" {
+			foundSceneBDeleted = true
+		}
+	}
+	if !foundSceneAModified {
+		t.Fatalf("comparison files missing modified experiment path: %#v", comparison.Files)
+	}
+	if !foundSceneBDeleted {
+		t.Fatalf("comparison files missing deleted main-only path: %#v", comparison.Files)
+	}
+
+	var sceneBComparison struct {
+		Canon struct {
+			Exists bool   `json:"exists"`
+			Text   string `json:"text"`
+		} `json:"canon"`
+		Experiment struct {
+			Exists bool   `json:"exists"`
+			Text   string `json:"text"`
+		} `json:"experiment"`
+	}
+	getJSON(t, handler, "/api/branches/"+experimentID+"/comparison/file?path="+sceneBPath, http.StatusOK, &sceneBComparison)
+	if !sceneBComparison.Canon.Exists || !strings.Contains(sceneBComparison.Canon.Text, "Main-only aftermath appears after the fork") {
+		t.Fatalf("scene B canon side = %#v", sceneBComparison.Canon)
+	}
+	if sceneBComparison.Experiment.Exists {
+		t.Fatalf("scene B experiment side unexpectedly exists: %#v", sceneBComparison.Experiment)
+	}
+
+	mainCommitsBeforePromotion := gitRevCountRef(t, projectPath, "main")
+	var promoted struct {
+		MainHead      string   `json:"main_head"`
+		PromotedPaths []string `json:"promoted_paths"`
+		ExperimentID  string   `json:"experiment_id"`
+	}
+	putJSON(t, handler, http.MethodPost, "/api/branches/"+experimentID+"/promote", map[string]any{
+		"paths":                    []string{sceneAPath},
+		"expected_main_head":       comparison.MainHead,
+		"expected_experiment_head": comparison.ExperimentHead,
+		"comparison_fingerprint":   comparison.Fingerprint,
+	}, http.StatusOK, &promoted)
+
+	if gitRevCountRef(t, projectPath, "main") != mainCommitsBeforePromotion+1 {
+		t.Fatalf("main commit count = %d, want %d", gitRevCountRef(t, projectPath, "main"), mainCommitsBeforePromotion+1)
+	}
+	if len(promoted.PromotedPaths) != 1 || promoted.PromotedPaths[0] != sceneAPath {
+		t.Fatalf("promoted paths = %#v", promoted.PromotedPaths)
+	}
+	if promoted.ExperimentID != experimentID {
+		t.Fatalf("promoted experiment_id = %q, want %q", promoted.ExperimentID, experimentID)
+	}
+
+	message := gitShowBody(t, projectPath)
+	if !strings.Contains(message, "Storywork-Experiment-ID: "+experimentID) {
+		t.Fatalf("commit missing experiment trailer: %q", message)
+	}
+	if !strings.Contains(message, "Storywork-Source-Commit: "+comparison.ExperimentHead) {
+		t.Fatalf("commit missing source trailer: %q", message)
+	}
+	if !strings.Contains(message, "Storywork-Base-Commit: "+comparison.BaseHead) {
+		t.Fatalf("commit missing base trailer: %q", message)
+	}
+	if comparison.BaseHead == mainHeadAfterSceneB {
+		t.Fatalf("comparison base_head = %q, want merge-base distinct from refreshed main head %q", comparison.BaseHead, mainHeadAfterSceneB)
+	}
+
+	mainSceneA, err := exec.Command("git", "-C", projectPath, "show", "main:"+sceneAPath).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainSceneA), sceneA["markdown"].(string)) {
+		t.Fatalf("main scene A missing experiment content: %q", mainSceneA)
+	}
+	mainSceneB, err := exec.Command("git", "-C", projectPath, "show", "main:"+sceneBPath).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(mainSceneB), "Main-only aftermath appears after the fork") {
+		t.Fatalf("main scene B missing main-only content: %q", mainSceneB)
+	}
+	if gitActiveBranch(t, projectPath) != "main" {
+		t.Fatalf("active branch = %q, want main", gitActiveBranch(t, projectPath))
+	}
+	assertClean(t, projectPath)
+}
+
 // BDD Scenario: 8.3.3 - Reject stale, oversized, or malformed analysis
 // Requirements: M8-R09, M8-R12, M8-R13, M8-R14, M8-R15
 // Test purpose: Adversarial guards stop stale refs, canon conflicts, and

@@ -179,6 +179,17 @@ test('requires confirmation before creating an experiment when the app draft is 
   expect(onBranchChanged).toHaveBeenCalled()
 })
 
+// Test: the branch workbench does not clear a dirty parent draft merely by
+// mounting.
+// Requirements: M8-R18.
+test('does not clear parent dirty state on mount', async () => {
+  const onDirtyChange = vi.fn()
+  render(<BranchWorkbench project={project} appDirty onDirtyChange={onDirtyChange} onBranchChanged={vi.fn()} />)
+
+  await waitFor(() => expect(screen.getByText('Canon')).toBeInTheDocument())
+  expect(onDirtyChange).not.toHaveBeenCalledWith(false)
+})
+
 // Test: successful switch to the reviewed experiment clears branch-sensitive
 // state and refetches the reviewed comparison under the new active branch.
 // Requirements: M8-R18.

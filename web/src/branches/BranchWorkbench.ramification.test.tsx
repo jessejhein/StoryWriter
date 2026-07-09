@@ -4,6 +4,7 @@
 // context do not install findings, errors, or status messages.
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import { beforeEach, expect, test, vi } from 'vitest'
 import type { Project, RamificationResponse } from '../api'
 import BranchWorkbench from './BranchWorkbench'
@@ -117,6 +118,75 @@ test('disables ramification analysis until a non-empty model is provided', async
 
   fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'qwen2.5:7b' } })
   await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze ramifications' })).not.toBeDisabled())
+})
+
+// Test: a typed branch-local analysis goal behaves as an unsaved browser draft
+// and blocks branch mutation until explicitly discarded.
+// Requirements: M8-R18.
+test('analysis goal marks the app dirty and requires explicit discard before branch switch', async () => {
+  vi.mocked(api.getBranchStatus).mockResolvedValue({
+    active_branch: 'main',
+    active_kind: 'canon',
+    main_head: mainHead,
+    experiment_head: null,
+    active_experiment_id: null,
+    worktree_clean: true,
+  })
+  vi.mocked(api.listExperiments).mockResolvedValue({
+    experiments: [
+      { experiment_id: experimentID, branch_name: 'branch/test-exp-0123456789abcdef0123', head: experimentHead, display_name: 'test-exp' },
+    ],
+  })
+  vi.mocked(api.switchBranch).mockResolvedValue({
+    active_branch: 'branch/test-exp-0123456789abcdef0123',
+    active_kind: 'experiment',
+    main_head: mainHead,
+    experiment_head: experimentHead,
+    active_experiment_id: experimentID,
+    worktree_clean: true,
+  })
+
+  const dirtyChange = vi.fn()
+
+  function DirtyHarness() {
+    const [dirty, setDirty] = useState(false)
+    return (
+      <BranchWorkbench
+        project={projectA}
+        appDirty={dirty}
+        onDirtyChange={(nextDirty) => {
+          dirtyChange(nextDirty)
+          setDirty(nextDirty)
+        }}
+        onBranchChanged={vi.fn()}
+      />
+    )
+  }
+
+  render(<DirtyHarness />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Switch to reviewed experiment' })).toBeInTheDocument())
+
+  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Review ramifications before switching' } })
+  await waitFor(() => expect(dirtyChange).toHaveBeenCalledWith(true))
+
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to reviewed experiment' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  expect(api.switchBranch).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('Analysis goal')).toHaveValue('Review ramifications before switching')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(api.switchBranch).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('Analysis goal')).toHaveValue('Review ramifications before switching')
+
+  fireEvent.click(screen.getByRole('button', { name: 'Switch to reviewed experiment' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+
+  await waitFor(() => expect(api.switchBranch).toHaveBeenCalledWith({
+    target: experimentID,
+    expected_head: experimentHead,
+  }))
+  expect(dirtyChange).toHaveBeenCalledWith(false)
 })
 
 // Test: analysis started for project A does not display findings after
