@@ -1,3 +1,5 @@
+// BDD Scenario: 8.4.3 - Reject an invalid selected subset
+// Requirements: M8-R14, M8-R15, M8-R20
 // Test purpose: Verify Validator accepts injected StoryReader and RegistryReader
 // implementations, enabling unit tests without filesystem fixtures.
 
@@ -56,6 +58,7 @@ func noopMetadata(_ string) (string, string, error) { return "", "", nil }
 func noopImports(_ context.Context, _ string) error { return nil }
 
 // Test: NewWithReaders uses injected readers and returns their errors directly.
+// Requirements: M8-R14, M8-R15, M8-R20.
 func TestNewWithReadersUsesInjectedImplementations(t *testing.T) {
 	t.Parallel()
 
@@ -76,6 +79,7 @@ func TestNewWithReadersUsesInjectedImplementations(t *testing.T) {
 }
 
 // Test: NewWithReaders propagates agent registry errors.
+// Requirements: M8-R14, M8-R15, M8-R20.
 func TestNewWithReadersPropagatesRegistryErrors(t *testing.T) {
 	t.Parallel()
 

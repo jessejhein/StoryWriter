@@ -12,6 +12,14 @@ tools/milestone_loop/
 
 The Python script is `uv run --script` ready via a PEP 723 header.
 
+## Tests
+
+The repository baseline runs the tool regression suite with:
+
+```bash
+python3 -m unittest tools.milestone_loop.test_codex_milestone_loop
+```
+
 ## Normal safer run
 
 ```bash

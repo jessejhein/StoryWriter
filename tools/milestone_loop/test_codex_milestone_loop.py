@@ -6,6 +6,7 @@ import contextlib
 import importlib.util
 import io
 import json
+import subprocess
 import tempfile
 import sys
 from pathlib import Path
@@ -206,6 +207,39 @@ class StatusCommandTests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "STATUS REPORT\n")
         require_tool.assert_called_once_with("git")
         build_status_report.assert_called_once()
+
+
+class MakefileContractTests(unittest.TestCase):
+    def test_tool_check_target_runs_milestone_loop_unittests(self) -> None:
+        repo_root = MODULE_PATH.parents[2]
+
+        result = subprocess.run(
+            ["make", "-n", "tool-check"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "python3 -m unittest tools.milestone_loop.test_codex_milestone_loop",
+            result.stdout,
+        )
+
+    def test_check_target_includes_tool_check(self) -> None:
+        repo_root = MODULE_PATH.parents[2]
+
+        result = subprocess.run(
+            ["make", "-n", "check"],
+            cwd=repo_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("tool-check", result.stdout)
 
 
 if __name__ == "__main__":
