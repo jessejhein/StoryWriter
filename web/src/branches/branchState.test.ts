@@ -22,8 +22,8 @@ import {
 } from './branchState'
 
 const projectID = 'proj_story'
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const fingerprint = `sha256:${'c'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
 
@@ -32,7 +32,7 @@ const comparison: ComparisonResponse = {
   branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
   main_head: mainHead,
   experiment_head: experimentHead,
-  base_head: `sha256:${'d'.repeat(64)}`,
+  base_head: 'dddddddddddddddddddddddddddddddddddddddd',
   fingerprint,
   files: [
     { path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' },
@@ -253,7 +253,7 @@ test('never writes branch comparison goals or findings to browser storage', () =
 // Requirements: M8-R18.
 test('matches context keys across every stale dimension', () => {
   const left = context()
-  const right = context({ mainHead: `sha256:${'f'.repeat(64)}` })
+  const right = context({ mainHead: 'ffffffffffffffffffffffffffffffffffffffff' })
   expect(contextKeysEqual(left, left)).toBe(true)
   expect(contextKeysEqual(left, right)).toBe(false)
   expect(shouldAcceptResponse(left, right, 2, 2)).toBe(false)
@@ -268,8 +268,8 @@ test('rejects stale responses per individual context field', () => {
   const mismatches: Array<[string, Partial<BranchContextKey>]> = [
     ['projectID', { projectID: 'other' }],
     ['experimentID', { experimentID: 'brn_other' }],
-    ['mainHead', { mainHead: `sha256:${'f'.repeat(64)}` }],
-    ['experimentHead', { experimentHead: `sha256:${'f'.repeat(64)}` }],
+    ['mainHead', { mainHead: 'ffffffffffffffffffffffffffffffffffffffff' }],
+    ['experimentHead', { experimentHead: 'ffffffffffffffffffffffffffffffffffffffff' }],
     ['fingerprint', { fingerprint: `sha256:${'f'.repeat(64)}` }],
     ['selectedPath', { selectedPath: 'scenes/other.md' }],
   ]
@@ -310,8 +310,8 @@ test('applyRamificationSuccess rejects stale responses per context field', () =>
   const mismatches: Array<[string, Partial<BranchContextKey>]> = [
     ['projectID', { projectID: 'other' }],
     ['experimentID', { experimentID: 'brn_other' }],
-    ['mainHead', { mainHead: `sha256:${'f'.repeat(64)}` }],
-    ['experimentHead', { experimentHead: `sha256:${'f'.repeat(64)}` }],
+    ['mainHead', { mainHead: 'ffffffffffffffffffffffffffffffffffffffff' }],
+    ['experimentHead', { experimentHead: 'ffffffffffffffffffffffffffffffffffffffff' }],
     ['fingerprint', { fingerprint: `sha256:${'f'.repeat(64)}` }],
     ['selectedPath', { selectedPath: 'scenes/other.md' }],
   ]
@@ -351,8 +351,8 @@ test('applyRamificationSuccess rejects mismatched manifest identity', () => {
   }
 
   for (const [field, override] of [
-    ['main_head', { main_head: `sha256:${'f'.repeat(64)}` }],
-    ['experiment_head', { experiment_head: `sha256:${'f'.repeat(64)}` }],
+    ['main_head', { main_head: 'ffffffffffffffffffffffffffffffffffffffff' }],
+    ['experiment_head', { experiment_head: 'ffffffffffffffffffffffffffffffffffffffff' }],
     ['fingerprint', { fingerprint: `sha256:${'e'.repeat(64)}` }],
   ] as const) {
     const mismatched = {

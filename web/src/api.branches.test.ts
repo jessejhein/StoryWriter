@@ -20,8 +20,8 @@ const fetchMock = vi.fn<(path: string | URL | Request, init?: RequestInit) => Pr
   return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
 })
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const fingerprint = `sha256:${'c'.repeat(64)}`
 
 beforeEach(() => {

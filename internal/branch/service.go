@@ -244,7 +244,11 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 	if err != nil {
 		return Comparison{}, mapRepositoryError(err)
 	}
-	fingerprint, err := ComputeFingerprint(resolved.mainHead, resolved.experimentHead, resolved.liveBase, files)
+	normalizedFiles, err := ValidateChangedFiles(files)
+	if err != nil {
+		return Comparison{}, err
+	}
+	fingerprint, err := ComputeFingerprint(resolved.mainHead, resolved.experimentHead, resolved.liveBase, normalizedFiles)
 	if err != nil {
 		return Comparison{}, err
 	}
@@ -255,7 +259,7 @@ func (s *Service) buildComparison(ctx context.Context, path string, id Experimen
 		ExperimentHead: resolved.experimentHead,
 		BaseHead:       resolved.liveBase,
 		Fingerprint:    fingerprint,
-		Files:          files,
+		Files:          normalizedFiles,
 	}, nil
 }
 

@@ -37,11 +37,11 @@ const project: Project = {
   index_initialized: true,
 }
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const experimentID = 'brn_0123456789abcdef0123'
 const inactiveExperimentID = 'brn_0123456789abcdef0124'
-const inactiveExperimentHead = `sha256:${'e'.repeat(64)}`
+const inactiveExperimentHead = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -75,7 +75,7 @@ beforeEach(() => {
     branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
+    base_head: 'dddddddddddddddddddddddddddddddddddddddd',
     fingerprint: `sha256:${'c'.repeat(64)}`,
     files: [],
   })
@@ -185,7 +185,7 @@ test('discards an inactive reviewed experiment without switching branches', asyn
       branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
       main_head: mainHead,
       experiment_head: experimentHead,
-      base_head: `sha256:${'d'.repeat(64)}`,
+      base_head: 'dddddddddddddddddddddddddddddddddddddddd',
       fingerprint: `sha256:${'c'.repeat(64)}`,
       files: [],
     })
@@ -194,7 +194,7 @@ test('discards an inactive reviewed experiment without switching branches', asyn
       branch_name: 'branch/yoda-lives-0123456789abcdef0124',
       main_head: mainHead,
       experiment_head: inactiveExperimentHead,
-      base_head: `sha256:${'d'.repeat(64)}`,
+      base_head: 'dddddddddddddddddddddddddddddddddddddddd',
       fingerprint: `sha256:${'f'.repeat(64)}`,
       files: [],
     })

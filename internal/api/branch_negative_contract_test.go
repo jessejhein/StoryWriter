@@ -47,6 +47,11 @@ type switchErrorBranchStore struct {
 	err error
 }
 
+type comparisonErrorBranchStore struct {
+	branchServiceStub
+	err error
+}
+
 type noopBranchIndex struct{}
 
 func (noopBranchIndex) Rebuild(context.Context, string) error { return nil }
@@ -119,6 +124,10 @@ func (s fileComparisonErrorBranchStore) LoadFileComparison(context.Context, stri
 
 func (s switchErrorBranchStore) SwitchTarget(context.Context, string, *branch.CommitID) (branch.RepositoryStatus, error) {
 	return branch.RepositoryStatus{}, s.err
+}
+
+func (s comparisonErrorBranchStore) LoadComparison(context.Context, string) (branch.Comparison, error) {
+	return branch.Comparison{}, s.err
 }
 
 // Test: typed domain errors map to the exact public status classes.
@@ -197,6 +206,24 @@ func TestBranchFileComparisonRouteMapsOversizedBlobTo413(t *testing.T) {
 	}
 	body := response.Body.String()
 	if strings.Contains(body, "/") || strings.Contains(body, "git") || strings.Contains(body, "\"canon\"") || strings.Contains(body, "\"experiment\"") {
+		t.Fatalf("unsafe body=%s", body)
+	}
+}
+
+// Test: malformed comparison state maps to a safe 500 on the comparison route.
+// Requirements: M8-R06, M8-R07, M8-R20.
+func TestBranchComparisonRouteMapsMalformedRepositoryStateToSafe500(t *testing.T) {
+	t.Parallel()
+	response := httptest.NewRecorder()
+	handlerWithBranches(comparisonErrorBranchStore{err: errors.Join(branch.ErrRepositoryState, errors.New("/tmp/project invalid comparison row"))}).ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/api/branches/brn_0123456789abcdef0123/comparison", nil),
+	)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if strings.Contains(body, "/tmp/project") || strings.Contains(body, "comparison row") {
 		t.Fatalf("unsafe body=%s", body)
 	}
 }

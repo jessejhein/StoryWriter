@@ -37,8 +37,8 @@ const project: Project = {
   index_initialized: true,
 }
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const experimentID = 'brn_0123456789abcdef0123'
 const inactiveExperimentID = 'brn_0123456789abcdef0124'
 
@@ -74,7 +74,7 @@ beforeEach(() => {
       {
         experiment_id: inactiveExperimentID,
         branch_name: 'branch/yoda-lives-0123456789abcdef0124',
-        head: `sha256:${'e'.repeat(64)}`,
+        head: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
         display_name: 'yoda-lives',
       },
     ],
@@ -84,7 +84,7 @@ beforeEach(() => {
     branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
+    base_head: 'dddddddddddddddddddddddddddddddddddddddd',
     fingerprint: `sha256:${'c'.repeat(64)}`,
     files: [
       { path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' },
@@ -111,7 +111,7 @@ test('reviews an inactive experiment without switching branches', async () => {
       branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
       main_head: mainHead,
       experiment_head: experimentHead,
-      base_head: `sha256:${'d'.repeat(64)}`,
+      base_head: 'dddddddddddddddddddddddddddddddddddddddd',
       fingerprint: `sha256:${'c'.repeat(64)}`,
       files: [],
     })
@@ -119,8 +119,8 @@ test('reviews an inactive experiment without switching branches', async () => {
       experiment_id: inactiveExperimentID,
       branch_name: 'branch/yoda-lives-0123456789abcdef0124',
       main_head: mainHead,
-      experiment_head: `sha256:${'e'.repeat(64)}`,
-      base_head: `sha256:${'d'.repeat(64)}`,
+      experiment_head: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+      base_head: 'dddddddddddddddddddddddddddddddddddddddd',
       fingerprint: `sha256:${'f'.repeat(64)}`,
       files: [],
     })
@@ -160,7 +160,7 @@ test('renders a true empty state when a comparison has no changed files', async 
     branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
+    base_head: 'dddddddddddddddddddddddddddddddddddddddd',
     fingerprint: `sha256:${'c'.repeat(64)}`,
     files: [],
   })

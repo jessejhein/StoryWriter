@@ -38,8 +38,8 @@ const project: Project = {
   index_initialized: true,
 }
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const fingerprint = `sha256:${'c'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
 
@@ -51,7 +51,7 @@ beforeEach(() => {
     branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
+    base_head: 'dddddddddddddddddddddddddddddddddddddddd',
     fingerprint,
     files: [
       { path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' },

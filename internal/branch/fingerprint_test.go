@@ -6,6 +6,8 @@
 package branch_test
 
 import (
+	"errors"
+	"fmt"
 	"testing"
 
 	"storywork/internal/branch"
@@ -79,5 +81,63 @@ func TestComputeFingerprintSensitiveToInputs(t *testing.T) {
 	)
 	if err != nil || changedStatus == base {
 		t.Fatalf("status sensitivity: %q vs %q err=%v", changedStatus, base, err)
+	}
+}
+
+// Test: fingerprinting rejects invalid changed-file inputs instead of hashing
+// malformed comparison state.
+// Requirements: M8-R06, M8-R07.
+func TestComputeFingerprintRejectsInvalidChangedFiles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		files   []branch.ChangedFile
+		wantErr error
+	}{
+		{
+			name:    "invalid path",
+			files:   []branch.ChangedFile{{Path: "/abs", Status: branch.StatusModified}},
+			wantErr: branch.ErrInvalidProjectPath,
+		},
+		{
+			name:    "invalid status",
+			files:   []branch.ChangedFile{{Path: "outline.yaml", Status: branch.ChangedStatus("renamed")}},
+			wantErr: branch.ErrInvalidChangedStatus,
+		},
+		{
+			name: "duplicate path",
+			files: []branch.ChangedFile{
+				{Path: "outline.yaml", Status: branch.StatusModified},
+				{Path: "outline.yaml", Status: branch.StatusAdded},
+			},
+			wantErr: branch.ErrInvalidChangedStatus,
+		},
+		{
+			name: "too many paths",
+			files: func() []branch.ChangedFile {
+				files := make([]branch.ChangedFile, branch.MaxChangedPaths+1)
+				for index := range files {
+					files[index] = branch.ChangedFile{
+						Path:   branch.ProjectPath(fmt.Sprintf("imports/raw/a/part-%03d.md", index)),
+						Status: branch.StatusModified,
+					}
+				}
+				return files
+			}(),
+			wantErr: branch.ErrTooManyChangedPaths,
+		},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := branch.ComputeFingerprint(
+				"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+				"cccccccccccccccccccccccccccccccccccccccc",
+				testCase.files,
+			)
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("ComputeFingerprint() err = %v, want errors.Is(%v)", err, testCase.wantErr)
+			}
+		})
 	}
 }

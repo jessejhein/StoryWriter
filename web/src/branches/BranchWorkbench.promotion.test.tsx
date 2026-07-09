@@ -37,8 +37,8 @@ const project: Project = {
   index_initialized: true,
 }
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const fingerprint = `sha256:${'c'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
 
@@ -66,7 +66,7 @@ beforeEach(() => {
     branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
+    base_head: 'dddddddddddddddddddddddddddddddddddddddd',
     fingerprint,
     files: [
       { path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' },
@@ -100,7 +100,7 @@ test('shows whole-file promotion summary without hunk controls', async () => {
 // Requirements: M8-R12.
 test('requires confirmation and sends expected refs and fingerprint on promote', async () => {
   vi.mocked(api.promoteExperimentFiles).mockResolvedValue({
-    main_head: `sha256:${'f'.repeat(64)}`,
+    main_head: 'ffffffffffffffffffffffffffffffffffffffff',
     promoted_paths: ['scenes/scn_0123456789abcdef0123.md'],
     experiment_id: experimentID,
   })
@@ -127,7 +127,7 @@ test('requires confirmation and sends expected refs and fingerprint on promote',
 // Requirements: M8-R18.
 test('requires discard confirmation before promoting when the browser draft is dirty', async () => {
   vi.mocked(api.promoteExperimentFiles).mockResolvedValue({
-    main_head: `sha256:${'f'.repeat(64)}`,
+    main_head: 'ffffffffffffffffffffffffffffffffffffffff',
     promoted_paths: ['scenes/scn_0123456789abcdef0123.md'],
     experiment_id: experimentID,
   })
@@ -168,7 +168,7 @@ test('shows conflict paths returned from promotion failures', async () => {
 // Test: successful promotion leaves main active while experiment remains listed.
 // Requirements: M8-R14, M8-R16.
 test('reports successful promotion with main active and experiment retained', async () => {
-  const newMainHead = `sha256:${'f'.repeat(64)}`
+  const newMainHead = 'ffffffffffffffffffffffffffffffffffffffff'
   vi.mocked(api.getBranchStatus).mockResolvedValue({
     active_branch: 'branch/obi-wan-lives-0123456789abcdef0123',
     active_kind: 'experiment',

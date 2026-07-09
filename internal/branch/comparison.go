@@ -20,9 +20,9 @@ func ComputeFingerprint(mainHead, experimentHead, baseHead CommitID, files []Cha
 	if _, err := ValidateCommitID(string(baseHead)); err != nil {
 		return "", err
 	}
-	sorted := SortChangedFiles(files)
-	if len(sorted) > MaxChangedPaths {
-		return "", fmt.Errorf("%d changed paths: %w", len(sorted), ErrTooManyChangedPaths)
+	sorted, err := ValidateChangedFiles(files)
+	if err != nil {
+		return "", err
 	}
 	hasher := sha256.New()
 	hasher.Write([]byte{fingerprintVersion})

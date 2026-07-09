@@ -46,20 +46,31 @@ const projectB: Project = {
   index_initialized: true,
 }
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const fingerprint = `sha256:${'c'.repeat(64)}`
 const experimentID = 'brn_0123456789abcdef0123'
 
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(api.getProviderProfiles).mockResolvedValue({ profiles: [], revision: null })
+  vi.mocked(api.getProviderProfiles).mockResolvedValue({
+    profiles: [{
+      id: 'local_ollama',
+      name: 'Local Ollama',
+      type: 'ollama',
+      base_url: 'http://127.0.0.1:11434',
+      auth: { type: 'none', credential_env: '' },
+      capabilities: { chat: true, streaming: false, structured_output: false, max_context_tokens: 8192 },
+      readiness: 'ready',
+    }],
+    revision: null,
+  })
   vi.mocked(api.getBranchComparison).mockResolvedValue({
     experiment_id: experimentID,
     branch_name: 'branch/test-exp-0123456789abcdef0123',
     main_head: mainHead,
     experiment_head: experimentHead,
-    base_head: `sha256:${'d'.repeat(64)}`,
+    base_head: 'dddddddddddddddddddddddddddddddddddddddd',
     fingerprint,
     files: [
       { path: 'scenes/scn_0123456789abcdef0123.md', status: 'modified' },
@@ -74,6 +85,38 @@ beforeEach(() => {
     canon: { exists: true, text: 'alpha' },
     experiment: { exists: true, text: 'beta' },
   })
+})
+
+// Test: analysis requires a non-empty model before the UI can submit.
+// Requirements: M8-R09, M8-R18.
+test('disables ramification analysis until a non-empty model is provided', async () => {
+  vi.mocked(api.getBranchStatus).mockResolvedValue({
+    active_branch: 'branch/test-exp-0123456789abcdef0123',
+    active_kind: 'experiment',
+    main_head: mainHead,
+    experiment_head: experimentHead,
+    active_experiment_id: experimentID,
+    worktree_clean: true,
+  })
+  vi.mocked(api.listExperiments).mockResolvedValue({
+    experiments: [
+      { experiment_id: experimentID, branch_name: 'branch/test-exp-0123456789abcdef0123', head: experimentHead, display_name: 'test-exp' },
+    ],
+  })
+
+  render(
+    <BranchWorkbench project={projectA} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />,
+  )
+  await waitFor(() => expect(screen.getByText('Ramification analysis')).toBeInTheDocument())
+
+  fireEvent.change(screen.getByLabelText('Analysis goal'), { target: { value: 'Review' } })
+  const analyze = screen.getByRole('button', { name: 'Analyze ramifications' })
+  expect(analyze).toBeDisabled()
+  fireEvent.click(analyze)
+  expect(api.analyzeBranchRamifications).not.toHaveBeenCalled()
+
+  fireEvent.change(screen.getByLabelText('Model'), { target: { value: 'qwen2.5:7b' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Analyze ramifications' })).not.toBeDisabled())
 })
 
 // Test: analysis started for project A does not display findings after

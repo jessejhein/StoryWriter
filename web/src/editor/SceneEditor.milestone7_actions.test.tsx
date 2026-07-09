@@ -266,6 +266,7 @@ test('shows a full scene diff for Scene Rewrite', async () => {
   render(<SceneEditor project={project} sceneID="scn_0123456789abcdef0123" onBack={() => {}} onDirtyChange={() => {}} />)
   await waitFor(() => expect(screen.getByDisplayValue('The Duel')).toBeInTheDocument())
   fireEvent.click(screen.getByRole('button', { name: 'Rewrite scene' }))
+  await waitFor(() => expect(requests.some((request) => request.path.includes('/api/actions/available') && request.path.includes('input_scope=scene'))).toBe(true))
   const scenePanel = await screen.findByLabelText('Scene AI actions')
   await waitFor(() => expect(within(scenePanel).getByRole('button', { name: 'Run scene rewrite' })).toBeInTheDocument())
   fireEvent.click(within(scenePanel).getByRole('button', { name: 'Preview context' }))

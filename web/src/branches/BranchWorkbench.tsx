@@ -367,7 +367,8 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
     const comparison = workbench.comparison
     const goal = workbench.goal.trim()
-    if (!comparison || !goal) {
+    const trimmedModel = model.trim()
+    if (!comparison || !goal || !trimmedModel) {
       return
     }
 
@@ -392,7 +393,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
       const response = await analyzeBranchRamifications(selectedExperimentID, {
         goal,
         profile_id: profileID,
-        model: model.trim(),
+        model: trimmedModel,
         expected_main_head: comparison.main_head,
         expected_experiment_head: comparison.experiment_head,
         comparison_fingerprint: comparison.fingerprint,
@@ -594,7 +595,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
                 Model
                 <input disabled={pending} onChange={(event) => setModel(event.target.value)} value={model} />
               </label>
-              <button disabled={busy === 'analysis' || !workbench.goal.trim() || !profileID} onClick={() => void runAnalysis()} type="button">
+              <button disabled={busy === 'analysis' || !workbench.goal.trim() || !profileID || !model.trim()} onClick={() => void runAnalysis()} type="button">
                 Analyze ramifications
               </button>
             </section>

@@ -284,9 +284,11 @@ Backend:
   `TestParseManagedExperimentRefRejectsReservedSlug`
 - `internal/branch/path_test.go`: `TestValidateProjectPathAcceptsAllowedFamilies`,
   `TestValidateProjectPathRejectsUnsafeSegments`, `TestValidateStrictUTF8EnforcesBounds`
-- `internal/branch/comparison_test.go`: `TestValidateChangedFilesSortsAndDedupes`
+- `internal/branch/comparison_test.go`: `TestValidateChangedFilesSortsAndDedupes`,
+  `TestLoadComparisonRejectsInvalidRepositoryComparisonRows`
 - `internal/branch/fingerprint_test.go`: `TestComputeFingerprintMatchesFixture`,
-  `TestComputeFingerprintSensitiveToInputs`
+  `TestComputeFingerprintSensitiveToInputs`,
+  `TestComputeFingerprintRejectsInvalidChangedFiles`
 - `internal/branch/file_comparison_test.go`: `TestIndexChangedFilesRejectsUnknownPath`
 - `internal/gitstore/branch_selected_paths_test.go`:
   `TestSelectedPathsChangedUsesPathspecFilter`
@@ -334,7 +336,8 @@ Backend:
   `TestBranchRoutesRejectAnalysisGoalsWithNULBeforeService`,
   `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
   `TestBranchRoutesRejectOversizedBodies`,
-  `TestEveryBranchRouteReturnsMethodSpecificAllow`
+  `TestEveryBranchRouteReturnsMethodSpecificAllow`,
+  `TestBranchComparisonRouteMapsMalformedRepositoryStateToSafe500`
 - `internal/gitstore/blob_test.go` and `tree_comparison_test.go`:
   `TestReadTextBlobRejectsNonRegularEntriesAndDoesNotHideGitErrors`,
   `TestCompareTreesRejectsSymlinkChanges`
@@ -421,7 +424,7 @@ Frontend:
 - `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, inactive review
   without checkout, empty comparison state, no analysis on compare, stale file responses ignored
 - `web/src/branches/BranchWorkbench.ramification.test.tsx`: explicit Analyze only,
-  reviewed fingerprint request, findings cleared on fingerprint change
+  reviewed fingerprint request, empty-model guard, findings cleared on fingerprint change
 - `web/src/branches/RamificationResults.test.tsx`: grouped findings, advisory notice
 - `web/src/branches/BranchWorkbench.promotion.test.tsx`: whole-file summary, confirmation,
   conflict paths, success leaves experiment listed
@@ -430,7 +433,7 @@ Frontend:
 
 Verification: full `make check` (including `go test -race ./...`,
 `git diff --check`, and tracked-artifact leak detection), 50 frontend test
-files, 132 frontend tests.
+files, 133 frontend tests.
 
 ### Milestone 9
 

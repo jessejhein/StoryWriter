@@ -6,8 +6,8 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { expect, test } from 'vitest'
 import SideBySideDiff from './SideBySideDiff'
 
-const mainHead = `sha256:${'a'.repeat(64)}`
-const experimentHead = `sha256:${'b'.repeat(64)}`
+const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const fingerprint = `sha256:${'c'.repeat(64)}`
 
 // Test: Canon/main and Experiment labels, path, status, and commit identifiers.

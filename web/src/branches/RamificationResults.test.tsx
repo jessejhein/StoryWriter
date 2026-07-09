@@ -45,8 +45,8 @@ const response: RamificationResponse = {
   ],
   provider: { profile_id: 'local_ollama', type: 'ollama', model: 'qwen2.5:7b' },
   manifest: {
-    main_head: `sha256:${'a'.repeat(64)}`,
-    experiment_head: `sha256:${'b'.repeat(64)}`,
+    main_head: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    experiment_head: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     fingerprint: `sha256:${'c'.repeat(64)}`,
     changed_file_count: 2,
     included_paths: ['scenes/scn_0123456789abcdef0123.md'],
