@@ -99,10 +99,44 @@ test('requires confirmation and sends expected experiment head on discard', asyn
   expect(onBranchChanged).toHaveBeenCalled()
 })
 
-// Test: dirty guard blocks discard while app draft is dirty.
+// Test: dirty browser drafts require explicit confirmation before discard.
 // Requirements: M8-R18.
-test('blocks discard while browser drafts are dirty', async () => {
-  render(<BranchWorkbench project={project} appDirty onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
+test('requires draft confirmation before discard while browser drafts are dirty', async () => {
+  vi.mocked(api.discardExperiment).mockResolvedValue({ main_head: mainHead })
+  const onDirtyChange = vi.fn()
+  render(<BranchWorkbench project={project} appDirty onDirtyChange={onDirtyChange} onBranchChanged={vi.fn()} />)
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Discard experiment' })).toBeEnabled())
+
+  fireEvent.click(screen.getByRole('button', { name: 'Discard experiment' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(api.discardExperiment).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Discard experiment' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+  expect(onDirtyChange).toHaveBeenCalledWith(false)
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard experiment?' })).toBeInTheDocument())
+  fireEvent.click(within(screen.getByRole('dialog', { name: 'Discard experiment?' })).getByRole('button', { name: 'Discard experiment' }))
+
+  await waitFor(() => expect(api.discardExperiment).toHaveBeenCalledWith(experimentID, {
+    expected_experiment_head: experimentHead,
+  }))
+})
+
+// Test: dirty Git worktrees still block discard.
+// Requirements: M8-R17, M8-R18.
+test('blocks discard while the git worktree is dirty', async () => {
+  vi.mocked(api.getBranchStatus).mockResolvedValue({
+    active_branch: 'branch/obi-wan-lives-0123456789abcdef0123',
+    active_kind: 'experiment',
+    main_head: mainHead,
+    experiment_head: experimentHead,
+    active_experiment_id: experimentID,
+    worktree_clean: false,
+  })
+
+  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
   await waitFor(() => expect(screen.getByRole('button', { name: 'Discard experiment' })).toBeDisabled())
 })
 

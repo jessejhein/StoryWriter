@@ -6,6 +6,7 @@
 package branch
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -93,6 +94,101 @@ func TestBuildAnalysisPacketRejectsInvalidGoals(t *testing.T) {
 	} {
 		if _, _, err := BuildAnalysisPacket(goal, comparison, "diff"); err == nil {
 			t.Fatalf("BuildAnalysisPacket(%q) = nil, want error", goal)
+		}
+	}
+}
+
+// Test: malformed comparison metadata is rejected before packet construction.
+func TestBuildAnalysisPacketRejectsInvalidComparisonMetadata(t *testing.T) {
+	t.Parallel()
+	valid := Comparison{
+		ExperimentID:   "brn_0123456789abcdef0123",
+		BranchName:     "branch/test-exp-0123456789abcdef0123",
+		MainHead:       CommitID(strings.Repeat("a", 40)),
+		ExperimentHead: CommitID(strings.Repeat("b", 40)),
+		BaseHead:       CommitID(strings.Repeat("c", 40)),
+		Fingerprint:    "sha256:" + strings.Repeat("d", 64),
+		Files:          []ChangedFile{{Path: "outline.yaml", Status: StatusModified}},
+	}
+	tests := []struct {
+		name       string
+		comparison Comparison
+		wantErr    error
+	}{
+		{name: "bad experiment id", comparison: func() Comparison { next := valid; next.ExperimentID = "bad"; return next }(), wantErr: ErrInvalidExperimentID},
+		{name: "bad branch ref", comparison: func() Comparison { next := valid; next.BranchName = "branch/main-0123456789abcdef0123"; return next }(), wantErr: ErrInvalidBranchRef},
+		{name: "bad main head", comparison: func() Comparison { next := valid; next.MainHead = "bad"; return next }(), wantErr: ErrInvalidCommitID},
+		{name: "bad experiment head", comparison: func() Comparison { next := valid; next.ExperimentHead = "bad"; return next }(), wantErr: ErrInvalidCommitID},
+		{name: "bad base head", comparison: func() Comparison { next := valid; next.BaseHead = "bad"; return next }(), wantErr: ErrInvalidCommitID},
+		{name: "bad fingerprint", comparison: func() Comparison { next := valid; next.Fingerprint = "sha256:bad"; return next }(), wantErr: ErrInvalidFingerprint},
+		{name: "bad path", comparison: func() Comparison {
+			next := valid
+			next.Files = []ChangedFile{{Path: "/abs", Status: StatusModified}}
+			return next
+		}(), wantErr: ErrInvalidProjectPath},
+		{name: "bad status", comparison: func() Comparison {
+			next := valid
+			next.Files = []ChangedFile{{Path: "outline.yaml", Status: ChangedStatus("renamed")}}
+			return next
+		}(), wantErr: ErrInvalidChangedStatus},
+	}
+	for _, testCase := range tests {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, _, err := BuildAnalysisPacket("goal", testCase.comparison, "diff")
+			if !errors.Is(err, testCase.wantErr) {
+				t.Fatalf("BuildAnalysisPacket() err = %v, want errors.Is(%v)", err, testCase.wantErr)
+			}
+		})
+	}
+}
+
+// Test: changed files are normalized to deterministic byte order.
+func TestBuildAnalysisPacketSortsChangedFilesDeterministically(t *testing.T) {
+	t.Parallel()
+	comparison := Comparison{
+		ExperimentID:   "brn_0123456789abcdef0123",
+		BranchName:     "branch/test-exp-0123456789abcdef0123",
+		MainHead:       CommitID(strings.Repeat("a", 40)),
+		ExperimentHead: CommitID(strings.Repeat("b", 40)),
+		BaseHead:       CommitID(strings.Repeat("c", 40)),
+		Fingerprint:    "sha256:" + strings.Repeat("d", 64),
+		Files: []ChangedFile{
+			{Path: "scenes/scn_z.md", Status: StatusAdded},
+			{Path: "outline.yaml", Status: StatusModified},
+			{Path: "scenes/scn_a.md", Status: StatusDeleted},
+		},
+	}
+	packet, manifest, err := BuildAnalysisPacket("goal", comparison, "diff")
+	if err != nil {
+		t.Fatalf("BuildAnalysisPacket() error = %v", err)
+	}
+	if got, want := packet.Comparison.Files[0].Path, ProjectPath("outline.yaml"); got != want {
+		t.Fatalf("first sorted path = %q, want %q", got, want)
+	}
+	if got := manifest.IncludedPaths; len(got) != 3 || got[0] != "outline.yaml" || got[1] != "scenes/scn_a.md" || got[2] != "scenes/scn_z.md" {
+		t.Fatalf("IncludedPaths = %#v", got)
+	}
+}
+
+// Test: malformed diff text is rejected before rendering.
+func TestBuildAnalysisPacketRejectsInvalidDiffText(t *testing.T) {
+	t.Parallel()
+	comparison := Comparison{
+		ExperimentID:   "brn_0123456789abcdef0123",
+		BranchName:     "branch/test-exp-0123456789abcdef0123",
+		MainHead:       CommitID(strings.Repeat("a", 40)),
+		ExperimentHead: CommitID(strings.Repeat("b", 40)),
+		BaseHead:       CommitID(strings.Repeat("c", 40)),
+		Fingerprint:    "sha256:" + strings.Repeat("d", 64),
+		Files:          []ChangedFile{{Path: "outline.yaml", Status: StatusModified}},
+	}
+	for _, diffText := range []string{
+		string([]byte{0xff, 0xfe}),
+		"diff\x00text",
+	} {
+		_, _, err := BuildAnalysisPacket("goal", comparison, diffText)
+		if !errors.Is(err, ErrInvalidAnalysis) {
+			t.Fatalf("BuildAnalysisPacket(%q) err = %v, want ErrInvalidAnalysis", diffText, err)
 		}
 	}
 }

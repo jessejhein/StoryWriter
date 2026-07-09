@@ -126,16 +126,43 @@ func BuildAnalysisPacket(goal string, comparison Comparison, diffText string) (A
 	if err != nil {
 		return AnalysisPacket{}, RedactedManifest{}, ErrInvalidAnalysis
 	}
-	if len(comparison.Files) > MaxAnalysisFiles {
+	if _, err := ValidateExperimentID(string(comparison.ExperimentID)); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	if err := ValidateBranchRef(string(comparison.BranchName)); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	if _, err := ValidateCommitID(string(comparison.MainHead)); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	if _, err := ValidateCommitID(string(comparison.ExperimentHead)); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	if _, err := ValidateCommitID(string(comparison.BaseHead)); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	if err := ValidateFingerprint(comparison.Fingerprint); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	normalizedFiles, err := ValidateChangedFiles(comparison.Files)
+	if err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, err
+	}
+	if len(normalizedFiles) > MaxAnalysisFiles {
 		return AnalysisPacket{}, RedactedManifest{}, ErrAnalysisBudget
 	}
-	included := make([]ProjectPath, 0, len(comparison.Files))
-	for _, file := range comparison.Files {
+	if _, err := ValidateStrictUTF8([]byte(diffText)); err != nil {
+		return AnalysisPacket{}, RedactedManifest{}, ErrInvalidAnalysis
+	}
+	normalizedComparison := comparison
+	normalizedComparison.Files = normalizedFiles
+	included := make([]ProjectPath, 0, len(normalizedComparison.Files))
+	for _, file := range normalizedComparison.Files {
 		included = append(included, file.Path)
 	}
 	packet := AnalysisPacket{
 		Goal:       validGoal,
-		Comparison: comparison,
+		Comparison: normalizedComparison,
 		DiffText:   diffText,
 	}
 	rendered := buildRamificationPrompt(packet)
@@ -143,10 +170,10 @@ func BuildAnalysisPacket(goal string, comparison Comparison, diffText string) (A
 		return AnalysisPacket{}, RedactedManifest{}, ErrAnalysisBudget
 	}
 	manifest := RedactedManifest{
-		MainHead:         comparison.MainHead,
-		ExperimentHead:   comparison.ExperimentHead,
-		Fingerprint:      comparison.Fingerprint,
-		ChangedFileCount: len(comparison.Files),
+		MainHead:         normalizedComparison.MainHead,
+		ExperimentHead:   normalizedComparison.ExperimentHead,
+		Fingerprint:      normalizedComparison.Fingerprint,
+		ChangedFileCount: len(normalizedComparison.Files),
 		IncludedPaths:    SortProjectPaths(included),
 		EstimatedBytes:   len(rendered),
 	}

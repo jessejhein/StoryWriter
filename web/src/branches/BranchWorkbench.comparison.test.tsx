@@ -152,6 +152,29 @@ test('lists changed files and loads side-by-side comparison for the selected pat
   await waitFor(() => expect(api.getBranchFileComparison).toHaveBeenCalledWith(experimentID, 'scenes/scn_added.md'))
 })
 
+// Test: an empty comparison renders only the empty state and skips file loading.
+// Requirements: M8-R08.
+test('renders a true empty state when a comparison has no changed files', async () => {
+  vi.mocked(api.getBranchComparison).mockResolvedValue({
+    experiment_id: experimentID,
+    branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+    main_head: mainHead,
+    experiment_head: experimentHead,
+    base_head: `sha256:${'d'.repeat(64)}`,
+    fingerprint: `sha256:${'c'.repeat(64)}`,
+    files: [],
+  })
+
+  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
+
+  await waitFor(() => expect(screen.getByText('No changed files in this comparison.')).toBeInTheDocument())
+  expect(api.getBranchFileComparison).not.toHaveBeenCalled()
+  expect(screen.queryByRole('heading', { name: 'Canon (main)' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('heading', { name: 'Experiment' })).not.toBeInTheDocument()
+  expect(screen.queryByText(mainHead)).not.toBeInTheDocument()
+  expect(screen.queryByText(experimentHead)).not.toBeInTheDocument()
+})
+
 // Test: merely opening comparison never calls analysis.
 // Requirements: M8-R09.
 test('does not call ramification analysis when listing or comparing files', async () => {

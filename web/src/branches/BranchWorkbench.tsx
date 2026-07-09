@@ -69,12 +69,19 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
   const [promotionMessage, setPromotionMessage] = useState('')
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [busy, setBusy] = useState<'create' | 'switch' | 'comparison' | 'file' | 'analysis' | 'promote' | 'discard' | null>(null)
+  const [dirtyDraftAcknowledged, setDirtyDraftAcknowledged] = useState(false)
   const requestVersionRef = useRef(0)
   const liveRegionRef = useRef<HTMLParagraphElement>(null)
 
   useEffect(() => {
     onDirtyChange?.(false)
   }, [onDirtyChange])
+
+  useEffect(() => {
+    if (!appDirty) {
+      setDirtyDraftAcknowledged(false)
+    }
+  }, [appDirty])
 
   const refreshStatus = useCallback(async () => {
     const [statusResponse, experimentResponse] = await Promise.all([
@@ -217,6 +224,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
   function resetBranchSensitiveState() {
     requestVersionRef.current += 1
+    setDirtyDraftAcknowledged(false)
     setWorkbench((state) => ({
       ...invalidateOnBranchChange(project.project_id),
       requestVersion: state.requestVersion + 1,
@@ -257,6 +265,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
     if (!status) {
       return
     }
+    setDirtyDraftAcknowledged(false)
     setPendingAction(null)
     setError('')
     try {
@@ -410,8 +419,11 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
   const activeBadge = status?.active_kind === 'experiment' ? 'Experiment' : 'Canon'
   const changedFiles = workbench.comparison?.files ?? []
-  const needsDiscardConfirmation = pendingAction !== null && canProceedWithBranchChange(appDirty, status?.worktree_clean ?? false) === 'confirm'
+  const effectiveAppDirty = appDirty && !dirtyDraftAcknowledged
+  const branchChangeDisposition = canProceedWithBranchChange(effectiveAppDirty, status?.worktree_clean ?? false)
+  const needsDiscardConfirmation = pendingAction !== null && branchChangeDisposition === 'confirm'
   const pending = busy !== null
+  const shouldRenderFileComparison = workbench.comparisonLoading || workbench.fileLoading || workbench.fileError !== null || workbench.selectedPath !== null
 
   return (
     <section className="branch-shell">
@@ -546,18 +558,24 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
               </section>
             )}
 
-            <SideBySideDiff
-              canon={workbench.fileComparison?.canon ?? { exists: false, text: '' }}
-              error={workbench.fileError}
-              experiment={workbench.fileComparison?.experiment ?? { exists: false, text: '' }}
-              experimentHead={workbench.comparison?.experiment_head ?? ''}
-              fingerprint={workbench.comparison?.fingerprint ?? ''}
-              loading={workbench.fileLoading || workbench.comparisonLoading}
-              mainHead={workbench.comparison?.main_head ?? ''}
-              path={workbench.selectedPath ?? ''}
-              stale={Boolean(workbench.fileComparison && comparisonContext && workbench.fileComparison.path !== workbench.selectedPath)}
-              status={workbench.fileComparison?.status ?? changedFiles.find((file) => file.path === workbench.selectedPath)?.status ?? 'modified'}
-            />
+            {shouldRenderFileComparison ? (
+              workbench.selectedPath ? (
+                <SideBySideDiff
+                  canon={workbench.fileComparison?.canon ?? { exists: false, text: '' }}
+                  error={workbench.fileError}
+                  experiment={workbench.fileComparison?.experiment ?? { exists: false, text: '' }}
+                  experimentHead={workbench.comparison?.experiment_head ?? ''}
+                  fingerprint={workbench.comparison?.fingerprint ?? ''}
+                  loading={workbench.fileLoading || workbench.comparisonLoading}
+                  mainHead={workbench.comparison?.main_head ?? ''}
+                  path={workbench.selectedPath}
+                  stale={Boolean(workbench.fileComparison && comparisonContext && workbench.fileComparison.path !== workbench.selectedPath)}
+                  status={workbench.fileComparison?.status ?? changedFiles.find((file) => file.path === workbench.selectedPath)?.status ?? 'modified'}
+                />
+              ) : (
+                <p className="branch-message">Select a changed file to compare.</p>
+              )
+            ) : null}
 
             <section className="branch-analysis-form">
               <h3>Ramification analysis</h3>
@@ -590,8 +608,8 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
 
             <div className="branch-danger-actions">
               <button
-                disabled={pending || appDirty || !status?.worktree_clean}
-                onClick={() => setPendingAction({ kind: 'discard' })}
+                disabled={pending || !status?.worktree_clean}
+                onClick={() => requestBranchChange({ kind: 'discard' })}
                 type="button"
               >
                 Discard experiment
@@ -605,7 +623,10 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           cancelLabel="Keep editing"
           confirmLabel="Discard draft"
           message="You have unsaved changes in the current workspace. Discard them and continue?"
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => {
+            setDirtyDraftAcknowledged(false)
+            setPendingAction(null)
+          }}
           onConfirm={() => {
             if (pendingAction?.kind === 'create') {
               setPendingAction(null)
@@ -618,6 +639,7 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
               void executeBranchChange(pendingAction)
               return
             }
+            setDirtyDraftAcknowledged(true)
             onDirtyChange?.(false)
           }}
           open={needsDiscardConfirmation}
@@ -628,9 +650,12 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           cancelLabel="Stay on branch"
           confirmLabel="Switch branch"
           message="Switch branches now? Branch-sensitive loaded state will be cleared and reloaded from the selected tree."
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => {
+            setDirtyDraftAcknowledged(false)
+            setPendingAction(null)
+          }}
           onConfirm={() => { if (pendingAction?.kind === 'switch') void executeBranchChange(pendingAction) }}
-          open={pendingAction?.kind === 'switch' && !needsDiscardConfirmation && canProceedWithBranchChange(appDirty, status?.worktree_clean ?? false) === 'allowed'}
+          open={pendingAction?.kind === 'switch' && !needsDiscardConfirmation && branchChangeDisposition === 'allowed'}
           title="Switch branches?"
         />
 
@@ -638,7 +663,10 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           cancelLabel="Keep reviewing"
           confirmLabel="Promote to main"
           message="Promote the selected whole files onto main? This creates one promotion commit and leaves main active."
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => {
+            setDirtyDraftAcknowledged(false)
+            setPendingAction(null)
+          }}
           onConfirm={() => void executeBranchChange({ kind: 'promote' })}
           open={pendingAction?.kind === 'promote' && !needsDiscardConfirmation}
           title="Promote selected files?"
@@ -648,7 +676,10 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           cancelLabel="Keep experiment"
           confirmLabel="Discard experiment"
           message="Discard this experiment permanently? Main history will remain unchanged."
-          onCancel={() => setPendingAction(null)}
+          onCancel={() => {
+            setDirtyDraftAcknowledged(false)
+            setPendingAction(null)
+          }}
           onConfirm={() => void executeBranchChange({ kind: 'discard' })}
           open={pendingAction?.kind === 'discard' && !needsDiscardConfirmation}
           title="Discard experiment?"
