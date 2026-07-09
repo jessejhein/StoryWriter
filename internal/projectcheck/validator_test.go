@@ -117,6 +117,65 @@ func TestValidateProjectClassifiesMalformedCodexAndProgressionDocuments(t *testi
 	}
 }
 
+// Test: tracked codex artifacts fail closed outside the owned YAML schema.
+// Requirements: M8-R14, M8-R15.
+func TestValidateProjectRejectsUnexpectedCodexArtifacts(t *testing.T) {
+	t.Parallel()
+	base := map[string]string{
+		"project.yaml":                                    "version: 1\nid: proj_test\nname: Test\ncreated_at: \"2026-07-03T00:00:00Z\"\ndefault_branch: main\nsettings:\n  prose_format: markdown\n  vim_mode_default: true\n  ai_mutation_requires_acceptance: true\n",
+		"outline.yaml":                                    "version: 1\nroot:\n  arcs:\n    - id: arc_00000000000000000001\n      chapters:\n        - id: ch_00000000000000000001\n          scenes:\n            - id: scn_00000000000000000001\n",
+		"arcs/arc_00000000000000000001.yaml":              "version: 1\nid: arc_00000000000000000001\ntitle: Act\n",
+		"chapters/ch_00000000000000000001.yaml":           "version: 1\nid: ch_00000000000000000001\narc_id: arc_00000000000000000001\ntitle: Chapter\n",
+		"scenes/scn_00000000000000000001.md":              "---\nid: scn_00000000000000000001\ntitle: Scene\nchapter_id: ch_00000000000000000001\npov: \"\"\nstatus: draft\nexclude_from_ai: false\n---\n\n",
+		"codex/characters/char_0123456789abcdef0123.yaml": "version: 1\nid: char_0123456789abcdef0123\ntype: character\nname: Character\naliases: []\ntags: []\ndescription: Character description.\nmetadata: {}\n",
+	}
+	tests := []struct {
+		name  string
+		files map[string]string
+	}{
+		{
+			name: "unexpected top level file",
+			files: map[string]string{
+				"codex/unexpected.txt": "nope\n",
+			},
+		},
+		{
+			name: "unexpected nested directory",
+			files: map[string]string{
+				"codex/characters/archive/char_0123456789abcdef0123.yaml": "version: 1\n",
+			},
+		},
+		{
+			name: "unexpected non yaml child",
+			files: map[string]string{
+				"codex/characters/readme.md": "nope\n",
+			},
+		},
+	}
+	for _, testCase := range tests {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, "agents"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Join(root, "styles"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			files := maps.Clone(base)
+			for path, contents := range testCase.files {
+				files[path] = contents
+			}
+			writeFixture(t, root, files)
+			err := projectcheck.New().ValidateProject(context.Background(), root)
+			if !errors.Is(err, projectcheck.ErrInvalidProject) {
+				t.Fatalf("ValidateProject() error = %v, want invalid project classification", err)
+			}
+		})
+	}
+}
+
 // Test: project metadata is strict and rejects duplicate or unknown fields.
 // Requirements: M8-R14.
 func TestValidateProjectRejectsNonStrictProjectMetadata(t *testing.T) {

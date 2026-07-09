@@ -103,6 +103,9 @@ func (v *Validator) ValidateProject(ctx context.Context, projectPath string) err
 	if err != nil {
 		return classifyValidationError(fmt.Errorf("codex validation failed: %w", err))
 	}
+	if err := validateCodexArtifacts(projectPath); err != nil {
+		return classifyValidationError(fmt.Errorf("codex validation failed: %w", err))
+	}
 	entryIDs := make(map[string]struct{}, len(entries))
 	for _, entry := range entries {
 		entryIDs[entry.ID] = struct{}{}
@@ -132,6 +135,52 @@ func (v *Validator) ValidateProject(ctx context.Context, projectPath string) err
 	}
 	if err := v.validateImportArtifacts(ctx, projectPath); err != nil {
 		return classifyValidationError(err)
+	}
+	return nil
+}
+
+func validateCodexArtifacts(projectPath string) error {
+	allowedDirectories := make(map[string]struct{}, 4)
+	for _, entryType := range []codex.EntryType{codex.TypeCharacter, codex.TypeLocation, codex.TypeLore, codex.TypeCustom} {
+		directory, err := codex.DirectoryForType(entryType)
+		if err != nil {
+			return err
+		}
+		allowedDirectories[directory] = struct{}{}
+	}
+	root := filepath.Join(projectPath, "codex")
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	for _, entry := range entries {
+		if entry.Name() == ".gitkeep" {
+			continue
+		}
+		if !entry.IsDir() {
+			return fmt.Errorf("unexpected file codex/%s: %w", entry.Name(), storyfile.ErrInvalidCanonicalState)
+		}
+		if _, ok := allowedDirectories[entry.Name()]; !ok {
+			return fmt.Errorf("unexpected directory codex/%s: %w", entry.Name(), storyfile.ErrInvalidCanonicalState)
+		}
+		childEntries, err := os.ReadDir(filepath.Join(root, entry.Name()))
+		if err != nil {
+			return err
+		}
+		for _, child := range childEntries {
+			if child.Name() == ".gitkeep" {
+				continue
+			}
+			if child.IsDir() {
+				return fmt.Errorf("unexpected directory codex/%s/%s: %w", entry.Name(), child.Name(), storyfile.ErrInvalidCanonicalState)
+			}
+			if filepath.Ext(child.Name()) != ".yaml" {
+				return fmt.Errorf("unexpected file codex/%s/%s: %w", entry.Name(), child.Name(), storyfile.ErrInvalidCanonicalState)
+			}
+		}
 	}
 	return nil
 }

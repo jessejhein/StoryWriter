@@ -148,6 +148,37 @@ test('requires confirmation before switching branches when the app draft is dirt
   expect(onBranchChanged).toHaveBeenCalled()
 })
 
+// Test: dirty browser draft guard also covers experiment creation and only
+// creates after explicit discard confirmation.
+// Requirements: M8-R02, M8-R18.
+test('requires confirmation before creating an experiment when the app draft is dirty', async () => {
+  const onBranchChanged = vi.fn()
+  const onDirtyChange = vi.fn()
+  vi.mocked(api.createExperiment).mockResolvedValue(experimentStatus)
+  vi.mocked(api.getBranchStatus)
+    .mockResolvedValueOnce(canonStatus)
+    .mockResolvedValue(experimentStatus)
+
+  render(<BranchWorkbench project={project} appDirty onDirtyChange={onDirtyChange} onBranchChanged={onBranchChanged} />)
+
+  await waitFor(() => expect(screen.getByText('Canon')).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'Obi-Wan lives' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create experiment' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
+
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }))
+  expect(api.createExperiment).not.toHaveBeenCalled()
+
+  fireEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
+  await waitFor(() => expect(screen.getByRole('dialog', { name: 'Discard current draft?' })).toBeInTheDocument())
+  fireEvent.click(screen.getByRole('button', { name: 'Discard draft' }))
+
+  await waitFor(() => expect(api.createExperiment).toHaveBeenCalledWith('Obi-Wan lives'))
+  expect(onDirtyChange).toHaveBeenCalledWith(false)
+  expect(onBranchChanged).toHaveBeenCalled()
+})
+
 // Test: successful switch to the reviewed experiment clears branch-sensitive
 // state and refetches the reviewed comparison under the new active branch.
 // Requirements: M8-R18.

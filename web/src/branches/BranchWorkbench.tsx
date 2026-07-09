@@ -51,6 +51,7 @@ type Props = {
 
 type PendingAction =
   | { kind: 'switch'; target: 'main' | string; expectedHead?: string }
+  | { kind: 'create'; name: string }
   | { kind: 'promote' }
   | { kind: 'discard' }
 
@@ -278,19 +279,11 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
     }
   }
 
-  async function handleCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!experimentName.trim() || !status?.worktree_clean) {
-      return
-    }
-    if (canProceedWithBranchChange(appDirty, status.worktree_clean) === 'confirm') {
-      setPendingAction({ kind: 'switch', target: 'create' })
-      return
-    }
+  async function runCreateExperiment(name: string) {
     setBusy('create')
     setError('')
     try {
-      const nextStatus = await createExperiment(experimentName.trim())
+      const nextStatus = await createExperiment(name)
       setExperimentName('')
       setStatus(nextStatus)
       setSelectedExperimentID(nextStatus.active_experiment_id)
@@ -300,6 +293,19 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
     } finally {
       setBusy(null)
     }
+  }
+
+  async function handleCreate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = experimentName.trim()
+    if (!name || !status?.worktree_clean) {
+      return
+    }
+    if (canProceedWithBranchChange(appDirty, status.worktree_clean) === 'confirm') {
+      setPendingAction({ kind: 'create', name })
+      return
+    }
+    await runCreateExperiment(name)
   }
 
   async function runPromotion() {
@@ -601,24 +607,10 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
           message="You have unsaved changes in the current workspace. Discard them and continue?"
           onCancel={() => setPendingAction(null)}
           onConfirm={() => {
-            if (pendingAction?.kind === 'switch' && pendingAction.target === 'create') {
+            if (pendingAction?.kind === 'create') {
               setPendingAction(null)
               onDirtyChange?.(false)
-              void (async () => {
-                setBusy('create')
-                setError('')
-                try {
-                  const nextStatus = await createExperiment(experimentName.trim())
-                  setExperimentName('')
-                  setStatus(nextStatus)
-                  setSelectedExperimentID(nextStatus.active_experiment_id)
-                  await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`, nextStatus.active_experiment_id)
-                } catch (requestError) {
-                  setError(requestError instanceof Error ? requestError.message : 'Failed to create experiment.')
-                } finally {
-                  setBusy(null)
-                }
-              })()
+              void runCreateExperiment(pendingAction.name)
               return
             }
             if (pendingAction?.kind === 'switch') {

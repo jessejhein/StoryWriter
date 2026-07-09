@@ -197,3 +197,80 @@ func TestCommitPromotionRejectsUnexpectedStagedPaths(t *testing.T) {
 		t.Fatalf("main head changed: %q -> %q", mainHead, currentMain)
 	}
 }
+
+// Test: a publication verification failure rolls main back to the expected
+// head instead of leaving the promotion commit published.
+// Requirements: M8-R14, M8-R15.
+func TestCommitPromotionRevertsPublishedMainOnVerificationFailure(t *testing.T) {
+	t.Parallel()
+	ctx, dir, _ := initTestRepo(t)
+	mainHead, err := gitstore.New("git").ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "branch/test-exp-0123456789abcdef0123"
+	baseStore := gitstore.New("git")
+	if err := baseStore.CreateAndSwitch(ctx, dir, ref, mainHead, mainHead); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "outline.yaml"), []byte("version: 2\nroot:\n  arcs: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := baseStore.CommitAll(ctx, dir, "experiment"); err != nil {
+		t.Fatal(err)
+	}
+	experimentHead, err := baseStore.ResolveCommit(ctx, dir, ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := baseStore.CompareTrees(ctx, dir, mainHead, experimentHead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := baseStore.Switch(ctx, dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := baseStore.ApplyPaths(ctx, dir, experimentHead, changes, []string{"outline.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := baseStore.StagePaths(ctx, dir, []string{"outline.yaml"}); err != nil {
+		t.Fatal(err)
+	}
+
+	wrapper := filepath.Join(t.TempDir(), "git-wrapper.sh")
+	script := "#!/bin/sh\n" +
+		"set -eu\n" +
+		"repo=\n" +
+		"if [ \"${1:-}\" = \"-C\" ]; then repo=$2; fi\n" +
+		"if [ \"${1:-}\" = \"-C\" ] && [ \"${3:-}\" = \"update-ref\" ] && [ \"${4:-}\" = \"refs/heads/main\" ] && [ -n \"$repo\" ]; then\n" +
+		"  /usr/bin/env git \"$@\"\n" +
+		"  printf '\\n' >> \"$repo/outline.yaml\"\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"exec /usr/bin/env git \"$@\"\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	store := gitstore.New(wrapper)
+	_, err = store.CommitPromotion(ctx, dir, gitstore.PromotionCommitInput{
+		ExperimentID:     "brn_0123456789abcdef0123",
+		SourceCommit:     experimentHead,
+		BaseCommit:       mainHead,
+		ExpectedMainHead: mainHead,
+		Paths:            []string{"outline.yaml"},
+	})
+	if err == nil {
+		t.Fatal("CommitPromotion() error = nil")
+	}
+	if !strings.Contains(err.Error(), "verify promotion publication") {
+		t.Fatalf("CommitPromotion() error = %v", err)
+	}
+	currentMain, err := baseStore.ResolveCommit(ctx, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentMain != mainHead {
+		t.Fatalf("main head changed: %q -> %q", mainHead, currentMain)
+	}
+}
