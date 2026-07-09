@@ -8,7 +8,7 @@ Status: in progress as of July 7, 2026.
 | --- | --- | --- | --- |
 | M8-00.3 | `go test ./... -count=1` | all packages green | recorded |
 | M8-00.4 | `go test -race ./...` | all packages green | recorded |
-| M8-00.5 | frontend lint/typecheck/test | 50 files, 129 tests green | recorded |
+| M8-00.5 | frontend lint/typecheck/test | 50 files, 132 tests green | recorded |
 | M8-00.6 | `make check` | full check green (vite chunk warning pre-existing) | recorded |
 
 ## Milestone 8
@@ -101,9 +101,17 @@ Backend:
   `TestModelchatAnalyzerRejectsMalformedOutput`
 - `internal/branch/ramification_service_test.go`:
   `TestAnalyzeRamificationsRejectsStaleFingerprint`,
-  `TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket`
+  `TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket`,
+  `TestAnalyzeRamificationsRejectsInvalidGoalsBeforeProviderWork`
+- `internal/branch/ramification_packet_test.go`:
+  `TestBuildAnalysisPacketRejectsInvalidGoals`,
+  `TestBuildAnalysisPacketRejectsInvalidComparisonMetadata`,
+  `TestBuildAnalysisPacketSortsChangedFilesDeterministically`,
+  `TestBuildAnalysisPacketRejectsInvalidDiffText`
 - `internal/branch/service_lifecycle_test.go`:
-  `TestSwitchTargetRejectsDetachedHEADBeforeMutation`
+  `TestSwitchTargetRejectsDetachedHEADBeforeMutation`,
+  `TestCreateExperimentRejectsMissingMainBeforeMutation`,
+  `TestSwitchExperimentRejectsMissingMainBeforeCheckout`
 - `internal/api/branch_negative_contract_test.go`:
   `TestBranchFileComparisonRouteMapsOversizedBlobTo413`,
   `TestBranchSwitchRouteMapsDetachedHEADTo409`
@@ -123,7 +131,8 @@ Frontend:
 - `web/src/branches/BranchWorkbench.lifecycle.test.tsx`:
   create/switch badges, dirty guard, state invalidation
 - `web/src/branches/BranchWorkbench.comparison.test.tsx`:
-  changed-file list, inactive review without checkout, stale file responses ignored
+  changed-file list, inactive review without checkout, empty comparison state,
+  stale file responses ignored
 - `web/src/branches/BranchWorkbench.ramification.test.tsx`:
   explicit Analyze only, reviewed fingerprint request, findings cleared on change
 - `web/src/branches/RamificationResults.test.tsx`:
@@ -131,7 +140,8 @@ Frontend:
 - `web/src/branches/BranchWorkbench.promotion.test.tsx`:
   whole-file summary, confirmation, conflict paths, success leaves experiment listed
 - `web/src/branches/BranchWorkbench.discard.test.tsx`:
-  active and inactive discard, dirty guard, stale conflicts, pending disabled state
+  active and inactive discard, dirty draft confirmation, dirty worktree blocking,
+  stale conflicts, pending disabled state
 
 Verification commands and results:
 
@@ -143,7 +153,7 @@ Verification commands and results:
 | `go test -race ./...` | PASS |
 | `cd web && npm run lint` | PASS |
 | `cd web && npm run typecheck` | PASS |
-| `cd web && npm test -- --run` | PASS, 50 files / 129 tests |
+| `cd web && npm test -- --run` | PASS, 50 files / 132 tests |
 | `make check` | PASS, with the pre-existing Vite chunk warning |
 | `git diff --check` | PASS |
 | `git status --short` | inspected for unexpected generated artifacts |

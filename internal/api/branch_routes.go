@@ -393,7 +393,7 @@ func statusForBranchError(err error) int {
 	switch {
 	case errors.Is(err, branch.ErrNoActiveProject), errors.Is(err, branch.ErrDirtyWorktree), errors.Is(err, branch.ErrStaleRef), errors.Is(err, branch.ErrStaleFingerprint), errors.Is(err, branch.ErrPromotionConflict), errors.Is(err, branch.ErrDetachedHEAD), errors.Is(err, branch.ErrUnmanagedBranch):
 		return http.StatusConflict
-	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
+	case errors.Is(err, branch.ErrMainMissing), errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
 		return http.StatusBadRequest
 	case errors.Is(err, branch.ErrInvalidPromotionSubset):
 		return http.StatusConflict
@@ -420,7 +420,7 @@ func sanitizeBranchError(err error) error {
 		return errors.New("selected files do not form a valid canonical project")
 	case errors.Is(err, branch.ErrExperimentNotFound), errors.Is(err, branch.ErrPathNotInComparison):
 		return errors.New("branch resource not found")
-	case errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
+	case errors.Is(err, branch.ErrMainMissing), errors.Is(err, branch.ErrInvalidExperimentID), errors.Is(err, branch.ErrInvalidExperimentName), errors.Is(err, branch.ErrInvalidBranchRef), errors.Is(err, branch.ErrInvalidCommitID), errors.Is(err, branch.ErrInvalidProjectPath), errors.Is(err, branch.ErrInvalidFingerprint), errors.Is(err, branch.ErrInvalidPromotion), errors.Is(err, branch.ErrInvalidAnalysis), errors.Is(err, branch.ErrAnalysisBudget), errors.Is(err, branch.ErrTooManyChangedPaths):
 		return errors.New("invalid branch request")
 	case errors.Is(err, branch.ErrProviderRejected), errors.Is(err, branch.ErrInvalidAnalysisOutput):
 		return errors.New("analysis provider returned an invalid response")

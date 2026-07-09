@@ -39,6 +39,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 17. `docs/14_milestone_5_task_prompt.md`
 18. `docs/15_milestone_6_task_prompt.md`
 19. `docs/16_milestone_7_task_prompt.md`
+20. `docs/17_milestone_8_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.

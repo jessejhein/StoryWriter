@@ -131,6 +131,7 @@ func TestBranchRouteMapsEveryContractErrorClass(t *testing.T) {
 		status int
 	}{
 		{name: "invalid", err: branch.ErrInvalidProjectPath, status: http.StatusBadRequest},
+		{name: "missing main", err: branch.ErrMainMissing, status: http.StatusBadRequest},
 		{name: "conflict", err: branch.ErrStaleRef, status: http.StatusConflict},
 		{name: "not found", err: branch.ErrExperimentNotFound, status: http.StatusNotFound},
 		{name: "too large", err: branch.ErrFileTooLarge, status: http.StatusRequestEntityTooLarge},

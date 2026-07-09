@@ -278,6 +278,8 @@ Backend:
 
 - `internal/branch/identity_test.go`: `TestValidateExperimentIDAcceptsCanonicalShape`,
   `TestNormalizeSlugDerivesCanonicalSlugs`, `TestBuildAndParseManagedBranchRefRoundTrip`,
+  `TestNormalizeSlugRejectsReservedNames`, `TestBuildBranchRefRejectsReservedSlugs`,
+  `TestBranchRefFromNameRejectsReservedNames`,
   `TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain`,
   `TestParseManagedExperimentRefRejectsReservedSlug`
 - `internal/branch/path_test.go`: `TestValidateProjectPathAcceptsAllowedFamilies`,
@@ -292,7 +294,9 @@ Backend:
   `TestCreateExperimentRecoversOnIndexFailure`,
   `TestCreateExperimentRecoversAfterRequestCancellation`,
   `TestCreateExperimentSerializesUnderCoordinator`,
-  `TestCreateExperimentFromActiveManagedBranchRecordsMainBase`
+  `TestCreateExperimentFromActiveManagedBranchRecordsMainBase`,
+  `TestCreateExperimentRejectsMissingMainBeforeMutation`,
+  `TestSwitchExperimentRejectsMissingMainBeforeCheckout`
 - `internal/branch/promotion_policy_test.go`: `TestPromotionConflictsDetectsMainDivergence`,
   `TestValidatePromotionPreflightRejectsStaleRefs`
 - `internal/branch/promotion_service_test.go`:
@@ -309,7 +313,13 @@ Backend:
   `TestAnalyzeRamificationsRejectsStaleFingerprint`,
   `TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket`,
   `TestAnalyzeRamificationsRejectsFileBudgetBeforeReadingBlobs`,
+  `TestAnalyzeRamificationsRejectsInvalidGoalsBeforeProviderWork`,
   `TestAnalyzeRamificationsMapsAnalyzerCancellationToProviderUnavailable`
+- `internal/branch/ramification_packet_test.go`:
+  `TestBuildAnalysisPacketRejectsInvalidGoals`,
+  `TestBuildAnalysisPacketRejectsInvalidComparisonMetadata`,
+  `TestBuildAnalysisPacketSortsChangedFilesDeterministically`,
+  `TestBuildAnalysisPacketRejectsInvalidDiffText`
 - `internal/branch/promotion_service_test.go`:
   `TestPromoteSelectedFilesOrdersTransactionAndReturnsResult`,
   `TestPromoteSelectedFilesRollsBackEveryFailureBoundary`,
@@ -321,6 +331,7 @@ Backend:
   `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
   `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
   `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchRoutesRejectAnalysisGoalsWithNULBeforeService`,
   `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
   `TestBranchRoutesRejectOversizedBodies`,
   `TestEveryBranchRouteReturnsMethodSpecificAllow`
@@ -390,7 +401,9 @@ Backend:
   `changed_on_main_path_conflicts_before_promotion_checkout`,
   `invalid_promotion_subset_rolls_back_main`
 - `internal/app/milestone8_history_guard_integration_test.go`:
-  `TestMilestone8RewrittenExperimentHistoryFailsClosed`
+  `TestMilestone8UnrelatedExperimentHistoryFailsClosed`,
+  `TestMilestone8RelatedRewrittenExperimentHistoryFailsClosed`,
+  `TestMilestone8PrivateBaseRefCorruptionFailsClosed`
 - `web/src/App.branch_invalidation.test.tsx`:
   `confirms branch navigation before leaving dirty scene, codex, and import drafts`,
   `remounts branch-sensitive workspaces after switch, promotion, and discard actions`
@@ -406,18 +419,18 @@ Frontend:
 - `web/src/branches/BranchWorkbench.lifecycle.test.tsx`: create/switch badges, dirty guard,
   state invalidation
 - `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, inactive review
-  without checkout, no analysis on compare, stale file responses ignored
+  without checkout, empty comparison state, no analysis on compare, stale file responses ignored
 - `web/src/branches/BranchWorkbench.ramification.test.tsx`: explicit Analyze only,
   reviewed fingerprint request, findings cleared on fingerprint change
 - `web/src/branches/RamificationResults.test.tsx`: grouped findings, advisory notice
 - `web/src/branches/BranchWorkbench.promotion.test.tsx`: whole-file summary, confirmation,
   conflict paths, success leaves experiment listed
 - `web/src/branches/BranchWorkbench.discard.test.tsx`: active and inactive discard,
-  dirty guard, stale conflicts, pending disabled state
+  dirty draft confirmation, dirty worktree blocking, stale conflicts, pending disabled state
 
 Verification: full `make check` (including `go test -race ./...`,
 `git diff --check`, and tracked-artifact leak detection), 50 frontend test
-files, 129 frontend tests.
+files, 132 frontend tests.
 
 ### Milestone 9
 

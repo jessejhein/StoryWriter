@@ -1,5 +1,5 @@
-// BDD Scenario: 8.1.1 - Create from current canon
-// Requirements: M8-R01, M8-R02, M8-R03
+// BDD Scenario: 8.1.1 - Create from current canon; 8.1.2 - Reject unsafe branch state
+// Requirements: M8-R01, M8-R02, M8-R03, M8-R04
 // Test purpose: Branch service orchestrates create/switch with coordinator and index.
 
 package branch_test
@@ -18,6 +18,7 @@ type fakeRepo struct {
 	status                     branch.RepositoryStatus
 	experiments                []branch.ExperimentRef
 	mainHead                   branch.CommitID
+	resolveCommitErr           error
 	compareFiles               []branch.ChangedFile
 	blobSides                  map[string]branch.TextSide
 	mergeBase                  branch.CommitID
@@ -150,6 +151,9 @@ func (f *fakeRepo) CommitPromotion(context.Context, string, branch.PromotionComm
 	return head, nil
 }
 func (f *fakeRepo) ResolveCommit(context.Context, string, string) (branch.CommitID, error) {
+	if f.resolveCommitErr != nil {
+		return "", f.resolveCommitErr
+	}
 	return f.mainHead, nil
 }
 func (f *fakeRepo) IsClean(context.Context, string) (bool, error) { return true, nil }
@@ -266,6 +270,55 @@ func TestCreateExperimentFromActiveManagedBranchRecordsMainBase(t *testing.T) {
 	}
 	if status.BaseHead != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || len(repo.experiments) != 2 {
 		t.Fatalf("status=%#v experiments=%#v", status, repo.experiments)
+	}
+}
+
+// Test: missing main is rejected before creating refs, checking out, or
+// rebuilding the index.
+// Requirements: M8-R01, M8-R03, M8-R04.
+func TestCreateExperimentRejectsMissingMainBeforeMutation(t *testing.T) {
+	t.Parallel()
+	repo := &fakeRepo{
+		status:           branch.RepositoryStatus{ActiveBranch: "main", IsCanon: true, IsClean: true, MainHead: ""},
+		resolveCommitErr: branch.ErrMainMissing,
+	}
+	index := &fakeIndex{}
+	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	if _, err := service.CreateExperiment(context.Background(), "Missing Main"); !errors.Is(err, branch.ErrMainMissing) {
+		t.Fatalf("CreateExperiment() error = %v, want ErrMainMissing", err)
+	}
+	if len(repo.experiments) != 0 || repo.switches != 0 || index.rebuilds != 0 {
+		t.Fatalf("experiments=%#v switches=%d rebuilds=%d", repo.experiments, repo.switches, index.rebuilds)
+	}
+}
+
+// Test: switching to an experiment rejects missing main during experiment
+// resolution before checkout or index rebuild.
+// Requirements: M8-R01, M8-R03, M8-R04.
+func TestSwitchExperimentRejectsMissingMainBeforeCheckout(t *testing.T) {
+	t.Parallel()
+	experimentHead := branch.CommitID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	repo := &fakeRepo{
+		status: branch.RepositoryStatus{
+			ActiveBranch: "main",
+			IsCanon:      true,
+			IsClean:      true,
+		},
+		experiments: []branch.ExperimentRef{{
+			ID:         "brn_0123456789abcdef0123",
+			BranchName: "branch/test-exp-0123456789abcdef0123",
+			Head:       experimentHead,
+			BaseHead:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		}},
+		resolveCommitErr: branch.ErrMainMissing,
+	}
+	index := &fakeIndex{}
+	service := branch.NewService(repo, index, mutation.NewCoordinator(), branch.SessionAdapter{PathFn: func() (string, bool) { return "/tmp/project", true }}, nil, nil, &staticIDs{id: "brn_0123456789abcdef0123"})
+	if _, err := service.SwitchTarget(context.Background(), "brn_0123456789abcdef0123", &experimentHead); !errors.Is(err, branch.ErrMainMissing) {
+		t.Fatalf("SwitchTarget() error = %v, want ErrMainMissing", err)
+	}
+	if repo.switches != 0 || index.rebuilds != 0 {
+		t.Fatalf("switches=%d rebuilds=%d", repo.switches, index.rebuilds)
 	}
 }
 
