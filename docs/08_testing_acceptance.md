@@ -385,9 +385,17 @@ Backend:
   `TestMilestone8CodexAndProgressionMutationCommitsToActiveBranchOnly`
 - `internal/action/milestone8_branch_characterization_test.go`:
   `TestMilestone8AcceptedAIPatchCommitsToActiveBranchOnly`
+- `internal/action/milestone8_branch_snapshot_race_test.go`:
+  `TestMilestone8BranchSnapshotChangeBeforeProviderRejectsRun`,
+  `TestMilestone8BranchSnapshotChangeDuringProviderRejectsWithoutStoredRun`,
+  `TestMilestone8StableBranchSnapshotStoresRunSnapshot`,
+  `TestRunInvitationBranchSnapshotChangeDuringProviderReleasesClaim`,
+  `TestMilestone8CompletedRunInvitationsUseValidatedBranchSnapshot`,
+  `TestMilestone8AcceptedRunInvitationsRefreshCommittedBranchSnapshot`
 - `internal/importer/milestone8_branch_characterization_test.go`:
   `TestMilestone8ImportSnapshotCommitsToActiveBranchOnly`,
   `TestMilestone8ImportReviewMutationCommitsToActiveBranchOnly`
+- `internal/api/branch_lifecycle_test.go`: `TestBranchCreateRoute`
 - `internal/api/branch_negative_contract_test.go`: `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
   `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
   `TestBranchRoutesRejectMalformedCallsBeforeService`,
@@ -423,7 +431,7 @@ Frontend:
   complexity fallback
 - `web/src/branches/SideBySideDiff.test.tsx`: labels, accessible indicators, read-only panes
 - `web/src/branches/BranchWorkbench.lifecycle.test.tsx`: create/switch badges, dirty guard,
-  state invalidation
+  state invalidation, no duplicate comparison load after newly selected experiment creation
 - `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, inactive review
   without checkout, empty comparison state, no analysis on compare, stale file responses ignored
 - `web/src/branches/BranchWorkbench.ramification.test.tsx`: explicit Analyze only,
@@ -437,7 +445,7 @@ Frontend:
 
 Verification: full `make check` (including `go test -race ./...`,
 `git diff --check`, and tracked-artifact leak detection), 50 frontend test
-files, 135 frontend tests.
+files, 136 frontend tests.
 
 ### Milestone 9
 

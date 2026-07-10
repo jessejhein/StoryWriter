@@ -110,11 +110,31 @@ func TestBranchStatusAndListRoutes(t *testing.T) {
 // Requirements: M8-R02.
 func TestBranchCreateRoute(t *testing.T) {
 	t.Parallel()
-	handler := newBranchHandler()
+	handler := handlerWithBranches(lifecycleBranchStoreStub{})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/branches", strings.NewReader(`{"name":"Test Exp"}`)))
 	if response.Code != http.StatusCreated {
 		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != 6 {
+		t.Fatalf("create keys=%v body=%s", payload, response.Body.String())
+	}
+	if payload["active_branch"] != "branch/test-exp-0123456789abcdef0123" ||
+		payload["active_kind"] != "experiment" ||
+		payload["main_head"] != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ||
+		payload["experiment_head"] != "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" ||
+		payload["active_experiment_id"] != "brn_0123456789abcdef0123" ||
+		payload["worktree_clean"] != true {
+		t.Fatalf("unexpected create payload: %s", response.Body.String())
+	}
+	for _, forbidden := range []string{"is_canon", "is_managed_experiment", "is_detached", "is_clean", "base_head"} {
+		if _, ok := payload[forbidden]; ok {
+			t.Fatalf("create leaked %q: %s", forbidden, response.Body.String())
+		}
 	}
 }
 
@@ -156,7 +176,14 @@ func (lifecycleBranchStoreStub) ListExperiments(context.Context) ([]branch.Exper
 }
 
 func (lifecycleBranchStoreStub) CreateExperiment(context.Context, string) (branch.RepositoryStatus, error) {
-	return branch.RepositoryStatus{}, nil
+	return branch.RepositoryStatus{
+		ActiveBranch:   "branch/test-exp-0123456789abcdef0123",
+		IsManaged:      true,
+		IsClean:        true,
+		MainHead:       "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ExperimentID:   "brn_0123456789abcdef0123",
+		ExperimentHead: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+	}, nil
 }
 
 func (lifecycleBranchStoreStub) SwitchTarget(context.Context, string, *branch.CommitID) (branch.RepositoryStatus, error) {

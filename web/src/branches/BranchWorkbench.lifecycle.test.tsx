@@ -40,6 +40,7 @@ const project: Project = {
 const mainHead = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 const experimentHead = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 const experimentID = 'brn_0123456789abcdef0123'
+const createdExperimentID = 'brn_ffffffffffffffffffff'
 
 const canonStatus = {
   active_branch: 'main',
@@ -56,6 +57,15 @@ const experimentStatus = {
   main_head: mainHead,
   experiment_head: experimentHead,
   active_experiment_id: experimentID,
+  worktree_clean: true,
+}
+
+const createdExperimentStatus = {
+  active_branch: 'branch/new-route-ffffffffffffffffffff',
+  active_kind: 'experiment' as const,
+  main_head: mainHead,
+  experiment_head: experimentHead,
+  active_experiment_id: createdExperimentID,
   worktree_clean: true,
 }
 
@@ -208,4 +218,52 @@ test('clears comparison state and refetches after switching to the reviewed expe
   fireEvent.click(screen.getByRole('button', { name: 'Switch branch' }))
   await waitFor(() => expect(onBranchChanged).toHaveBeenCalled())
   await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalled())
+})
+
+// Test: creating an experiment loads its comparison once through the selected
+// experiment state boundary, avoiding redundant branch comparison requests.
+// Requirements: M8-R18.
+test('loads comparison only once after creating a newly selected experiment', async () => {
+  vi.mocked(api.createExperiment).mockResolvedValue(createdExperimentStatus)
+  vi.mocked(api.getBranchStatus)
+    .mockResolvedValueOnce(canonStatus)
+    .mockResolvedValue(createdExperimentStatus)
+  vi.mocked(api.listExperiments)
+    .mockResolvedValueOnce({
+      experiments: [{
+        experiment_id: experimentID,
+        branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+        head: experimentHead,
+        display_name: 'obi-wan-lives',
+      }],
+    })
+    .mockResolvedValue({
+      experiments: [
+        {
+          experiment_id: experimentID,
+          branch_name: 'branch/obi-wan-lives-0123456789abcdef0123',
+          head: experimentHead,
+          display_name: 'obi-wan-lives',
+        },
+        {
+          experiment_id: createdExperimentID,
+          branch_name: 'branch/new-route-ffffffffffffffffffff',
+          head: experimentHead,
+          display_name: 'new-route',
+        },
+      ],
+    })
+
+  render(<BranchWorkbench project={project} appDirty={false} onDirtyChange={vi.fn()} onBranchChanged={vi.fn()} />)
+
+  await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalledWith(experimentID))
+  vi.mocked(api.getBranchComparison).mockClear()
+
+  fireEvent.change(screen.getByLabelText('Experiment name'), { target: { value: 'New route' } })
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Create experiment' })).not.toBeDisabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Create experiment' }))
+
+  await waitFor(() => expect(api.createExperiment).toHaveBeenCalledWith('New route'))
+  await waitFor(() => expect(api.getBranchComparison).toHaveBeenCalledWith(createdExperimentID))
+  expect(api.getBranchComparison).toHaveBeenCalledTimes(1)
 })

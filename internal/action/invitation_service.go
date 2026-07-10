@@ -196,7 +196,7 @@ func (s *Service) publishPreparedInvitations(run Run, prepared []preparedInvitat
 	chainDepth := run.effectiveChainDepth() + 1
 	invitationBranch := run.Branch
 	invitationHead := run.BranchHead
-	if s.branches != nil {
+	if s.branches != nil && (run.Status == RunAccepted || invitationBranch == "" || invitationHead == "") {
 		snapshot, err := s.branches.Snapshot(context.Background())
 		if err != nil {
 			return nil, err

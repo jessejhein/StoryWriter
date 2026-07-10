@@ -231,12 +231,15 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
   }
 
   async function afterBranchMutation(message: string, nextExperimentID: string | null) {
+    const shouldReloadCurrentSelection = Boolean(nextExperimentID && nextExperimentID === selectedExperimentID)
     resetBranchSensitiveState()
     onBranchChanged()
     await refreshStatus()
     if (nextExperimentID) {
       setSelectedExperimentID(nextExperimentID)
-      void loadComparison(nextExperimentID, requestVersionRef.current)
+      if (shouldReloadCurrentSelection) {
+        void loadComparison(nextExperimentID, requestVersionRef.current)
+      }
     }
     setStatusMessage(message)
     liveRegionRef.current?.focus()
@@ -292,7 +295,6 @@ export default function BranchWorkbench({ project, appDirty, onDirtyChange, onBr
       const nextStatus = await createExperiment(name)
       setExperimentName('')
       setStatus(nextStatus)
-      setSelectedExperimentID(nextStatus.active_experiment_id)
       await afterBranchMutation(`Created experiment ${nextStatus.active_branch}.`, nextStatus.active_experiment_id)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'Failed to create experiment.')
