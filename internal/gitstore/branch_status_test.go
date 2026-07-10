@@ -6,9 +6,11 @@ package gitstore_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"storywork/internal/gitstore"
@@ -66,5 +68,38 @@ func TestStatusReportsActiveBranchAndCleanliness(t *testing.T) {
 	}
 	if status.ActiveBranch != "branch/test-exp-0123456789abcdef0123" {
 		t.Fatalf("active = %q", status.ActiveBranch)
+	}
+}
+
+// Test: a missing fixed main ref is classified as unsupported branch state
+// while leaving the active experiment worktree untouched.
+// Requirements: M8-R01, M8-R03, M8-R20.
+func TestStatusReportsMissingMainWithSentinel(t *testing.T) {
+	t.Parallel()
+	ctx, dir, store := initTestRepo(t)
+	status, err := store.Status(ctx, dir)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if err := store.CreateAndSwitch(ctx, dir, "branch/missing-main-0123456789abcdef0123", status.MainHead, status.MainHead); err != nil {
+		t.Fatalf("CreateAndSwitch() error = %v", err)
+	}
+	if output, err := exec.Command("git", "-C", dir, "update-ref", "-d", "refs/heads/main", status.MainHead).CombinedOutput(); err != nil {
+		t.Fatalf("delete main ref: %v: %s", err, output)
+	}
+
+	_, err = store.Status(ctx, dir)
+	if !errors.Is(err, gitstore.ErrMainMissing) {
+		t.Fatalf("Status() error = %v, want ErrMainMissing", err)
+	}
+	active, err := exec.Command("git", "-C", dir, "symbolic-ref", "--short", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(active)) != "branch/missing-main-0123456789abcdef0123" {
+		t.Fatalf("active branch = %q", active)
+	}
+	if body, err := os.ReadFile(filepath.Join(dir, "outline.yaml")); err != nil || !strings.Contains(string(body), "version: 1") {
+		t.Fatalf("outline body=%q err=%v", body, err)
 	}
 }

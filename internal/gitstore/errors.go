@@ -13,6 +13,9 @@ var ErrStaleExperimentHead = errors.New("stale experiment head")
 // ErrNoMergeBase is returned when two commits share no merge base.
 var ErrNoMergeBase = errors.New("no merge base")
 
+// ErrMainMissing is returned when the fixed canon branch cannot be resolved.
+var ErrMainMissing = errors.New("main branch is missing")
+
 // ErrDiffTooLarge is returned when a unified diff output exceeds the supplied
 // byte budget.
 var ErrDiffTooLarge = errors.New("diff exceeds byte budget")

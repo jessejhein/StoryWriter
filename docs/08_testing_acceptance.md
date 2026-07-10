@@ -364,7 +364,8 @@ Backend:
 - `internal/storyfile/milestone8_validation_test.go`:
   `TestValidateCanonicalFilesRejectsOrphanStoryFiles`,
   `TestValidateCanonicalFilesIgnoresGitkeepPlaceholders`
-- `internal/gitstore/branch_status_test.go`: `TestStatusReportsActiveBranchAndCleanliness`
+- `internal/gitstore/branch_status_test.go`: `TestStatusReportsActiveBranchAndCleanliness`,
+  `TestStatusReportsMissingMainWithSentinel`
 - `internal/gitstore/branch_switch_test.go`: `TestCreateAndSwitchFromMain`,
   `TestCreateAndSwitchFromAnotherManagedExperiment`,
   `TestCreateAndSwitchRejectsDirtyWorktree`,
@@ -399,11 +400,13 @@ Backend:
   `TestBranchPromotionRoute`, `TestBranchDiscardRoute`
 - `internal/api/branch_dependencies_test.go`: `TestHandlerDependenciesAcceptBranchStore`
 - `internal/app/milestone8_integration_test.go`: `TestMilestone8AcceptanceM833HappyPath`,
+  `TestMilestone8AcceptanceM835PromotionAllowsUnrelatedMainAdvancement`,
   `TestMilestone8AcceptanceM834Adversarial` and subtests
   `stale_fingerprint_and_refs_rejected_before_provider_or_checkout`,
   `changed_on_main_path_conflicts_before_promotion_checkout`,
   `invalid_promotion_subset_rolls_back_main`
 - `internal/app/milestone8_history_guard_integration_test.go`:
+  `TestMilestone8MissingMainFailsClosedWithSafeBranchErrors`,
   `TestMilestone8UnrelatedExperimentHistoryFailsClosed`,
   `TestMilestone8RelatedRewrittenExperimentHistoryFailsClosed`,
   `TestMilestone8PrivateBaseRefCorruptionFailsClosed`
@@ -424,7 +427,8 @@ Frontend:
 - `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, inactive review
   without checkout, empty comparison state, no analysis on compare, stale file responses ignored
 - `web/src/branches/BranchWorkbench.ramification.test.tsx`: explicit Analyze only,
-  reviewed fingerprint request, empty-model guard, findings cleared on fingerprint change
+  reviewed fingerprint request, empty-model guard, findings cleared on fingerprint change,
+  analysis-goal dirty-draft guard
 - `web/src/branches/RamificationResults.test.tsx`: grouped findings, advisory notice
 - `web/src/branches/BranchWorkbench.promotion.test.tsx`: whole-file summary, confirmation,
   conflict paths, success leaves experiment listed
@@ -433,7 +437,7 @@ Frontend:
 
 Verification: full `make check` (including `go test -race ./...`,
 `git diff --check`, and tracked-artifact leak detection), 50 frontend test
-files, 133 frontend tests.
+files, 135 frontend tests.
 
 ### Milestone 9
 

@@ -95,7 +95,7 @@ func (s *Store) Status(ctx context.Context, repoPath string) (BranchStatus, erro
 	}
 	mainHead, err := s.ResolveCommit(ctx, repoPath, canonBranch)
 	if err != nil {
-		return BranchStatus{}, fmt.Errorf("resolve main head: %w", err)
+		return BranchStatus{}, errors.Join(ErrMainMissing, fmt.Errorf("resolve main head: %w", err))
 	}
 	return BranchStatus{
 		ActiveBranch: active,

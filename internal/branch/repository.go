@@ -385,6 +385,8 @@ func mapRepositoryError(err error) error {
 		return errors.Join(ErrDirtyWorktree, err)
 	case errors.Is(err, gitstore.ErrNoMergeBase):
 		return errors.Join(ErrStaleRef, err)
+	case errors.Is(err, gitstore.ErrMainMissing):
+		return errors.Join(ErrMainMissing, err)
 	case errors.Is(err, gitstore.ErrStaleExperimentHead):
 		return errors.Join(ErrStaleRef, err)
 	case errors.Is(err, gitstore.ErrPathListTooLarge):

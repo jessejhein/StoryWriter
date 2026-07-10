@@ -7,7 +7,10 @@
 package app_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +20,37 @@ import (
 
 	"storywork/internal/app"
 )
+
+// Test: deleting the fixed main ref is reported as unsupported branch state
+// with safe API errors before refs, checkout, or worktree files change.
+// Requirements: M8-R01, M8-R03, M8-R20.
+func TestMilestone8MissingMainFailsClosedWithSafeBranchErrors(t *testing.T) {
+	configPath := t.TempDir()
+	t.Setenv("STORYWORK_CONFIG_DIR", configPath)
+
+	handler := app.NewHandler("test")
+	projectPath := filepath.Join(t.TempDir(), "m8-missing-main")
+	_, experimentID, experimentBranch, experimentHead, _ := createHistoryGuardExperiment(t, handler, projectPath)
+	branchRefsBefore := managedBranchRefs(t, projectPath)
+	if output, err := exec.Command("git", "-C", projectPath, "update-ref", "-d", "refs/heads/main", gitRevParse(t, projectPath, "main")).CombinedOutput(); err != nil {
+		t.Fatalf("delete main ref: %v: %s", err, output)
+	}
+
+	assertBranchAPIError(t, handler, projectPath, http.MethodGet, "/api/branches/status", nil, http.StatusBadRequest)
+	assertBranchAPIError(t, handler, projectPath, http.MethodPost, "/api/branches", map[string]string{"name": "Should Fail"}, http.StatusBadRequest)
+	assertBranchAPIError(t, handler, projectPath, http.MethodPost, "/api/branches/switch", map[string]any{
+		"target":        experimentID,
+		"expected_head": experimentHead,
+	}, http.StatusBadRequest)
+
+	if got := managedBranchRefs(t, projectPath); got != branchRefsBefore {
+		t.Fatalf("managed refs changed:\n before=%s\n after=%s", branchRefsBefore, got)
+	}
+	if active := gitActiveBranch(t, projectPath); active != experimentBranch {
+		t.Fatalf("active branch = %q, want %q", active, experimentBranch)
+	}
+	assertClean(t, projectPath)
+}
 
 // Test: comparison and promotion routes reject unrelated managed experiment
 // history with safe conflict responses and no canon mutation.
@@ -338,5 +372,44 @@ func updateManagedRef(t *testing.T, projectPath, branchName, newHead, oldHead st
 	t.Helper()
 	if output, err := exec.Command("git", "-C", projectPath, "update-ref", "refs/heads/"+branchName, newHead, oldHead).CombinedOutput(); err != nil {
 		t.Fatalf("git update-ref %s: %v: %s", branchName, err, output)
+	}
+}
+
+func managedBranchRefs(t *testing.T, projectPath string) string {
+	t.Helper()
+	output, err := exec.Command("git", "-C", projectPath, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/branch/").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func assertBranchAPIError(t *testing.T, handler http.Handler, projectPath, method, path string, body any, status int) {
+	t.Helper()
+	var reader *bytes.Reader
+	if body == nil {
+		reader = bytes.NewReader(nil)
+	} else {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	request := httptest.NewRequest(method, path, reader)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != status {
+		t.Fatalf("%s %s status=%d want=%d body=%s", method, path, response.Code, status, response.Body.String())
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("error response is not JSON: %v body=%s", err, response.Body.String())
+	}
+	if payload["error"] == "" {
+		t.Fatalf("error response missing error: %s", response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), projectPath) || strings.Contains(response.Body.String(), "git ") || strings.Contains(response.Body.String(), "update-ref") {
+		t.Fatalf("unsafe error response: %s", response.Body.String())
 	}
 }
