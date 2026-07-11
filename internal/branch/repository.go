@@ -1,0 +1,401 @@
+package branch
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"storywork/internal/gitstore"
+)
+
+// GitRepository adapts gitstore.Store to the branch repository boundary.
+type GitRepository struct {
+	Store gitRepositoryStore
+}
+
+type gitRepositoryStore interface {
+	Status(context.Context, string) (gitstore.BranchStatus, error)
+	ListExperiments(context.Context, string) ([]gitstore.ExperimentBranch, error)
+	CreateAndSwitch(context.Context, string, string, string, string) error
+	Switch(context.Context, string, string) error
+	SwitchExperiment(context.Context, string, string, string) error
+	DeleteExperiment(context.Context, string, string, string, string) error
+	CompareTrees(context.Context, string, string, string) ([]gitstore.TreeChange, error)
+	ReadTextBlob(context.Context, string, string, string) (gitstore.TextBlob, error)
+	MergeBase(context.Context, string, string, string) (string, error)
+	IsAncestor(context.Context, string, string, string) (bool, error)
+	PathsChanged(context.Context, string, string, string) ([]string, error)
+	SelectedPathsChanged(context.Context, string, string, string, []string) ([]string, error)
+	UnifiedDiff(context.Context, string, string, string, []string, int) (string, error)
+	SnapshotPaths(context.Context, string, string, []string) ([]gitstore.PathSnapshot, error)
+	ApplyPaths(context.Context, string, string, []gitstore.TreeChange, []string) error
+	StagePaths(context.Context, string, []string) error
+	UnstagePaths(context.Context, string, []string) error
+	RestorePathSnapshots(context.Context, string, []gitstore.PathSnapshot) error
+	CommitPromotion(context.Context, string, gitstore.PromotionCommitInput) (string, error)
+	ResolveCommit(context.Context, string, string) (string, error)
+	IsClean(context.Context, string) (bool, error)
+	ResolveExperimentBase(context.Context, string, string) (string, error)
+}
+
+func (r *GitRepository) Status(ctx context.Context, repoPath string) (RepositoryStatus, error) {
+	status, err := r.Store.Status(ctx, repoPath)
+	if err != nil {
+		return RepositoryStatus{}, err
+	}
+	result := RepositoryStatus{
+		ActiveBranch: status.ActiveBranch,
+		IsCanon:      status.ActiveBranch == CanonBranchName && !status.IsDetached,
+		IsManaged:    IsManagedExperimentRef(status.ActiveBranch),
+		IsDetached:   status.IsDetached,
+		IsClean:      status.IsClean,
+		MainHead:     CommitID(status.MainHead),
+	}
+	if strings.HasPrefix(status.ActiveBranch, ExperimentNamespace) {
+		if !IsManagedExperimentRef(status.ActiveBranch) {
+			return RepositoryStatus{}, fmt.Errorf("managed branch ref %q: %w", status.ActiveBranch, ErrRepositoryState)
+		}
+		id, _, err := ParseManagedExperimentRef(status.ActiveBranch)
+		if err != nil {
+			return RepositoryStatus{}, fmt.Errorf("managed branch ref %q: %w", status.ActiveBranch, ErrRepositoryState)
+		}
+		head, err := r.Store.ResolveCommit(ctx, repoPath, status.ActiveBranch)
+		if err != nil {
+			return RepositoryStatus{}, err
+		}
+		base, err := r.Store.ResolveExperimentBase(ctx, repoPath, status.ActiveBranch)
+		if err != nil {
+			return RepositoryStatus{}, fmt.Errorf("managed branch ref %q: %w", status.ActiveBranch, ErrRepositoryState)
+		}
+		result.ExperimentID = id
+		result.ExperimentHead = CommitID(head)
+		result.BaseHead = CommitID(base)
+		result.IsManaged = true
+	}
+	return result, nil
+}
+
+func (r *GitRepository) ListExperiments(ctx context.Context, repoPath string) ([]ExperimentRef, error) {
+	refs, err := r.Store.ListExperiments(ctx, repoPath)
+	if err != nil {
+		return nil, errors.Join(ErrRepositoryState, err)
+	}
+	experiments := make([]ExperimentRef, 0, len(refs))
+	for _, item := range refs {
+		id, _, err := ParseManagedExperimentRef(item.Ref)
+		if err != nil {
+			return nil, errors.Join(ErrRepositoryState, err)
+		}
+		base, err := r.Store.ResolveExperimentBase(ctx, repoPath, item.Ref)
+		if err != nil {
+			return nil, errors.Join(ErrRepositoryState, err)
+		}
+		experiments = append(experiments, ExperimentRef{
+			ID:         id,
+			BranchName: BranchRef(item.Ref),
+			Head:       CommitID(item.Head),
+			BaseHead:   CommitID(base),
+		})
+	}
+	return experiments, nil
+}
+
+func (r *GitRepository) CreateAndSwitch(ctx context.Context, repoPath string, ref ExperimentRef, start CommitID) error {
+	return r.Store.CreateAndSwitch(ctx, repoPath, string(ref.BranchName), string(start), string(ref.BaseHead))
+}
+
+func (r *GitRepository) Switch(ctx context.Context, repoPath string, ref BranchRef) error {
+	return r.Store.Switch(ctx, repoPath, string(ref))
+}
+
+func (r *GitRepository) SwitchExperiment(ctx context.Context, repoPath string, ref ExperimentRef) error {
+	return r.Store.SwitchExperiment(ctx, repoPath, string(ref.BranchName), string(ref.Head))
+}
+
+func (r *GitRepository) DeleteExperiment(ctx context.Context, repoPath string, ref ExperimentRef, expected CommitID) error {
+	return r.Store.DeleteExperiment(ctx, repoPath, string(ref.BranchName), string(expected), string(ref.BaseHead))
+}
+
+func (r *GitRepository) CompareTrees(ctx context.Context, repoPath string, left, right CommitID) ([]ChangedFile, error) {
+	changes, err := r.Store.CompareTrees(ctx, repoPath, string(left), string(right))
+	if err != nil {
+		return nil, err
+	}
+	files := make([]ChangedFile, 0, len(changes))
+	for _, change := range changes {
+		status, err := ParseChangedStatus(change.Status)
+		if err != nil {
+			return nil, err
+		}
+		path, err := ValidateProjectPath(change.Path)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, ChangedFile{Path: path, Status: status})
+	}
+	return ValidateChangedFiles(files)
+}
+
+func (r *GitRepository) ReadTextBlob(ctx context.Context, repoPath string, commit CommitID, path ProjectPath) (TextSide, error) {
+	blob, err := r.Store.ReadTextBlob(ctx, repoPath, string(commit), string(path))
+	if err != nil {
+		return TextSide{}, mapRepositoryError(err)
+	}
+	if !blob.Exists {
+		return TextSide{Exists: false, Text: ""}, nil
+	}
+	text, err := ValidateStrictUTF8(blob.Bytes)
+	if err != nil {
+		return TextSide{}, err
+	}
+	return TextSide{Exists: true, Text: text}, nil
+}
+
+func (r *GitRepository) MergeBase(ctx context.Context, repoPath string, left, right CommitID) (CommitID, error) {
+	base, err := r.Store.MergeBase(ctx, repoPath, string(left), string(right))
+	if err != nil {
+		return "", err
+	}
+	return CommitID(base), nil
+}
+
+func (r *GitRepository) IsAncestor(ctx context.Context, repoPath string, ancestor, descendant CommitID) (bool, error) {
+	return r.Store.IsAncestor(ctx, repoPath, string(ancestor), string(descendant))
+}
+
+func (r *GitRepository) PathsChanged(ctx context.Context, repoPath string, base, head CommitID) ([]ProjectPath, error) {
+	paths, err := r.Store.PathsChanged(ctx, repoPath, string(base), string(head))
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ProjectPath, 0, len(paths))
+	for _, raw := range paths {
+		path, err := ValidateProjectPath(raw)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, path)
+	}
+	return SortProjectPaths(result), nil
+}
+
+func (r *GitRepository) SelectedPathsChanged(ctx context.Context, repoPath string, base, head CommitID, selected []ProjectPath) ([]ProjectPath, error) {
+	rawSelected := make([]string, len(selected))
+	for i, path := range selected {
+		rawSelected[i] = string(path)
+	}
+	paths, err := r.Store.SelectedPathsChanged(ctx, repoPath, string(base), string(head), rawSelected)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]ProjectPath, 0, len(paths))
+	for _, raw := range paths {
+		path, err := ValidateProjectPath(raw)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, path)
+	}
+	return SortProjectPaths(result), nil
+}
+
+func (r *GitRepository) SnapshotMainPaths(ctx context.Context, repoPath string, mainHead CommitID, paths []ProjectPath) ([]PathSnapshot, error) {
+	raw := make([]string, len(paths))
+	for i, path := range paths {
+		raw[i] = string(path)
+	}
+	snapshots, err := r.Store.SnapshotPaths(ctx, repoPath, string(mainHead), raw)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]PathSnapshot, len(snapshots))
+	for i, s := range snapshots {
+		result[i] = PathSnapshot{Path: ProjectPath(s.Path), Exists: s.Exists, SourceCommit: CommitID(s.SourceCommit)}
+	}
+	return result, nil
+}
+
+func (r *GitRepository) ApplyPaths(ctx context.Context, repoPath string, experiment CommitID, files []ChangedFile, selected []ProjectPath) error {
+	changes := make([]gitstore.TreeChange, len(files))
+	for i, file := range files {
+		var code byte
+		switch file.Status {
+		case StatusAdded:
+			code = 'A'
+		case StatusModified:
+			code = 'M'
+		case StatusDeleted:
+			code = 'D'
+		}
+		changes[i] = gitstore.TreeChange{Path: string(file.Path), Status: code}
+	}
+	raw := make([]string, len(selected))
+	for i, path := range selected {
+		raw[i] = string(path)
+	}
+	return r.Store.ApplyPaths(ctx, repoPath, string(experiment), changes, raw)
+}
+
+func (r *GitRepository) StagePaths(ctx context.Context, repoPath string, paths []ProjectPath) error {
+	raw := make([]string, len(paths))
+	for i, path := range paths {
+		raw[i] = string(path)
+	}
+	return r.Store.StagePaths(ctx, repoPath, raw)
+}
+
+func (r *GitRepository) UnstagePaths(ctx context.Context, repoPath string, paths []ProjectPath) error {
+	raw := make([]string, len(paths))
+	for i, path := range paths {
+		raw[i] = string(path)
+	}
+	return r.Store.UnstagePaths(ctx, repoPath, raw)
+}
+
+func (r *GitRepository) RestoreSnapshots(ctx context.Context, repoPath string, snapshots []PathSnapshot) error {
+	raw := make([]gitstore.PathSnapshot, len(snapshots))
+	for i, s := range snapshots {
+		raw[i] = gitstore.PathSnapshot{Path: string(s.Path), Exists: s.Exists, SourceCommit: string(s.SourceCommit)}
+	}
+	return r.Store.RestorePathSnapshots(ctx, repoPath, raw)
+}
+
+func (r *GitRepository) CommitPromotion(ctx context.Context, repoPath string, commit PromotionCommit) (CommitID, error) {
+	paths := make([]string, len(commit.Paths))
+	for i, path := range commit.Paths {
+		paths[i] = string(path)
+	}
+	head, err := r.Store.CommitPromotion(ctx, repoPath, gitstore.PromotionCommitInput{
+		ExperimentID:     string(commit.ExperimentID),
+		SourceCommit:     string(commit.SourceCommit),
+		BaseCommit:       string(commit.BaseCommit),
+		ExpectedMainHead: string(commit.ExpectedMainHead),
+		Paths:            paths,
+	})
+	if err != nil {
+		return "", err
+	}
+	return CommitID(head), nil
+}
+
+func (r *GitRepository) ResolveCommit(ctx context.Context, repoPath, ref string) (CommitID, error) {
+	head, err := r.Store.ResolveCommit(ctx, repoPath, ref)
+	if err != nil {
+		return "", err
+	}
+	return CommitID(head), nil
+}
+
+func (r *GitRepository) IsClean(ctx context.Context, repoPath string) (bool, error) {
+	return r.Store.IsClean(ctx, repoPath)
+}
+
+func (r *GitRepository) UnifiedDiff(ctx context.Context, repoPath string, mainHead, experimentHead CommitID, paths []ProjectPath, maxBytes int) (string, error) {
+	raw := make([]string, len(paths))
+	for i, path := range paths {
+		raw[i] = string(path)
+	}
+	diff, err := r.Store.UnifiedDiff(ctx, repoPath, string(mainHead), string(experimentHead), raw, maxBytes)
+	if err != nil {
+		return "", mapRepositoryError(err)
+	}
+	text, err := ValidateStrictUTF8([]byte(diff))
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", ErrInvalidAnalysis, err)
+	}
+	return text, nil
+}
+
+type StatusRepository interface {
+	Status(context.Context, string) (RepositoryStatus, error)
+}
+
+type ExperimentRepository interface {
+	ListExperiments(context.Context, string) ([]ExperimentRef, error)
+	CreateAndSwitch(context.Context, string, ExperimentRef, CommitID) error
+	Switch(context.Context, string, BranchRef) error
+	SwitchExperiment(context.Context, string, ExperimentRef) error
+	DeleteExperiment(context.Context, string, ExperimentRef, CommitID) error
+	ResolveCommit(context.Context, string, string) (CommitID, error)
+}
+
+type ComparisonRepository interface {
+	CompareTrees(context.Context, string, CommitID, CommitID) ([]ChangedFile, error)
+	ReadTextBlob(context.Context, string, CommitID, ProjectPath) (TextSide, error)
+	MergeBase(context.Context, string, CommitID, CommitID) (CommitID, error)
+	IsAncestor(context.Context, string, CommitID, CommitID) (bool, error)
+	PathsChanged(context.Context, string, CommitID, CommitID) ([]ProjectPath, error)
+	SelectedPathsChanged(context.Context, string, CommitID, CommitID, []ProjectPath) ([]ProjectPath, error)
+}
+
+type AnalysisRepository interface {
+	UnifiedDiff(context.Context, string, CommitID, CommitID, []ProjectPath, int) (string, error)
+}
+
+type PromotionRepository interface {
+	SnapshotMainPaths(context.Context, string, CommitID, []ProjectPath) ([]PathSnapshot, error)
+	ApplyPaths(context.Context, string, CommitID, []ChangedFile, []ProjectPath) error
+	StagePaths(context.Context, string, []ProjectPath) error
+	UnstagePaths(context.Context, string, []ProjectPath) error
+	RestoreSnapshots(context.Context, string, []PathSnapshot) error
+	CommitPromotion(context.Context, string, PromotionCommit) (CommitID, error)
+	IsClean(context.Context, string) (bool, error)
+}
+
+// Repository is the concrete Git boundary accepted by NewService.
+type Repository interface {
+	StatusRepository
+	ExperimentRepository
+	ComparisonRepository
+	AnalysisRepository
+	PromotionRepository
+}
+
+// Index rebuilds the disposable active-tree index.
+type Index interface {
+	Rebuild(context.Context, string) error
+}
+
+// CanonicalValidator validates a complete on-disk project snapshot.
+type CanonicalValidator interface {
+	ValidateProject(context.Context, string) error
+}
+
+// MutationCoordinator serializes branch-changing operations.
+type MutationCoordinator interface {
+	Lock()
+	Unlock()
+	RLock()
+	RUnlock()
+}
+
+// ProjectSession supplies the active project path.
+type ProjectSession interface {
+	ProjectPath() (string, error)
+}
+
+// ErrNoActiveProject is returned when no project is active.
+func mapRepositoryError(err error) error {
+	if err == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(err, gitstore.ErrDirtyWorktree):
+		return errors.Join(ErrDirtyWorktree, err)
+	case errors.Is(err, gitstore.ErrNoMergeBase):
+		return errors.Join(ErrStaleRef, err)
+	case errors.Is(err, gitstore.ErrMainMissing):
+		return errors.Join(ErrMainMissing, err)
+	case errors.Is(err, gitstore.ErrStaleExperimentHead):
+		return errors.Join(ErrStaleRef, err)
+	case errors.Is(err, gitstore.ErrPathListTooLarge):
+		return errors.Join(ErrTooManyChangedPaths, err)
+	case errors.Is(err, gitstore.ErrBlobTooLarge):
+		return errors.Join(ErrFileTooLarge, err)
+	case errors.Is(err, gitstore.ErrDiffTooLarge):
+		return errors.Join(ErrAnalysisBudget, err)
+	default:
+		return errors.Join(ErrRepositoryState, err)
+	}
+}

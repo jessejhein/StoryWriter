@@ -47,6 +47,8 @@ type Invitation struct {
 	ChapterID    string
 	Relationship InvitationRelationship
 	Status       string
+	Branch       string
+	BranchHead   string
 	createdAt    time.Time
 }
 

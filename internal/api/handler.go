@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"storywork/internal/action"
 	"storywork/internal/agent"
@@ -253,6 +254,7 @@ type HandlerDependencies struct {
 	Actions   ActionStore
 	Providers ProviderStore
 	Imports   ImportStore
+	Branches  BranchStore
 	Version   string
 }
 
@@ -944,6 +946,9 @@ func NewHandler(deps HandlerDependencies) http.Handler {
 	})
 	mux.HandleFunc("/api/codex/{entry_id}/active", methodNotAllowed("GET"))
 	registerActionRoutes(mux, actionRouteDeps{actions: actionStore, providers: providers})
+	if deps.Branches != nil {
+		registerBranchRoutes(mux, branchRouteDeps{branches: deps.Branches})
+	}
 	mux.HandleFunc("/api/provider-profiles", methodNotAllowed("GET, PUT"))
 	return mux
 }
@@ -1047,6 +1052,12 @@ func readJSONBodyWithLimit(writer http.ResponseWriter, request *http.Request, li
 }
 
 func decodeJSONBytes(body []byte, target any) error {
+	if !utf8.Valid(body) {
+		return errors.New("invalid JSON request: body must be UTF-8")
+	}
+	if err := rejectDuplicateJSONKeys(body); err != nil {
+		return fmt.Errorf("invalid JSON request: %w", err)
+	}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -1057,6 +1068,69 @@ func decodeJSONBytes(body []byte, target any) error {
 			return errors.New("invalid JSON request: unexpected trailing JSON value")
 		}
 		return fmt.Errorf("invalid JSON request: %w", err)
+	}
+	return nil
+}
+
+func rejectDuplicateJSONKeys(body []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := consumeJSONValue(decoder); err != nil {
+		return err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		if err == nil {
+			return errors.New("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
+}
+
+func consumeJSONValue(decoder *json.Decoder) error {
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	delimiter, ok := token.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delimiter {
+	case '{':
+		seen := map[string]struct{}{}
+		for decoder.More() {
+			keyToken, err := decoder.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return errors.New("object key is not a string")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("duplicate JSON key %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim('}') {
+			return errors.New("unterminated JSON object")
+		}
+	case '[':
+		for decoder.More() {
+			if err := consumeJSONValue(decoder); err != nil {
+				return err
+			}
+		}
+		end, err := decoder.Token()
+		if err != nil || end != json.Delim(']') {
+			return errors.New("unterminated JSON array")
+		}
+	default:
+		return errors.New("unexpected JSON delimiter")
 	}
 	return nil
 }

@@ -1,7 +1,7 @@
 # Storywork Documentation Standards
 
 **Last Updated:** July 2026
-**Version:** Milestone 7
+**Version:** Milestone 8
 
 This document defines the documentation and code commenting standards for **Storywork** — a local-first creative writing application with a Go backend and a Vite + React + TypeScript frontend.
 
@@ -208,7 +208,7 @@ All HTTP endpoints are self-documenting via the handler code. When adding a new 
 2. Document request/response types
 3. Update this `DOCUMENTATION.md` under the API section (if major)
 
-Implemented through Milestone 7:
+Implemented through Milestone 8:
 
 ```text
 GET  /api/codex
@@ -239,6 +239,15 @@ PUT  /api/import-candidates/{candidate_id}
 POST /api/import-candidates/{candidate_id}/merge
 POST /api/import-candidates/{candidate_id}/discard
 POST /api/import-candidates/{candidate_id}/accept
+GET  /api/branches/status
+GET  /api/branches
+POST /api/branches
+POST /api/branches/switch
+GET  /api/branches/{experiment_id}/comparison
+GET  /api/branches/{experiment_id}/comparison/file?path=<project-relative-path>
+POST /api/branches/{experiment_id}/ramifications
+POST /api/branches/{experiment_id}/promote
+POST /api/branches/{experiment_id}/discard
 ```
 
 Mutation requests use strict JSON: unknown, missing, null, trailing, and
@@ -266,6 +275,14 @@ runs, deterministic follow-up invitations, and Git commit trailers for accepted
 operation lineage. Context assembly lives in `internal/contextpack`; providers
 receive scope-specific messages only. Its durable contract is
 `docs/16_milestone_7_task_prompt.md`.
+
+Milestone 8 adds managed `branch/` experiments from fixed `main` canon,
+read-only comparison against current `main` while an experiment stays checked
+out, live merge-base validation against the immutable creation provenance,
+explicit transient ramification analysis, and rollback-safe whole-file
+promotion with `internal/projectcheck` validation and post-publication
+verification. Shared provider chat transport lives in `internal/modelchat`.
+Its durable contract is `docs/17_milestone_8_task_prompt.md`.
 
 Example:
 

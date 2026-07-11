@@ -37,9 +37,20 @@ func (s *Service) RunTagged(ctx context.Context, request TaggedRunRequest) (Run,
 	if err := validateAgentScope(agentDefinition, request.Target); err != nil {
 		return Run{}, err
 	}
+	contextStartSnapshot, hasBranchSnapshot, err := s.captureBranchSnapshot(ctx)
+	if err != nil {
+		return Run{}, err
+	}
 	packet, manifest, materialResult, err := s.buildRunContext(ctx, request, agentDefinition, styleDefinition, providerContextLimit)
 	if err != nil {
 		return Run{}, err
+	}
+	contextEndSnapshot, hasContextEndSnapshot, err := s.captureBranchSnapshot(ctx)
+	if err != nil {
+		return Run{}, err
+	}
+	if hasBranchSnapshot != hasContextEndSnapshot || !sameBranchSnapshot(contextStartSnapshot, contextEndSnapshot) {
+		return Run{}, ErrRunConflict
 	}
 	generated, err := s.provider.Generate(ctx, agent.GenerateRequest{
 		Agent:       agentDefinition,
@@ -50,7 +61,14 @@ func (s *Service) RunTagged(ctx context.Context, request TaggedRunRequest) (Run,
 	if err != nil {
 		return Run{}, mapProviderError(err)
 	}
-	return s.insertTaggedRun(ctx, request, agentDefinition, manifest, materialResult, generated)
+	storageSnapshot, hasStorageSnapshot, err := s.captureBranchSnapshot(ctx)
+	if err != nil {
+		return Run{}, err
+	}
+	if hasContextEndSnapshot != hasStorageSnapshot || !sameBranchSnapshot(contextEndSnapshot, storageSnapshot) {
+		return Run{}, ErrRunConflict
+	}
+	return s.insertTaggedRun(ctx, request, agentDefinition, manifest, materialResult, generated, storageSnapshot, hasStorageSnapshot)
 }
 
 func (s *Service) buildRunContext(ctx context.Context, request TaggedRunRequest, agentDefinition agent.Agent, styleDefinition agent.Style, providerContextLimit int) (contextpack.Packet, contextpack.Manifest, story.ContextMaterialResult, error) {
@@ -79,13 +97,17 @@ func (s *Service) buildRunContext(ctx context.Context, request TaggedRunRequest,
 	return packet, manifest, materialResult, nil
 }
 
-func (s *Service) insertTaggedRun(ctx context.Context, request TaggedRunRequest, agentDefinition agent.Agent, manifest contextpack.Manifest, materialResult story.ContextMaterialResult, generated agent.GenerateResponse) (Run, error) {
+func (s *Service) insertTaggedRun(ctx context.Context, request TaggedRunRequest, agentDefinition agent.Agent, manifest contextpack.Manifest, materialResult story.ContextMaterialResult, generated agent.GenerateResponse, branchSnapshot BranchSnapshot, hasBranchSnapshot bool) (Run, error) {
 	run := Run{
 		AgentID:  agentDefinition.ID,
 		StyleID:  request.StyleID,
 		Scope:    request.Target.Scope,
 		Manifest: manifest,
 		Provider: generated.Provider,
+	}
+	if hasBranchSnapshot {
+		run.Branch = branchSnapshot.Branch
+		run.BranchHead = branchSnapshot.Head
 	}
 	switch request.Target.Scope {
 	case contextpack.ScopeSelection:
@@ -155,6 +177,21 @@ func (s *Service) insertTaggedRun(ctx context.Context, request TaggedRunRequest,
 	return s.insertRun(run)
 }
 
+func (s *Service) captureBranchSnapshot(ctx context.Context) (BranchSnapshot, bool, error) {
+	if s.branches == nil {
+		return BranchSnapshot{}, false, nil
+	}
+	snapshot, err := s.branches.Snapshot(ctx)
+	if err != nil {
+		return BranchSnapshot{}, false, err
+	}
+	return snapshot, true, nil
+}
+
+func sameBranchSnapshot(left, right BranchSnapshot) bool {
+	return left.Branch == right.Branch && left.Head == right.Head
+}
+
 func (s *Service) parseChapterReviewOutput(raw string, agentDefinition agent.Agent, materialResult story.ContextMaterialResult) (FindingsResponse, []preparedInvitation, error) {
 	allowedScenes := map[string]struct{}{}
 	for _, scene := range materialResult.Material.ChapterScenes {
@@ -206,6 +243,10 @@ func (s *Service) AcceptBody(ctx context.Context, runID, expectedRevision string
 	}
 	run, err := s.runs.ClaimAccepting(runID)
 	if err != nil {
+		return AcceptResult{}, err
+	}
+	if err := s.ensureRunSnapshotCurrent(ctx, run); err != nil {
+		_ = s.runs.ReleasePending(runID)
 		return AcceptResult{}, err
 	}
 	if run.Scope != contextpack.ScopeScene {

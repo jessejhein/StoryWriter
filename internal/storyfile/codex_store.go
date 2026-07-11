@@ -39,7 +39,7 @@ func (s *Store) LoadCodexEntries(_ context.Context, projectPath string) ([]codex
 			}
 			entry, err := parseCodexEntry(relative, contents)
 			if err != nil {
-				return nil, err
+				return nil, invalidCanonical(err)
 			}
 			entries = append(entries, entry)
 		}
@@ -61,7 +61,11 @@ func (s *Store) LoadCodexEntry(_ context.Context, projectPath, entryID string) (
 		}
 		return codex.Entry{}, fmt.Errorf("read %s: %w", relativePath, maskPathError(err))
 	}
-	return parseCodexEntry(relativePath, contents)
+	entry, err := parseCodexEntry(relativePath, contents)
+	if err != nil {
+		return codex.Entry{}, invalidCanonical(err)
+	}
+	return entry, nil
 }
 
 // LoadProgressions reads one canonical progression document or returns an empty logical document when none exists.
@@ -82,7 +86,11 @@ func (s *Store) LoadProgressions(_ context.Context, projectPath, entryID string)
 		}
 		return codex.ProgressionDocument{}, fmt.Errorf("read %s: %w", relativePath, maskPathError(err))
 	}
-	return parseProgressionDocument(relativePath, contents)
+	document, err := parseProgressionDocument(relativePath, contents)
+	if err != nil {
+		return codex.ProgressionDocument{}, invalidCanonical(err)
+	}
+	return document, nil
 }
 
 // MarshalCodexEntry encodes one canonical Codex entry file.

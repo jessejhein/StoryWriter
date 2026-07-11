@@ -44,14 +44,13 @@ Backend:
 - Index rebuild is idempotent.
 - Health endpoint returns ok.
 
-Manual:
+Named automated evidence:
 
-1. Start backend.
-2. Start frontend.
-3. Create project from UI or API.
-4. Confirm files on disk.
-5. Confirm Git repo exists.
-6. Confirm index exists.
+- `internal/project/service_test.go`: project creation, opening, Git initialization,
+  and idempotent index rebuild coverage.
+- `internal/api/health_handler_test.go`: health endpoint contract.
+- `internal/app/milestone0_integration_test.go`: real-adapter project creation,
+  canonical files on disk, Git repository presence, and disposable index creation.
 
 ### Milestone 1
 
@@ -268,15 +267,189 @@ Frontend:
 - `web/src/editor/SceneEditor.milestone7_actions.test.tsx`: preview, scene rewrite, dirty guards.
 - `web/src/editor/ChapterReview.test.tsx`, `FollowUpInvitations.test.tsx`: suggestions and explicit invitation runs.
 
-Verification: full `make check`, `go test -race ./...`, 78 frontend tests.
+Verification: full `make check`, `go test -race ./...`, 129 frontend tests.
 
 ### Milestone 8
 
-- Create Git branch.
-- Edit branch without changing canon branch.
-- Diff branch against canon.
-- Discard branch safely.
-- Promote selected file manually.
+Evidence is the current automated suite below. Milestone 8 coverage is claimed
+only where the named tests execute in the repository baseline.
+
+Backend:
+
+- `internal/branch/identity_test.go`: `TestValidateExperimentIDAcceptsCanonicalShape`,
+  `TestNormalizeSlugDerivesCanonicalSlugs`, `TestBuildAndParseManagedBranchRefRoundTrip`,
+  `TestNormalizeSlugRejectsReservedNames`, `TestBuildBranchRefRejectsReservedSlugs`,
+  `TestBranchRefFromNameRejectsReservedNames`,
+  `TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain`,
+  `TestParseManagedExperimentRefRejectsReservedSlug`
+- `internal/branch/path_test.go`: `TestValidateProjectPathAcceptsAllowedFamilies`,
+  `TestValidateProjectPathAcceptsRawImportMarkdownExtensionPolicy`,
+  `TestValidateProjectPathRejectsUnsafeSegments`, `TestValidateStrictUTF8EnforcesBounds`
+- `internal/branch/comparison_test.go`: `TestValidateChangedFilesSortsAndDedupes`,
+  `TestLoadComparisonRejectsInvalidRepositoryComparisonRows`
+- `internal/branch/fingerprint_test.go`: `TestComputeFingerprintMatchesFixture`,
+  `TestComputeFingerprintSensitiveToInputs`,
+  `TestComputeFingerprintRejectsInvalidChangedFiles`
+- `internal/branch/file_comparison_test.go`: `TestIndexChangedFilesRejectsUnknownPath`
+- `internal/gitstore/branch_selected_paths_test.go`:
+  `TestSelectedPathsChangedUsesPathspecFilter`
+- `internal/branch/service_lifecycle_test.go`: `TestCreateExperimentRebuildsIndex`,
+  `TestCreateExperimentRecoversOnIndexFailure`,
+  `TestCreateExperimentRecoversAfterRequestCancellation`,
+  `TestCreateExperimentSerializesUnderCoordinator`,
+  `TestCreateExperimentFromActiveManagedBranchRecordsMainBase`,
+  `TestCreateExperimentRejectsMissingMainBeforeMutation`,
+  `TestSwitchExperimentRejectsMissingMainBeforeCheckout`
+- `internal/branch/promotion_policy_test.go`: `TestPromotionConflictsDetectsMainDivergence`,
+  `TestValidatePromotionPreflightRejectsStaleRefs`
+- `internal/branch/promotion_service_test.go`:
+  `TestPromoteSelectedFilesRejectsConflictBeforeCheckout`
+- `internal/branch/discard_test.go`: `TestDiscardExperimentRejectsDirtyWorktree`
+- `internal/branch/experiment_history_guard_test.go`:
+  `TestLoadComparisonRejectsRewrittenExperimentHistory`,
+  `TestPromoteSelectedFilesRejectsRewrittenExperimentHistoryBeforeCheckout`,
+  `TestMissingExperimentBaseFailsClosedBeforeBranchMutation`,
+  `TestSwitchAndDiscardRejectRelatedRewrittenExperimentHistory`
+- `internal/branch/ramification_test.go`: `TestParseRamificationOutputAcceptsZeroFindings`,
+  `TestParseRamificationOutputRejectsUnknownFields`
+- `internal/branch/ramification_service_test.go`:
+  `TestAnalyzeRamificationsRejectsStaleFingerprint`,
+  `TestAnalyzeRamificationsBuildsReviewedUnifiedDiffPacket`,
+  `TestAnalyzeRamificationsRejectsFileBudgetBeforeReadingBlobs`,
+  `TestAnalyzeRamificationsRejectsInvalidGoalsBeforeProviderWork`,
+  `TestAnalyzeRamificationsMapsAnalyzerCancellationToProviderUnavailable`
+- `internal/branch/ramification_packet_test.go`:
+  `TestBuildAnalysisPacketRejectsInvalidGoals`,
+  `TestBuildAnalysisPacketRejectsInvalidComparisonMetadata`,
+  `TestBuildAnalysisPacketSortsChangedFilesDeterministically`,
+  `TestBuildAnalysisPacketRejectsInvalidDiffText`
+- `internal/branch/promotion_service_test.go`:
+  `TestPromoteSelectedFilesOrdersTransactionAndReturnsResult`,
+  `TestPromoteSelectedFilesRollsBackEveryFailureBoundary`,
+  `TestPromoteSelectedFilesRollbackContinuesAfterRecoveryFailure`
+- `internal/branch/ramification_test.go`:
+  `TestParseRamificationOutputRejectsEveryStrictContractViolation`
+- `internal/api/branch_negative_contract_test.go`:
+  `TestBranchRouteMapsEveryContractErrorClass`,
+  `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
+  `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
+  `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchFileComparisonRouteValidatesRawImportMarkdownPolicy`,
+  `TestBranchRoutesRejectAnalysisGoalsWithNULBeforeService`,
+  `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
+  `TestBranchRoutesRejectOversizedBodies`,
+  `TestEveryBranchRouteReturnsMethodSpecificAllow`,
+  `TestBranchComparisonRouteMapsMalformedRepositoryStateToSafe500`
+- `internal/gitstore/blob_test.go` and `tree_comparison_test.go`:
+  `TestReadTextBlobRejectsNonRegularEntriesAndDoesNotHideGitErrors`,
+  `TestCompareTreesRejectsSymlinkChanges`
+- `internal/projectcheck/validator_test.go`:
+  `TestValidateProjectRejectsNonStrictProjectMetadata`,
+  `TestValidateProjectRejectsOrphanProgressionsAndMalformedRawImports`
+- `internal/projectcheck/validator_injection_test.go`:
+  `TestNewWithReadersUsesInjectedImplementations`,
+  `TestNewWithReadersPropagatesRegistryErrors`,
+  `TestNewWithReadersLeavesCodexAndProgressionInfrastructureErrorsUnclassified`
+- `internal/branch/ramification_adapter_test.go`: `TestModelchatAnalyzerParsesStrictFindings`,
+  `TestModelchatAnalyzerRejectsMalformedOutput`
+- `internal/modelchat/model_test.go`: `TestM8ModelMessageRolesAndContent`,
+  `TestM8ModelCompleterContract`
+- `internal/modelchat/client_test.go`: `TestM8ModelchatOpenAICompatibleRequest`,
+  `TestM8ModelchatOllamaRequest`, `TestM8ModelchatErrorMapping`
+- `internal/agent/chat_characterization_test.go`: `TestM8ChatCharacterizationOpenAICompatibleRequest`,
+  `TestM8ChatCharacterizationSecretsAbsentFromErrors`
+- `internal/agent/modelchat_migration_test.go`: `TestM8AgentCompleteChatDelegatesToModelchat`
+- `internal/extract/modelchat_migration_test.go`:
+  `TestM8ExtractNoLongerImportsAgentChatTransport`
+- `internal/projectcheck/validator_test.go`: `TestValidateProjectAcceptsValidFixture`,
+  `TestValidateProjectRejectsMalformedOutline`
+- `internal/storyfile/milestone8_validation_test.go`:
+  `TestValidateCanonicalFilesRejectsOrphanStoryFiles`,
+  `TestValidateCanonicalFilesIgnoresGitkeepPlaceholders`
+- `internal/gitstore/branch_status_test.go`: `TestStatusReportsActiveBranchAndCleanliness`,
+  `TestStatusReportsMissingMainWithSentinel`
+- `internal/gitstore/branch_switch_test.go`: `TestCreateAndSwitchFromMain`,
+  `TestCreateAndSwitchFromAnotherManagedExperiment`,
+  `TestCreateAndSwitchRejectsDirtyWorktree`,
+  `TestSwitchExperimentRejectsStaleExpectedHead`
+- `internal/gitstore/snapshot_test.go`:
+  `TestSnapshotPathsDistinguishesExistenceAndInspectionErrors`,
+  `TestSnapshotPathsFailsClosedOnInvalidTreeState`
+- `internal/gitstore/tree_comparison_test.go`:
+  `TestCompareTreesReportsAddedModifiedDeleted`
+- `internal/gitstore/blob_test.go`: `TestReadTextBlobWithoutCheckout`
+- `internal/gitstore/promotion_message_test.go`: `TestFormatPromotionMessageExactBytes`
+- `internal/gitstore/promotion_test.go`: `TestApplyPathsAndCommitPromotion`,
+  `TestCommitPromotionRejectsUnexpectedStagedPaths`
+- `internal/gitstore/branch_delete_test.go`: `TestDeleteExperimentLeavesMainUntouched`
+- `internal/story/milestone8_branch_characterization_test.go`:
+  `TestMilestone8SceneSaveCommitsToCheckedOutExperimentBranch`,
+  `TestMilestone8CodexAndProgressionMutationCommitsToActiveBranchOnly`
+- `internal/action/milestone8_branch_characterization_test.go`:
+  `TestMilestone8AcceptedAIPatchCommitsToActiveBranchOnly`
+- `internal/action/milestone8_branch_snapshot_race_test.go`:
+  `TestMilestone8BranchSnapshotChangeBeforeProviderRejectsRun`,
+  `TestMilestone8BranchSnapshotChangeDuringProviderRejectsWithoutStoredRun`,
+  `TestMilestone8StableBranchSnapshotStoresRunSnapshot`,
+  `TestRunInvitationBranchSnapshotChangeDuringProviderReleasesClaim`,
+  `TestMilestone8CompletedRunInvitationsUseValidatedBranchSnapshot`,
+  `TestMilestone8AcceptedRunInvitationsRefreshCommittedBranchSnapshot`
+- `internal/importer/milestone8_branch_characterization_test.go`:
+  `TestMilestone8ComparisonIncludesValidRawImportMarkdownExtensions`,
+  `TestMilestone8ImportSnapshotCommitsToActiveBranchOnly`,
+  `TestMilestone8ImportReviewMutationCommitsToActiveBranchOnly`
+- `internal/api/branch_lifecycle_test.go`: `TestBranchCreateRoute`
+- `internal/api/branch_negative_contract_test.go`: `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
+  `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
+  `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchFileComparisonRouteValidatesRawImportMarkdownPolicy`,
+  `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
+  `TestBranchRoutesRejectOversizedBodies`,
+  `TestEveryBranchRouteReturnsMethodSpecificAllow`
+- `internal/api/branch_comparison_test.go`: `TestBranchComparisonRoute`,
+  `TestBranchFileComparisonRouteRequiresPath`
+- `internal/api/branch_operations_test.go`: `TestBranchRamificationRouteRequiresStrictBody`,
+  `TestBranchPromotionRoute`, `TestBranchDiscardRoute`
+- `internal/api/branch_dependencies_test.go`: `TestHandlerDependenciesAcceptBranchStore`
+- `internal/app/milestone8_integration_test.go`: `TestMilestone8AcceptanceM833HappyPath`,
+  `TestMilestone8AcceptanceM835PromotionAllowsUnrelatedMainAdvancement`,
+  `TestMilestone8AcceptanceM834Adversarial` and subtests
+  `stale_fingerprint_and_refs_rejected_before_provider_or_checkout`,
+  `changed_on_main_path_conflicts_before_promotion_checkout`,
+  `invalid_promotion_subset_rolls_back_main`
+- `internal/app/milestone8_history_guard_integration_test.go`:
+  `TestMilestone8MissingMainFailsClosedWithSafeBranchErrors`,
+  `TestMilestone8UnrelatedExperimentHistoryFailsClosed`,
+  `TestMilestone8RelatedRewrittenExperimentHistoryFailsClosed`,
+  `TestMilestone8PrivateBaseRefCorruptionFailsClosed`
+- `web/src/App.branch_invalidation.test.tsx`:
+  `confirms branch navigation before leaving dirty scene, codex, and import drafts`,
+  `remounts branch-sensitive workspaces after switch, promotion, and discard actions`
+
+Frontend:
+
+- `web/src/api.branches.test.ts`: `uses the documented branch routes and JSON bodies`
+- `web/src/branches/branchState.test.ts`: stale keys, selection pruning, branch-change
+  invalidation, requested-comparison tracking, dirty guard, no browser persistence
+- `web/src/branches/lineDiff.test.ts`: aligned rows, final-newline markers, modified pairing,
+  complexity fallback
+- `web/src/branches/SideBySideDiff.test.tsx`: labels, accessible indicators, read-only panes
+- `web/src/branches/BranchWorkbench.lifecycle.test.tsx`: create/switch badges, dirty guard,
+  state invalidation, no duplicate comparison load after newly selected experiment creation
+- `web/src/branches/BranchWorkbench.comparison.test.tsx`: changed-file list, inactive review
+  without checkout, empty comparison state, no analysis on compare, stale file responses ignored
+- `web/src/branches/BranchWorkbench.ramification.test.tsx`: explicit Analyze only,
+  reviewed fingerprint request, empty-model guard, findings cleared on fingerprint change,
+  analysis-goal dirty-draft guard
+- `web/src/branches/RamificationResults.test.tsx`: grouped findings, advisory notice
+- `web/src/branches/BranchWorkbench.promotion.test.tsx`: whole-file summary, confirmation,
+  conflict paths, success leaves experiment listed
+- `web/src/branches/BranchWorkbench.discard.test.tsx`: active and inactive discard,
+  dirty draft confirmation, dirty worktree blocking, stale conflicts, pending disabled state
+
+Verification: full `make check` (including `go test -race ./...`,
+`git diff --check`, and tracked-artifact leak detection), 50 frontend test
+files, 136 frontend tests.
 
 ### Milestone 9
 

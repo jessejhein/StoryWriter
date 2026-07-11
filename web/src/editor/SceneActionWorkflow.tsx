@@ -131,6 +131,7 @@ export default function SceneActionWorkflow({
   const [pendingScopeAction, setPendingScopeAction] = useState<PendingScopeAction | null>(null)
   const previewRegionRef = useRef<HTMLDivElement | null>(null)
   const baselineRef = useRef(baseline)
+  const baselineIDRef = useRef<string | null>(null)
   const activeRun = actionWorkflow.run?.response ?? actionWorkflow.invitationRun?.response ?? null
   const activeRunID = activeRun?.run_id ?? null
 
@@ -149,6 +150,14 @@ export default function SceneActionWorkflow({
   const canOpenChapterReview = fullActionDisableReason === null
 
   useEffect(() => {
+    if (baselineIDRef.current === null) {
+      baselineIDRef.current = baseline.id
+      return
+    }
+    if (baselineIDRef.current === baseline.id) {
+      return
+    }
+    baselineIDRef.current = baseline.id
     setActionWorkflow(bumpActionRequestVersion(initialActionWorkflowState()))
     setActionsOpen(false)
     setSceneActionsOpen(false)

@@ -10,8 +10,10 @@ Vite React UI
       -> File store service
       -> SQLite index service
       -> Agent/style service
+      -> Branch experiment service
       -> AI orchestration service
           -> Provider adapters
+          -> Neutral modelchat transport
           -> Eino-backed adapters where useful
           -> Local endpoint adapters
 ```
@@ -99,6 +101,35 @@ to story storage:
 - `internal/gitstore/commit_message.go` formats validated commit subjects and
   trailers at the Git consumer boundary.
 
+Milestone 8 adds controlled what-if experiments without a second checkout:
+
+- `internal/branch` owns experiment identity, lifecycle, read-only comparison,
+  ramification orchestration, promotion policy, and discard. It depends on narrow
+  repository, index, canonical-validator, and analyzer interfaces defined at the
+  consumer boundary.
+- `internal/gitstore` executes validated Git ref/tree/blob/diff/path-limited
+  commit operations; branch policy stays in `internal/branch`.
+- `internal/projectcheck` composes read-only validators from owning format
+  packages to prove a full on-disk snapshot is canonically valid before
+  promotion commits. Index rebuild alone is not validation.
+- `internal/modelchat` owns provider-neutral OpenAI-compatible and Ollama chat
+  transport. `internal/agent` and `internal/extract` consume it through thin
+  adapters; branch ramification analysis consumes it directly and does not
+  import `internal/agent`.
+- One project working directory holds one checked-out branch at a time.
+  Comparison reads current `main` and experiment Git objects directly while the
+  experiment remains active. Branch-changing operations acquire the shared
+  `internal/mutation.Coordinator` write lock and rebuild the single active-tree
+  SQLite index after checkout.
+- Branch history validation uses the live merge base between `main` and the
+  experiment head, not only the stored creation provenance. The stored
+  experiment-base ref remains immutable provenance that guards against rewritten
+  or unrelated history.
+- Promotion validates the full canonical snapshot, publishes exactly one commit,
+  and verifies the published `main` ref and clean worktree before success. If
+  publication verification fails, the Git adapter restores `main` back to the
+  previous head and the service rolls back the touched files and index state.
+
 ## Suggested source repository layout
 
 ```text
@@ -115,13 +146,16 @@ to story storage:
 │   ├── action/
 │   ├── agent/
 │   ├── api/
+│   ├── branch/
 │   ├── codex/
 │   ├── contextpack/
 │   ├── extract/
 │   ├── gitstore/
 │   ├── importer/
 │   ├── index/
+│   ├── modelchat/
 │   ├── mutation/
+│   ├── projectcheck/
 │   ├── provider/
 │   ├── project/
 │   ├── story/

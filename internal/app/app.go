@@ -14,13 +14,16 @@ import (
 	"storywork/internal/action"
 	"storywork/internal/agent"
 	"storywork/internal/api"
+	"storywork/internal/branch"
 	"storywork/internal/contextpack"
 	"storywork/internal/extract"
 	"storywork/internal/gitstore"
 	"storywork/internal/importer"
 	"storywork/internal/index"
+	"storywork/internal/modelchat"
 	"storywork/internal/mutation"
 	"storywork/internal/project"
+	"storywork/internal/projectcheck"
 	"storywork/internal/provider"
 	"storywork/internal/story"
 	"storywork/internal/storyfile"
@@ -76,6 +79,45 @@ func (p *providerDependencies) SaveProviderProfiles(ctx context.Context, profile
 
 type importHandlerStore struct {
 	service *importer.Service
+}
+
+type branchValidationAdapter struct {
+	validator *projectcheck.Validator
+}
+
+type actionBranchSnapshotter struct {
+	session *workspace.Session
+	git     *gitstore.Store
+}
+
+func (v branchValidationAdapter) ValidateProject(ctx context.Context, projectPath string) error {
+	if v.validator == nil {
+		return branch.ErrRepositoryState
+	}
+	err := v.validator.ValidateProject(ctx, projectPath)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, projectcheck.ErrInvalidProject) {
+		return errors.Join(branch.ErrInvalidPromotionSubset, err)
+	}
+	return err
+}
+
+func (s actionBranchSnapshotter) Snapshot(ctx context.Context) (action.BranchSnapshot, error) {
+	current, ok := s.session.Current()
+	if !ok {
+		return action.BranchSnapshot{}, story.ErrNoActiveProject
+	}
+	status, err := s.git.Status(ctx, current.Path)
+	if err != nil {
+		return action.BranchSnapshot{}, err
+	}
+	head, err := s.git.ResolveCommit(ctx, current.Path, "HEAD")
+	if err != nil {
+		return action.BranchSnapshot{}, err
+	}
+	return action.BranchSnapshot{Branch: status.ActiveBranch, Head: head}, nil
 }
 
 func (s *importHandlerStore) ImportDirectory(ctx context.Context, sourceDirectory string) (importer.ImportResponse, error) {
@@ -136,6 +178,40 @@ func NewHandler(version string) http.Handler {
 		WithMutationCoordinator(mutations).
 		WithExtractor(extract.NewRemoteExtractor(providerService, nil)).
 		WithStoryMutator(stories)
+	branchRepo := &branch.GitRepository{Store: git}
+	branchAnalyzerClient := modelchat.PrepareHTTPClient(nil)
+	branchAnalyzer := &branch.ModelchatAnalyzer{
+		Resolver: func(ctx context.Context, profileID string) (modelchat.Request, error) {
+			resolved, ok, err := providerService.Resolve(ctx, profileID)
+			if err != nil {
+				return modelchat.Request{}, err
+			}
+			if !ok {
+				return modelchat.Request{}, branch.ErrProviderUnavailable
+			}
+			if resolved.Readiness != provider.ReadinessReady || !resolved.Capabilities.Chat {
+				return modelchat.Request{}, branch.ErrProviderUnavailable
+			}
+			return modelchat.Request{Profile: resolved}, nil
+		},
+		Completer: modelchat.NewHTTPClient(),
+		Client:    branchAnalyzerClient,
+	}
+	branchService := branch.NewService(
+		branchRepo,
+		disposableIndex,
+		mutations,
+		branch.SessionAdapter{PathFn: func() (string, bool) {
+			current, ok := session.Current()
+			if !ok {
+				return "", false
+			}
+			return current.Path, true
+		}},
+		branchValidationAdapter{validator: projectcheck.New()},
+		branchAnalyzer,
+		branch.NewRandomIDGenerator(),
+	)
 	actions := action.NewService(
 		session,
 		agent.NewLoader(),
@@ -147,6 +223,7 @@ func NewHandler(version string) http.Handler {
 		action.NewRandomIDGenerator(),
 	).WithMaterialSource(stories).WithContextBuilder(contextpack.NewBuilder()).
 		WithBodyAcceptor(stories).
+		WithBranchSnapshotter(actionBranchSnapshotter{session: session, git: git}).
 		WithInvitationStore(action.NewInvitationStore(1000)).
 		WithInvitationIDGenerator(action.NewRandomInvitationIDGenerator())
 	return api.NewHandler(api.HandlerDependencies{
@@ -156,6 +233,7 @@ func NewHandler(version string) http.Handler {
 		Actions:   actions,
 		Providers: providerService,
 		Imports:   &importHandlerStore{service: importService},
+		Branches:  branchService,
 		Version:   version,
 	})
 }

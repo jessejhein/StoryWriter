@@ -73,3 +73,13 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Extra gitnores
+__pycache__/
+.codex
+.ruff_cache/
+.uv-cache/
+.venv/
+logs/
+*.log
+*.pyc

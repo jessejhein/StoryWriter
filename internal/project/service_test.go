@@ -2,6 +2,7 @@ package project_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -115,5 +116,24 @@ func TestOpenRejectsInvalidProject(t *testing.T) {
 	_, err := service.Open(context.Background(), t.TempDir())
 	if err == nil {
 		t.Fatal("Open() error = nil, want invalid project error")
+	}
+}
+
+// BDD trace:
+//   - Requirement: Milestone 8 canonical validation classification.
+//   - Scenario: malformed project metadata is recognized as invalid canonical
+//     state rather than an infrastructure failure.
+//   - Test purpose: verify the project metadata validator exposes a typed
+//     sentinel for composed validators.
+func TestValidateMetadataFileClassifiesInvalidMetadata(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "project.yaml")
+	if err := os.WriteFile(path, []byte("version: 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := project.ValidateMetadataFile(path)
+	if !errors.Is(err, project.ErrInvalidMetadata) {
+		t.Fatalf("ValidateMetadataFile() error = %v, want errors.Is invalid metadata", err)
 	}
 }

@@ -114,16 +114,16 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 
 	var document outlineDocument
 	if err := decodeYAML("outline.yaml", outlineBytes, &document); err != nil {
-		return story.Outline{}, err
+		return story.Outline{}, invalidCanonical(err)
 	}
 	if document.Version != story.OutlineVersion {
-		return story.Outline{}, fmt.Errorf("outline.yaml has unsupported version %d", document.Version)
+		return story.Outline{}, invalidCanonical(fmt.Errorf("outline.yaml has unsupported version %d", document.Version))
 	}
 	if document.Root == nil {
-		return story.Outline{}, errors.New("outline.yaml is missing root")
+		return story.Outline{}, invalidCanonical(errors.New("outline.yaml is missing root"))
 	}
 	if document.Root.Arcs == nil {
-		return story.Outline{}, errors.New("outline.yaml root is missing arcs")
+		return story.Outline{}, invalidCanonical(errors.New("outline.yaml root is missing arcs"))
 	}
 
 	outline := story.NewOutline()
@@ -133,107 +133,116 @@ func (s *Store) Load(_ context.Context, projectPath string) (story.Outline, erro
 
 	for _, arcRef := range *document.Root.Arcs {
 		if arcRef.Chapters == nil {
-			return story.Outline{}, fmt.Errorf("outline.yaml arc %q is missing chapters", arcRef.ID)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("outline.yaml arc %q is missing chapters", arcRef.ID))
 		}
 		if err := story.ValidateArcID(arcRef.ID); err != nil {
-			return story.Outline{}, fmt.Errorf("outline.yaml arc ID %q: %w", arcRef.ID, err)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("outline.yaml arc ID %q: %w", arcRef.ID, err))
 		}
 		if _, exists := seenArcs[arcRef.ID]; exists {
-			return story.Outline{}, fmt.Errorf("duplicate arc ID %q in outline.yaml", arcRef.ID)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("duplicate arc ID %q in outline.yaml", arcRef.ID))
 		}
 		seenArcs[arcRef.ID] = struct{}{}
 
 		arcPath := filepath.Join(projectPath, "arcs", arcRef.ID+".yaml")
 		arcBytes, err := s.readFile(arcPath)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return story.Outline{}, invalidCanonical(fmt.Errorf("missing %s", filepath.ToSlash(filepath.Join("arcs", arcRef.ID+".yaml"))))
+			}
 			return story.Outline{}, fmt.Errorf("read %s: %w", filepath.ToSlash(filepath.Join("arcs", arcRef.ID+".yaml")), err)
 		}
 		var arcFile arcDocument
 		if err := decodeYAML(filepath.ToSlash(filepath.Join("arcs", arcRef.ID+".yaml")), arcBytes, &arcFile); err != nil {
-			return story.Outline{}, err
+			return story.Outline{}, invalidCanonical(err)
 		}
 		if arcFile.Version != story.OutlineVersion {
-			return story.Outline{}, fmt.Errorf("arcs/%s.yaml has unsupported version %d", arcRef.ID, arcFile.Version)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("arcs/%s.yaml has unsupported version %d", arcRef.ID, arcFile.Version))
 		}
 		if arcFile.ID != arcRef.ID {
-			return story.Outline{}, fmt.Errorf("arcs/%s.yaml id %q does not match outline reference %q", arcRef.ID, arcFile.ID, arcRef.ID)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("arcs/%s.yaml id %q does not match outline reference %q", arcRef.ID, arcFile.ID, arcRef.ID))
 		}
 		if _, err := story.ValidateTitle(arcFile.Title); err != nil {
-			return story.Outline{}, fmt.Errorf("arcs/%s.yaml title: %w", arcRef.ID, err)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("arcs/%s.yaml title: %w", arcRef.ID, err))
 		}
 		outline, err = story.AddArc(outline, arcFile.ID, arcFile.Title)
 		if err != nil {
-			return story.Outline{}, fmt.Errorf("load arc %q: %w", arcFile.ID, err)
+			return story.Outline{}, invalidCanonical(fmt.Errorf("load arc %q: %w", arcFile.ID, err))
 		}
 
 		for _, chapterRef := range *arcRef.Chapters {
 			if chapterRef.Scenes == nil {
-				return story.Outline{}, fmt.Errorf("outline.yaml chapter %q is missing scenes", chapterRef.ID)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("outline.yaml chapter %q is missing scenes", chapterRef.ID))
 			}
 			if err := story.ValidateChapterID(chapterRef.ID); err != nil {
-				return story.Outline{}, fmt.Errorf("outline.yaml chapter ID %q: %w", chapterRef.ID, err)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("outline.yaml chapter ID %q: %w", chapterRef.ID, err))
 			}
 			if _, exists := seenChapters[chapterRef.ID]; exists {
-				return story.Outline{}, fmt.Errorf("duplicate chapter ID %q in outline.yaml", chapterRef.ID)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("duplicate chapter ID %q in outline.yaml", chapterRef.ID))
 			}
 			seenChapters[chapterRef.ID] = struct{}{}
 
 			chapterPath := filepath.Join(projectPath, "chapters", chapterRef.ID+".yaml")
 			chapterBytes, err := s.readFile(chapterPath)
 			if err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return story.Outline{}, invalidCanonical(fmt.Errorf("missing %s", filepath.ToSlash(filepath.Join("chapters", chapterRef.ID+".yaml"))))
+				}
 				return story.Outline{}, fmt.Errorf("read %s: %w", filepath.ToSlash(filepath.Join("chapters", chapterRef.ID+".yaml")), err)
 			}
 			var chapterFile chapterDocument
 			if err := decodeYAML(filepath.ToSlash(filepath.Join("chapters", chapterRef.ID+".yaml")), chapterBytes, &chapterFile); err != nil {
-				return story.Outline{}, err
+				return story.Outline{}, invalidCanonical(err)
 			}
 			if chapterFile.Version != story.OutlineVersion {
-				return story.Outline{}, fmt.Errorf("chapters/%s.yaml has unsupported version %d", chapterRef.ID, chapterFile.Version)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("chapters/%s.yaml has unsupported version %d", chapterRef.ID, chapterFile.Version))
 			}
 			if chapterFile.ID != chapterRef.ID {
-				return story.Outline{}, fmt.Errorf("chapters/%s.yaml id %q does not match outline reference %q", chapterRef.ID, chapterFile.ID, chapterRef.ID)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("chapters/%s.yaml id %q does not match outline reference %q", chapterRef.ID, chapterFile.ID, chapterRef.ID))
 			}
 			if chapterFile.ArcID != arcRef.ID {
-				return story.Outline{}, fmt.Errorf("chapters/%s.yaml arc_id %q does not match containing arc %q", chapterRef.ID, chapterFile.ArcID, arcRef.ID)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("chapters/%s.yaml arc_id %q does not match containing arc %q", chapterRef.ID, chapterFile.ArcID, arcRef.ID))
 			}
 			if _, err := story.ValidateTitle(chapterFile.Title); err != nil {
-				return story.Outline{}, fmt.Errorf("chapters/%s.yaml title: %w", chapterRef.ID, err)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("chapters/%s.yaml title: %w", chapterRef.ID, err))
 			}
 			outline, err = story.AddChapter(outline, chapterFile.ArcID, chapterFile.ID, chapterFile.Title)
 			if err != nil {
-				return story.Outline{}, fmt.Errorf("load chapter %q: %w", chapterFile.ID, err)
+				return story.Outline{}, invalidCanonical(fmt.Errorf("load chapter %q: %w", chapterFile.ID, err))
 			}
 
 			for _, sceneRef := range *chapterRef.Scenes {
 				if err := story.ValidateSceneID(sceneRef.ID); err != nil {
-					return story.Outline{}, fmt.Errorf("outline.yaml scene ID %q: %w", sceneRef.ID, err)
+					return story.Outline{}, invalidCanonical(fmt.Errorf("outline.yaml scene ID %q: %w", sceneRef.ID, err))
 				}
 				if _, exists := seenScenes[sceneRef.ID]; exists {
-					return story.Outline{}, fmt.Errorf("duplicate scene ID %q in outline.yaml", sceneRef.ID)
+					return story.Outline{}, invalidCanonical(fmt.Errorf("duplicate scene ID %q in outline.yaml", sceneRef.ID))
 				}
 				seenScenes[sceneRef.ID] = struct{}{}
 
 				scenePath := filepath.Join(projectPath, "scenes", sceneRef.ID+".md")
 				sceneBytes, err := s.readFile(scenePath)
 				if err != nil {
+					if errors.Is(err, os.ErrNotExist) {
+						return story.Outline{}, invalidCanonical(fmt.Errorf("missing %s", filepath.ToSlash(filepath.Join("scenes", sceneRef.ID+".md"))))
+					}
 					return story.Outline{}, fmt.Errorf("read %s: %w", filepath.ToSlash(filepath.Join("scenes", sceneRef.ID+".md")), err)
 				}
 				sceneFile, err := parseScene(filepath.ToSlash(filepath.Join("scenes", sceneRef.ID+".md")), sceneBytes)
 				if err != nil {
-					return story.Outline{}, err
+					return story.Outline{}, invalidCanonical(err)
 				}
 				if sceneFile.ID != sceneRef.ID {
-					return story.Outline{}, fmt.Errorf("scenes/%s.md id %q does not match outline reference %q", sceneRef.ID, sceneFile.ID, sceneRef.ID)
+					return story.Outline{}, invalidCanonical(fmt.Errorf("scenes/%s.md id %q does not match outline reference %q", sceneRef.ID, sceneFile.ID, sceneRef.ID))
 				}
 				if sceneFile.ChapterID != chapterRef.ID {
-					return story.Outline{}, fmt.Errorf("scenes/%s.md chapter_id %q does not match containing chapter %q", sceneRef.ID, sceneFile.ChapterID, chapterRef.ID)
+					return story.Outline{}, invalidCanonical(fmt.Errorf("scenes/%s.md chapter_id %q does not match containing chapter %q", sceneRef.ID, sceneFile.ChapterID, chapterRef.ID))
 				}
 				if _, err := story.ValidateTitle(sceneFile.Title); err != nil {
-					return story.Outline{}, fmt.Errorf("scenes/%s.md title: %w", sceneRef.ID, err)
+					return story.Outline{}, invalidCanonical(fmt.Errorf("scenes/%s.md title: %w", sceneRef.ID, err))
 				}
 				outline, err = story.AddScene(outline, sceneFile.ChapterID, sceneFile.ID, sceneFile.Title)
 				if err != nil {
-					return story.Outline{}, fmt.Errorf("load scene %q: %w", sceneFile.ID, err)
+					return story.Outline{}, invalidCanonical(fmt.Errorf("load scene %q: %w", sceneFile.ID, err))
 				}
 			}
 		}

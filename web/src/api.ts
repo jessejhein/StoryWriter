@@ -7,6 +7,19 @@
  */
 
 import type {
+  BranchStatusResponse,
+  ComparisonResponse,
+  DiscardRequest,
+  DiscardResponse,
+  ExperimentsListResponse,
+  FileComparisonResponse,
+  PromoteRequest,
+  PromoteResponse,
+  RamificationRequest,
+  RamificationResponse,
+  SwitchBranchRequest,
+} from './branches/branchTypes'
+import type {
   ContextPreviewResponse,
   RunActionResponse as ScopedRunActionResponse,
 } from './editor/actionTypes'
@@ -633,4 +646,78 @@ export function discardImportCandidate(candidateID: string, expectedRevision: st
 
 export function acceptImportCandidate(candidateID: string, expectedRevision: string): Promise<ImportAcceptResponse> {
   return postJSON(`/api/import-candidates/${candidateID}/accept`, { expected_revision: expectedRevision })
+}
+
+export type {
+  BranchStatusResponse,
+  ChangedFile,
+  ChangedFileStatus,
+  ComparisonResponse,
+  CreateExperimentRequest,
+  DiscardRequest,
+  DiscardResponse,
+  ExperimentSummary,
+  ExperimentsListResponse,
+  FileComparisonResponse,
+  FileSide,
+  PromoteRequest,
+  PromoteResponse,
+  RamificationRequest,
+  RamificationResponse,
+  SwitchBranchRequest,
+} from './branches/branchTypes'
+
+/** getBranchStatus loads the active branch, heads, and worktree cleanliness. */
+export function getBranchStatus(): Promise<BranchStatusResponse> {
+  return request('/api/branches/status')
+}
+
+/** listExperiments returns managed what-if experiments deterministically. */
+export function listExperiments(): Promise<ExperimentsListResponse> {
+  return request('/api/branches')
+}
+
+/** createExperiment creates a new experiment from current main and checks it out. */
+export function createExperiment(name: string): Promise<BranchStatusResponse> {
+  return postJSON('/api/branches', { name })
+}
+
+/** switchBranch switches between main and one managed experiment. */
+export function switchBranch(requestBody: SwitchBranchRequest): Promise<BranchStatusResponse> {
+  return postJSON('/api/branches/switch', requestBody)
+}
+
+/** getBranchComparison compares current main against one experiment head. */
+export function getBranchComparison(experimentID: string): Promise<ComparisonResponse> {
+  return request(`/api/branches/${experimentID}/comparison`)
+}
+
+/** getBranchFileComparison returns bounded canon and experiment text for one changed path. */
+export function getBranchFileComparison(experimentID: string, path: string): Promise<FileComparisonResponse> {
+  const query = new URLSearchParams({ path })
+  return request(`/api/branches/${experimentID}/comparison/file?${query.toString()}`)
+}
+
+/** analyzeBranchRamifications runs explicit transient ramification analysis. */
+export function analyzeBranchRamifications(
+  experimentID: string,
+  requestBody: RamificationRequest,
+): Promise<RamificationResponse> {
+  return postJSON(`/api/branches/${experimentID}/ramifications`, requestBody)
+}
+
+/** promoteExperimentFiles promotes selected whole files onto main. */
+export function promoteExperimentFiles(
+  experimentID: string,
+  requestBody: PromoteRequest,
+): Promise<PromoteResponse> {
+  return postJSON(`/api/branches/${experimentID}/promote`, requestBody)
+}
+
+/** discardExperiment deletes one managed experiment explicitly. */
+export function discardExperiment(
+  experimentID: string,
+  requestBody: DiscardRequest,
+): Promise<DiscardResponse> {
+  return postJSON(`/api/branches/${experimentID}/discard`, requestBody)
 }

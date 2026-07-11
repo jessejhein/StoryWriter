@@ -39,6 +39,7 @@ This is **not** an autopilot novelist. Chat is allowed later, but the base produ
 17. `docs/14_milestone_5_task_prompt.md`
 18. `docs/15_milestone_6_task_prompt.md`
 19. `docs/16_milestone_7_task_prompt.md`
+20. `docs/17_milestone_8_task_prompt.md`
 
 Then implement only the milestone the user assigned. If the user did not assign one,
 stop after identifying the next incomplete milestone and ask before coding.
@@ -78,15 +79,18 @@ Milestone 0 creates a runnable local skeleton:
 
 ## Current implementation status
 
-Milestones 0 through 7 are implemented and `make check` is green as of
-July 2, 2026. The app includes the local project foundation, canonical outline
-editing, the Vim-friendly scene editor with revision conflict protection and
-one Git checkpoint per explicit save, the Codex workbench with strict
-progression validation and active-state resolution, the agent/style registry
-and reviewable AI patch workflow, application-level provider profiles with real
-OpenAI-compatible and Ollama adapters, the Milestone 6 Markdown import and
-review queue, and Milestone 7 timeline-aware context with scene rewrite,
-chapter review suggestions, context preview, and explicit follow-up invitations.
+Milestones 0 through 8 are implemented and the verified Milestone 8 check set
+was green on July 10, 2026. The app includes the local project foundation,
+canonical outline editing, the Vim-friendly scene editor with revision
+conflict protection and one Git checkpoint per explicit save, the Codex
+workbench with strict progression validation and active-state resolution, the
+agent/style registry and reviewable AI patch workflow, application-level
+provider profiles with real OpenAI-compatible and Ollama adapters, the
+Milestone 6 Markdown import and review queue, Milestone 7 timeline-aware
+context with scene rewrite, chapter review suggestions, context preview, and
+explicit follow-up invitations, and Milestone 8 what-if branches with live
+main-versus-experiment comparison, explicit ramification analysis, and
+rollback-safe whole-file promotion from fixed `main` canon.
 
 Milestone 4 adds:
 
@@ -113,7 +117,12 @@ Milestone 7 adds timeline-aware context assembly (`internal/contextpack`),
 redacted context preview, scene-scoped Scene Rewrite, chapter-scoped Chapter
 Review suggestions, deterministic follow-up invitations, and Git commit
 trailers for accepted operation lineage. Its durable contract is
-`docs/16_milestone_7_task_prompt.md`. Milestone 8 is the next incomplete phase.
+`docs/16_milestone_7_task_prompt.md`.
+
+Milestone 8 adds managed `branch/` experiments, live canon-versus-experiment
+comparison from Git objects, transient ramification analysis, and rollback-safe
+whole-file promotion. Its durable contract is `docs/17_milestone_8_task_prompt.md`.
+Milestone 9 is the next incomplete phase.
 
 ## Development
 
@@ -148,16 +157,19 @@ The API listens on `127.0.0.1:9090`. Vite proxies `/api` requests to it.
 - `internal/gitstore`: Git command adapter.
 - `internal/index`: rebuildable SQLite index adapter.
 - `internal/agent`: strict agent/style registry (v1–v3), applicability, scope-specific message builders, and provider boundaries.
+- `internal/branch`: what-if experiment lifecycle, live comparison, ramification orchestration, promotion, and discard policy.
 - `internal/action`: scope-aware action orchestration, context preview, invitations, lineage, and accept/reject run lifecycle.
 - `internal/contextpack`: deterministic context policy, budgeting, lexical relevance, and redacted manifests.
 - `internal/extract`: provider-neutral extraction request, prompt, and response validation.
 - `internal/importer`: Markdown snapshot import, chunking, review queue, and acceptance orchestration.
+- `internal/modelchat`: provider-neutral OpenAI-compatible and Ollama chat transport shared by agent actions, extraction, and branch analysis.
 - `internal/mutation`: shared transaction coordination for story and durable review mutations.
+- `internal/projectcheck`: read-only full-project canonical validation composition.
 - `internal/story`: canonical outline, scene, and Codex mutation orchestration.
 - `internal/codex`: pure Codex validation and active-state decisions.
 - `internal/provider`: application-level provider profile storage and readiness resolution.
 - `internal/storyfile`: strict canonical story-file adapters.
 - `templates`: embedded canonical starter files.
-- `web`: React/Vite local UI.
+- `web`: React/Vite local UI, including the Branches workspace and side-by-side comparison.
 
 Working implementation plans belong in `.plans/`, which is ignored by Git. Product decisions and durable behavior belong in `docs/`.
