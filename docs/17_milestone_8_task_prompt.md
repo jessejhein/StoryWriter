@@ -485,10 +485,15 @@ codex/{characters,locations,lore,custom}/*.yaml
 progressions/*.yaml
 agents/*.yaml
 styles/*.yaml
-imports/raw/**.md
-imports/raw/**.yaml
+imports/raw/<import_id>/manifest.yaml
+imports/raw/<import_id>/files/**.{md,markdown}
 imports/review/*.yaml
 ```
+
+Raw imported Markdown snapshot file extensions follow the existing importer
+policy: `.md` and `.markdown` are accepted case-insensitively while preserving
+the imported relative path's original casing. Raw import YAML support is for
+tracked raw import metadata such as `manifest.yaml`.
 
 `project.yaml`, `.gitignore`, `.storywork/`, credentials, databases, generated
 output, arbitrary root files, and `.gitkeep` are not promotable in Milestone 8.

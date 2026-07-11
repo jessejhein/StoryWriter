@@ -9,7 +9,7 @@ Each milestone is a sprint. Each sprint must leave the app working.
 ## Current status
 
 - Milestones 0 through 8: implemented; Milestone 8 verification was re-run on
-  July 9, 2026 and passed.
+  July 10, 2026 and passed.
 - Milestone 9: next incomplete phase.
 
 The durable Milestone 4 contract is `docs/13_milestone_4_task_prompt.md`.

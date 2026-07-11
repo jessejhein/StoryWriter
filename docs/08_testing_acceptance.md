@@ -283,6 +283,7 @@ Backend:
   `TestValidateBranchRefRejectsUnsafeRefsAndAcceptsMain`,
   `TestParseManagedExperimentRefRejectsReservedSlug`
 - `internal/branch/path_test.go`: `TestValidateProjectPathAcceptsAllowedFamilies`,
+  `TestValidateProjectPathAcceptsRawImportMarkdownExtensionPolicy`,
   `TestValidateProjectPathRejectsUnsafeSegments`, `TestValidateStrictUTF8EnforcesBounds`
 - `internal/branch/comparison_test.go`: `TestValidateChangedFilesSortsAndDedupes`,
   `TestLoadComparisonRejectsInvalidRepositoryComparisonRows`
@@ -333,6 +334,7 @@ Backend:
   `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
   `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
   `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchFileComparisonRouteValidatesRawImportMarkdownPolicy`,
   `TestBranchRoutesRejectAnalysisGoalsWithNULBeforeService`,
   `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
   `TestBranchRoutesRejectOversizedBodies`,
@@ -393,12 +395,14 @@ Backend:
   `TestMilestone8CompletedRunInvitationsUseValidatedBranchSnapshot`,
   `TestMilestone8AcceptedRunInvitationsRefreshCommittedBranchSnapshot`
 - `internal/importer/milestone8_branch_characterization_test.go`:
+  `TestMilestone8ComparisonIncludesValidRawImportMarkdownExtensions`,
   `TestMilestone8ImportSnapshotCommitsToActiveBranchOnly`,
   `TestMilestone8ImportReviewMutationCommitsToActiveBranchOnly`
 - `internal/api/branch_lifecycle_test.go`: `TestBranchCreateRoute`
 - `internal/api/branch_negative_contract_test.go`: `TestBranchStatusAndListRoutesMapRepositoryStateErrorsSafely`,
   `TestBranchStatusAndListRoutesRejectMalformedManagedRefFromRealRepository`,
   `TestBranchRoutesRejectMalformedCallsBeforeService`,
+  `TestBranchFileComparisonRouteValidatesRawImportMarkdownPolicy`,
   `TestBranchPostRoutesRejectUnexpectedQueryBeforeService`,
   `TestBranchRoutesRejectOversizedBodies`,
   `TestEveryBranchRouteReturnsMethodSpecificAllow`

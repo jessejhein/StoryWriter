@@ -30,12 +30,42 @@ func TestValidateProjectPathAcceptsAllowedFamilies(t *testing.T) {
 		"agents/review.yaml",
 		"styles/default.yaml",
 		"imports/raw/imp_0123456789abcdef0123/manifest.yaml",
-		"imports/raw/imp_0123456789abcdef0123/chapter.md",
+		"imports/raw/imp_0123456789abcdef0123/files/chapter.md",
 		"imports/review/cand_0123456789abcdef0123.yaml",
 	}
 	for _, path := range allowed {
 		if _, err := branch.ValidateProjectPath(path); err != nil {
 			t.Fatalf("ValidateProjectPath(%q) error = %v", path, err)
+		}
+	}
+}
+
+// Test: stored raw import Markdown snapshots follow the Milestone 6 eligible
+// source extension policy without allowing arbitrary raw import files.
+// Requirements: M8-R07, M8-R19, M8-R20.
+func TestValidateProjectPathAcceptsRawImportMarkdownExtensionPolicy(t *testing.T) {
+	t.Parallel()
+	allowed := []string{
+		"imports/raw/imp_0123456789abcdef0123/files/zeta/readme.markdown",
+		"imports/raw/imp_0123456789abcdef0123/files/Alpha/intro.MD",
+		"imports/raw/imp_0123456789abcdef0123/files/middle/outline.md",
+		"imports/raw/imp_0123456789abcdef0123/manifest.yaml",
+	}
+	for _, path := range allowed {
+		if _, err := branch.ValidateProjectPath(path); err != nil {
+			t.Fatalf("ValidateProjectPath(%q) error = %v", path, err)
+		}
+	}
+
+	invalid := []string{
+		"imports/raw/imp_0123456789abcdef0123/files/zeta/readme.txt",
+		"imports/raw/imp_0123456789abcdef0123/chapter.md",
+		"imports/raw/imp_0123456789abcdef0123/files/.hidden.md",
+		"imports/raw/imp_0123456789abcdef0123/files/zeta/.hidden.markdown",
+	}
+	for _, path := range invalid {
+		if _, err := branch.ValidateProjectPath(path); !errors.Is(err, branch.ErrInvalidProjectPath) {
+			t.Fatalf("ValidateProjectPath(%q) = %v, want ErrInvalidProjectPath", path, err)
 		}
 	}
 }

@@ -15,19 +15,29 @@ import (
 	"testing"
 	"time"
 
+	"storywork/internal/branch"
 	"storywork/internal/extract"
 	"storywork/internal/gitstore"
 	"storywork/internal/index"
+	"storywork/internal/mutation"
 	"storywork/internal/project"
 	"storywork/internal/story"
 	"storywork/internal/storyfile"
 	"storywork/internal/workspace"
 )
 
-const milestone8ExperimentRef = "branch/test-exp-0123abcd"
+const milestone8ExperimentRef = "branch/test-exp-0123456789abcdef0123"
 
 type milestone8StoryIDGenerator struct {
 	ids []string
+}
+
+type staticMilestone8BranchIDs struct {
+	id branch.ExperimentID
+}
+
+func (g *staticMilestone8BranchIDs) NextExperimentID() (branch.ExperimentID, error) {
+	return g.id, nil
 }
 
 func (g *milestone8StoryIDGenerator) Next(_ story.NodeKind) (string, error) {
@@ -180,6 +190,75 @@ func TestMilestone8ImportSnapshotCommitsToActiveBranchOnly(t *testing.T) {
 	output, err := exec.CommandContext(ctx, "git", "-C", projectPath, "show", "main:imports/raw/imp_0123456789abcdef0123").CombinedOutput()
 	if err == nil {
 		t.Fatalf("main tree contains experiment import snapshot: %s", output)
+	}
+}
+
+// Test: branch comparison accepts every valid stored raw import Markdown
+// extension produced by the existing importer policy.
+// Requirements: M8-R05, M8-R07, M8-R19, M8-R20.
+func TestMilestone8ComparisonIncludesValidRawImportMarkdownExtensions(t *testing.T) {
+	t.Parallel()
+
+	ctx, projectPath, sourcePath, importerService, _ := setupMilestone8ImporterProject(t)
+	writeTestFile(t, filepath.Join(sourcePath, "zeta", "readme.markdown"), "# Zeta\nArchive note.\n")
+	writeTestFile(t, filepath.Join(sourcePath, "Alpha", "intro.MD"), "# Alpha\nUppercase extension.\n")
+	writeTestFile(t, filepath.Join(sourcePath, "middle", "outline.md"), "# Middle\nPlain markdown.\n")
+	branchService := branch.NewService(
+		&branch.GitRepository{Store: gitstore.New("git")},
+		index.New(),
+		mutation.NewCoordinator(),
+		branch.SessionAdapter{PathFn: func() (string, bool) { return projectPath, true }},
+		nil,
+		nil,
+		&staticMilestone8BranchIDs{id: "brn_0123456789abcdef0123"},
+	)
+	status, err := branchService.CreateExperiment(ctx, "Test Exp")
+	if err != nil {
+		t.Fatalf("CreateExperiment() error = %v", err)
+	}
+	if status.ActiveBranch != milestone8ExperimentRef || status.ExperimentID != "brn_0123456789abcdef0123" {
+		t.Fatalf("CreateExperiment() status = %#v", status)
+	}
+
+	imported, err := importerService.ImportDirectory(ctx, sourcePath)
+	if err != nil {
+		t.Fatalf("ImportDirectory() error = %v", err)
+	}
+	if imported.Import.ID != "imp_0123456789abcdef0123" {
+		t.Fatalf("ImportDirectory() import id = %q", imported.Import.ID)
+	}
+
+	comparison, err := branchService.LoadComparison(ctx, "brn_0123456789abcdef0123")
+	if err != nil {
+		t.Fatalf("LoadComparison() error = %v", err)
+	}
+
+	expectedPaths := []branch.ProjectPath{
+		"imports/raw/imp_0123456789abcdef0123/files/zeta/readme.markdown",
+		"imports/raw/imp_0123456789abcdef0123/files/Alpha/intro.MD",
+		"imports/raw/imp_0123456789abcdef0123/files/middle/outline.md",
+		"imports/raw/imp_0123456789abcdef0123/manifest.yaml",
+	}
+	changed := branch.IndexChangedFiles(comparison.Files)
+	for _, path := range expectedPaths {
+		if _, ok := changed[path]; !ok {
+			t.Fatalf("comparison missing %q in %#v", path, comparison.Files)
+		}
+	}
+
+	markdown, err := branchService.LoadFileComparison(ctx, "brn_0123456789abcdef0123", "imports/raw/imp_0123456789abcdef0123/files/zeta/readme.markdown")
+	if err != nil {
+		t.Fatalf("LoadFileComparison(.markdown) error = %v", err)
+	}
+	if markdown.Status != branch.StatusAdded || markdown.Canon.Exists || !markdown.Experiment.Exists || !strings.Contains(markdown.Experiment.Text, "Archive note.") {
+		t.Fatalf(".markdown comparison = %#v", markdown)
+	}
+	uppercase, err := branchService.LoadFileComparison(ctx, "brn_0123456789abcdef0123", "imports/raw/imp_0123456789abcdef0123/files/Alpha/intro.MD")
+	if err != nil {
+		t.Fatalf("LoadFileComparison(.MD) error = %v", err)
+	}
+	if uppercase.Status != branch.StatusAdded || uppercase.Canon.Exists || !uppercase.Experiment.Exists || !strings.Contains(uppercase.Experiment.Text, "Uppercase extension.") {
+		t.Fatalf(".MD comparison = %#v", uppercase)
 	}
 }
 

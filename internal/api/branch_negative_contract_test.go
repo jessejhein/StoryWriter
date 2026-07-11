@@ -68,6 +68,7 @@ type spyBranchStore struct {
 	createCalls         int
 	switchCalls         int
 	fileComparisonCalls int
+	fileComparisonPath  string
 	promoteCalls        int
 	discardCalls        int
 }
@@ -99,8 +100,9 @@ func (s *spyBranchStore) SwitchTarget(context.Context, string, *branch.CommitID)
 	return branch.RepositoryStatus{}, nil
 }
 
-func (s *spyBranchStore) LoadFileComparison(context.Context, string, string) (branch.FileComparison, error) {
+func (s *spyBranchStore) LoadFileComparison(_ context.Context, _, path string) (branch.FileComparison, error) {
 	s.fileComparisonCalls++
+	s.fileComparisonPath = path
 	return branch.FileComparison{}, nil
 }
 
@@ -392,6 +394,39 @@ func TestBranchRoutesRejectInvalidSwitchTargetAndComparisonPathBeforeService(t *
 			}
 			testCase.check(t)
 		})
+	}
+}
+
+// Test: file comparison routing accepts valid raw import Markdown snapshot
+// extensions and rejects non-Markdown raw import files before service work.
+// Requirements: M8-R07, M8-R19, M8-R20.
+func TestBranchFileComparisonRouteValidatesRawImportMarkdownPolicy(t *testing.T) {
+	t.Parallel()
+	validPath := "imports/raw/imp_0123456789abcdef0123/files/Alpha/intro.MD"
+	store := &spyBranchStore{}
+	response := httptest.NewRecorder()
+	handlerWithBranches(store).ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/api/branches/brn_0123456789abcdef0123/comparison/file?path="+validPath, nil),
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("valid status=%d body=%s", response.Code, response.Body.String())
+	}
+	if store.fileComparisonCalls != 1 || store.fileComparisonPath != validPath {
+		t.Fatalf("file comparison calls=%d path=%q, want 1 %q", store.fileComparisonCalls, store.fileComparisonPath, validPath)
+	}
+
+	invalidStore := &spyBranchStore{}
+	response = httptest.NewRecorder()
+	handlerWithBranches(invalidStore).ServeHTTP(
+		response,
+		httptest.NewRequest(http.MethodGet, "/api/branches/brn_0123456789abcdef0123/comparison/file?path=imports/raw/imp_0123456789abcdef0123/files/notes.txt", nil),
+	)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("invalid status=%d body=%s", response.Code, response.Body.String())
+	}
+	if invalidStore.fileComparisonCalls != 0 {
+		t.Fatalf("fileComparisonCalls=%d, want 0", invalidStore.fileComparisonCalls)
 	}
 }
 

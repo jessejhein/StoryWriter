@@ -27,8 +27,6 @@ var allowedPrefixes = []struct {
 	{"progressions/", ".yaml", false},
 	{"agents/", ".yaml", false},
 	{"styles/", ".yaml", false},
-	{"imports/raw/", ".md", true},
-	{"imports/raw/", ".yaml", true},
 	{"imports/review/", ".yaml", false},
 }
 
@@ -83,6 +81,9 @@ func isAllowedProjectPath(value string) bool {
 	if _, ok := allowedExactPaths[value]; ok {
 		return true
 	}
+	if isAllowedRawImportPath(value) {
+		return true
+	}
 	for _, rule := range allowedPrefixes {
 		if !strings.HasPrefix(value, rule.prefix) || !strings.HasSuffix(value, rule.extension) {
 			continue
@@ -97,6 +98,45 @@ func isAllowedProjectPath(value string) bool {
 		return true
 	}
 	return false
+}
+
+func isAllowedRawImportPath(value string) bool {
+	const (
+		rawImportPrefix = "imports/raw/"
+		rawFilesPrefix  = "files/"
+		rawManifestName = "manifest.yaml"
+	)
+	if !strings.HasPrefix(value, rawImportPrefix) {
+		return false
+	}
+	remainder := strings.TrimPrefix(value, rawImportPrefix)
+	importID, afterID, ok := strings.Cut(remainder, "/")
+	if !ok || !isRawImportID(importID) {
+		return false
+	}
+	if afterID == rawManifestName {
+		return true
+	}
+	filesPath, ok := strings.CutPrefix(afterID, rawFilesPrefix)
+	if !ok || filesPath == "" {
+		return false
+	}
+	// Raw import snapshot Markdown extensions mirror the Milestone 6 source
+	// discovery policy while preserving imported relative path casing.
+	lower := strings.ToLower(filesPath)
+	return strings.HasSuffix(lower, ".md") || strings.HasSuffix(lower, ".markdown")
+}
+
+func isRawImportID(value string) bool {
+	if len(value) != len("imp_0123456789abcdef0123") || !strings.HasPrefix(value, "imp_") {
+		return false
+	}
+	for _, r := range strings.TrimPrefix(value, "imp_") {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func containsControl(value string) bool {
